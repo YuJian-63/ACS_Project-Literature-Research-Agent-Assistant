@@ -14,8 +14,8 @@ dist/
 downloads/
 eggs/
 .eggs/
-lib/
-lib64/
+/lib/
+/lib64/
 parts/
 sdist/
 var/
@@ -151,6 +151,14 @@ activemq-data/
 
 # Environments
 .env
+.env.*
+# Keep sanitized configuration templates in version control.
+!.env.example
+!.env.sample
+!.env.template
+!.env.*.example
+!.env.*.sample
+!.env.*.template
 .envrc
 .venv
 env/
@@ -218,3 +226,73 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# React / TypeScript / Vite dependencies and generated files
+node_modules/
+.npm/
+.pnpm-store/
+.vite/
+.vite-temp/
+*.tsbuildinfo
+.eslintcache
+.stylelintcache
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Frontend test and coverage output
+coverage/
+.nyc_output/
+playwright-report/
+test-results/
+blob-report/
+
+# Local research data and service state (keep samples and fixtures tracked)
+/runtime/
+/backend/runtime/
+/data/uploads/
+/data/parsed/
+/data/embeddings/
+/data/vector_store/
+/data/artifacts/
+/data/traces/
+/data/logs/
+/data/postgres/
+/data/redis/
+/data/models/
+/backend/data/uploads/
+/backend/data/parsed/
+/backend/data/embeddings/
+/backend/data/vector_store/
+/backend/data/artifacts/
+/backend/data/traces/
+/backend/data/logs/
+/backend/data/postgres/
+/backend/data/redis/
+/backend/data/models/
+
+# Local model / dataset caches
+.huggingface/
+.hf_cache/
+
+# Local editor state; preserve shared VS Code configuration
+.idea/
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.json
+!.vscode/tasks.json
+!.vscode/launch.json
+*.swp
+*.swo
+*~
+
+# Operating system and Office temporary files
+.DS_Store
+._*
+Thumbs.db
+Desktop.ini
+~$*
+
+# Keep dependency lockfiles, migrations, evaluation fixtures, and documentation.
+# Do not add blanket rules such as *.pdf, *.json, *.sql, or data/.
