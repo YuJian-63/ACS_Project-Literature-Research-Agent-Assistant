@@ -19,6 +19,7 @@ class Settings(BaseSettings):
     cors_origins: list[str] = ["http://localhost:5173", "http://127.0.0.1:5173"]
     task_monitor_enabled: bool = True
     mock_step_delay_seconds: float = Field(default=0.5, ge=0, le=10, allow_inf_nan=False)
+    parser_timeout_seconds: float = Field(default=120, ge=1, le=600, allow_inf_nan=False)
 
     @field_validator("storage_root")
     @classmethod

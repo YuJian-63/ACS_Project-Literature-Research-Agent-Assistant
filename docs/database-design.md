@@ -9,7 +9,7 @@
 - 目标使用 PostgreSQL 17+；应用层使用 SQLAlchemy 2 + psycopg 3，迁移用 Alembic。UUID 由应用或 PostgreSQL 原生 gen_random_uuid() 生成，不依赖额外扩展。
 - 当前是单用户 MVP，不增加用户、工作区和权限表。增加多用户时需补归属、访问控制和幂等键作用域，不能只改页面。
 - PDF 保存到 STORAGE_ROOT/uploads；正文、比较表、引用与事件保存数据库。首版不额外部署对象存储、Redis 或独立日志数据库。
-- 七张目标表中，MVP-0 使用五张核心表；paper_chunks 和 citations 为 MVP-1 的证据链预留，Mock 不写伪造数据。
+- 七张目标表中，MVP-0 使用五张核心表；MVP-1A 开始写入真实解析的 paper_chunks，citations 仍只由后续 Runner 依据证据写入，Mock 不生成伪造片段或引用。
 - 引用使用关系表，避免在 artifact JSON 中再保存一套引用；比较表是结构可变的展示数据，采用 JSONB。
 - Agent checkpoint 由 LangGraph checkpointer 管理独立 schema，应用不手工复制它的内部表；task_id 与 thread_id 对应关系由适配器维护。
 - 暂不固定 embedding 维度或创建向量索引；按组员确定的 embedding 模型再迁移增加 pgvector 数据。
@@ -54,7 +54,7 @@ UUID 为主键；时间使用 timestamptz，应用会话按 UTC 读写，API 转
 | error_code, error_message, error_details | varchar(64), text, jsonb | 仅 failed 必填，details 为对象；其他状态全为空 |
 | created_at, updated_at | timestamptz | 非空，更新时间不早于创建时间 |
 
-MVP-0 上传后为 uploaded，不启动虚构的解析任务。MVP-1 Parser Worker 可直接从 uploaded 论文领取解析工作，按 processing → ready/failed 更新，使用自己的租约；无需把内部 parse 类型混入对外 summary/qa/review。
+MVP-0 上传后为 uploaded；启动独立 Parser Worker 后，从 uploaded 领取解析工作，按 processing → ready/failed 更新，使用独立于研究任务的租约；无需把内部 parse 类型混入对外 summary/qa/review。当前实现仅提取文本型 PDF，不支持 OCR。
 
 相同文件允许重复上传为不同论文 ID，用于未来解析版本隔离。文件与解析结果一旦被任务引用，服务层禁止原地改写；数据库复合外键另外防止修改已被 task_papers 固定的 SHA-256。
 
@@ -253,7 +253,7 @@ SELECT claimed.* FROM claimed JOIN recorded ON recorded.task_id = claimed.id;
 ## 6. 后续迁移路线
 
 1. 已提供 SQLAlchemy 七表模型和 20261110_0001 初始迁移；新开发库执行 alembic upgrade head。SQL 文件是设计参考，不应与迁移脚本在同一库重复执行。后续结构变化创建新 revision。
-2. MVP-0 只使用 papers、tasks、task_papers、task_events、artifacts；chunks/citations 空置，MVP-1 接入后再写入。
+2. MVP-0 只使用 papers、tasks、task_papers、task_events、artifacts；MVP-1A Parser Worker 原子写入 paper_chunks；citations 留待真实 Runner 按实际证据写入。
 3. LangGraph checkpointer 在独立 schema 执行其官方初始化；应用只持有稳定的线程映射，不共用 tasks 作为内部 checkpoint 表。
 4. 确认 embedding 模型后再引入 pgvector，建议单独建立 chunk_embeddings，固定模型标识、版本、维度和 chunk 关联；不同模型向量不能混用。
 5. pgvector 扩展需要相应 PostgreSQL 镜像/安装支持；本次 DDL 不假设普通 PostgreSQL 已安装该扩展。

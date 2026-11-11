@@ -5,7 +5,7 @@ import { Link } from 'react-router-dom';
 import { api } from '../api/client';
 import type { Paper, PaperStatus } from '../api/types';
 import { ErrorNotice, PageHeader, PaginationBar } from '../components/Common';
-import { canSelectPaper, PaperTable, selectedPaperRows } from '../components/PaperTable';
+import { canSelectPaper, hasPendingPapers, PaperTable, selectedPaperRows } from '../components/PaperTable';
 import { PaperUpload } from '../components/PaperUpload';
 import { useResource } from '../hooks/useResource';
 import { paperStatusLabels } from '../lib/format';
@@ -18,7 +18,7 @@ export default function PapersPage() {
   const [page, setPage] = useState(1);
   const [selected, setSelected] = useState<Paper[]>([]);
   const load = useCallback((signal: AbortSignal) => api.papers({ q: query || undefined, status, limit: 20, offset: (page - 1) * 20 }, signal), [page, query, status]);
-  const resource = useResource(load);
+  const resource = useResource(load, 2000, hasPendingPapers);
   const parameters = new URLSearchParams();
   selected.forEach((paper) => parameters.append('paper_id', paper.id));
 
@@ -43,6 +43,6 @@ export default function PapersPage() {
       }} />
       {resource.data && <PaginationBar total={resource.data.total} page={page} onChange={setPage} />}
     </section>
-    <div className="page-tip"><strong>关于资料与分析</strong><span>同一文件可以重复上传，每次都会生成独立论文记录。真实解析和证据检索将在后续阶段接入。</span></div>
+    <div className="page-tip"><strong>关于资料与分析</strong><span>启动解析 Worker 后会自动提取文本，扫描件暂不支持。解析就绪不代表已完成研究分析；重复上传会生成独立记录。</span></div>
   </>;
 }

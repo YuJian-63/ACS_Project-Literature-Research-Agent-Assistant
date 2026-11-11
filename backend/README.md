@@ -1,6 +1,6 @@
 # 后端开发
 
-当前已实现数据库基础设施及 MVP-0：FastAPI 健康检查、PDF 上传/读取、论文和任务分页、幂等提交、事件轮询、产物查询、独立 Mock Worker，以及超时/租约恢复。尚未接入真实 PDF 解析器或 Agent；接口规范见 `../docs/api-contract.md`。
+当前已实现数据库基础设施、MVP-0 API/Mock Worker 与 MVP-1A 文本 PDF Parser Worker。支持真实逐页文本提取、物理页码片段、解析状态恢复和 Worker 内部证据读取；尚未实现 OCR、真实研究 Agent 或引用生成。接口规范见 `../docs/api-contract.md`。
 
 ## 1. 首次启动
 
@@ -45,6 +45,7 @@ Linux/macOS 将复制命令替换为 `cp .env.example .env`。其他命令相同
 | STORAGE_ROOT | 默认 backend/runtime/storage；相对路径始终相对 backend 解析，上传文件使用 uploads/{UUID}.pdf |
 | TASK_MONITOR_ENABLED | 默认 true；API 启动时及每 10 秒恢复过期任务，Worker 也运行独立恢复监控 |
 | MOCK_STEP_DELAY_SECONDS | 默认 0.5，范围 0—10；每个模拟步骤的等待秒数，提交时冻结到任务，不影响已有任务 |
+| PARSER_TIMEOUT_SECONDS | 默认 120 秒，范围 1—600；限制每份 PDF 的子进程解析时间，超时失败且不会保存部分片段 |
 | CORS_ORIGINS | JSON 字符串数组；默认允许 localhost:5173 和 127.0.0.1:5173，不接受逗号分隔的裸字符串 |
 
 应用在宿主机运行，示例 DATABASE_URL 连接 `127.0.0.1:5432`。若已有独立 PostgreSQL 17+，可直接配置其 DATABASE_URL，跳过 Compose。修改用户、密码、端口或数据库名时，必须同步修改 DATABASE_URL；已初始化的数据卷不会因为更改 POSTGRES_* 自动修改已有数据库账号。
@@ -64,6 +65,10 @@ Linux/macOS 将复制命令替换为 `cp .env.example .env`。其他命令相同
 | src/app/main.py | 应用工厂、生命周期、请求 ID、统一错误及本地 CORS |
 | src/app/api.py、schemas.py、views.py | HTTP 路由、严格请求/响应模型、资源展示 |
 | src/app/storage.py | PDF 校验、受控存储、写入补偿和提交结果核对 |
+| src/app/pdf_parser.py | 纯文本提取、物理页码分块、内容 hash 与解析资源边界 |
+| src/app/parser_worker.py | 独立解析子进程、租约心跳、超时终止和恢复 |
+| src/app/parse_lifecycle.py | uploaded 领取、所有权、原子写 chunks/ready 与租约回收 |
+| src/app/evidence.py | Agent 内部只读、有界分页的已就绪论文片段读取 |
 | src/app/tasks.py | 请求规范化、SHA-256 幂等哈希、任务及来源原子创建 |
 | src/app/lifecycle.py、worker.py | 领取、独立心跳、事件、原子完成、恢复和 Mock Worker 命令入口 |
 | alembic/env.py | 在线连接与无需凭据的离线迁移 |
@@ -146,10 +151,21 @@ Invoke-RestMethod "http://127.0.0.1:8000/api/v1/tasks/$($task.id)/artifacts"
 ## 7. 运行边界与恢复
 
 - 仅用于受信本机单用户环境，无鉴权；API 默认绑定 127.0.0.1。公开部署前另行添加身份验证、访问控制、TLS、代理上传限制及配额。
-- 上传实际文件最大 20 MiB，分块统计大小并计算 SHA-256；额外限制 multipart 整体为 20 MiB + 64 KiB，避免解析阶段无限写临时文件。只检查 PDF 文件头，尚不保证内容可解析；论文保持 uploaded，page_count/parser_version 为 null。
+- 上传实际文件最大 20 MiB，分块统计大小并计算 SHA-256；额外限制 multipart 整体为 20 MiB + 64 KiB，避免解析阶段无限写临时文件。上传只检查 PDF 文件头；未启动独立 Parser Worker 时论文保持 uploaded，page_count/parser_version 为 null。
 - Mock Worker 领取事务使用行锁及 SKIP LOCKED，租约 60 秒，独立心跳 20 秒；开始时间后的 timeout_seconds 到期优先标为 TASK_TIMEOUT，否则租约到期标为 WORKER_LOST。不自动重跑失联任务，旧 Worker 不能覆盖失败结果。
 - 模拟产物明确标注未分析论文、引用为空、比较表为 null。原子写入产物、成功状态与事件；真实研究结论与证据校验留待真实 Runner 阶段实现。
 - 上传在明确未提交时清除本次临时/目标文件；提交结果不确定时保留文件并新建会话核对。暂时无法确认返回 503，日志仅记录 paper_id；请先查询论文列表，不要直接删除 uploads 下文件。当前没有自动孤儿文件清理命令，人工核对需先确认原事务已结束，并保留宽限期及备份。
 - 默认上传目录和临时验证产物均被 Git 忽略；自定义 STORAGE_ROOT 应放在仓库外或自行确认 ignore 规则。停止所有服务时不会即时恢复任务，下一次 API/Worker 启动时恢复。
 
-前端论文库、上传交互和任务详情/轮询页已提供，启动与联调说明见 `../frontend/README.md`；下一阶段接入真实解析与 Agent。
+前端论文库、上传交互和任务详情/轮询页已提供，启动与联调说明见 `../frontend/README.md`。以下命令在 API 和 Mock Worker 保持运行时，新开第三个终端：
+
+```powershell
+cd backend
+uv run --locked python -m app.parser_worker
+```
+
+Parser Worker 与 API/Mock Worker 必须使用相同的数据库和 `STORAGE_ROOT`。未启动时上传文件仍可用于既有 Mock 任务，但论文保持 `uploaded`；真实证据读取仅在应用内部 `app.evidence.read_evidence(...)` 开放，不新增公开原文片段 API。Parser Worker 默认可并行启动多个实例并使用论文行锁领取不同论文，但 PGlite 不代表已完成 PostgreSQL 多连接竞争验收。
+
+MVP-1A 使用 pypdf 提取文本，不运行 OCR。默认拒绝超过 500 页、8 MiB 提取文本、10000 个片段、单页 16 MiB 解码内容流的文档；连续片段最大 2000 字符。超限不做部分成功；worker 子进程有 120 秒 wall-clock 超时。内容流限制在 pypdf 解码后检查，**不等同于操作系统 RAM 上限**；服务于不可信公网 PDF 前，应在操作系统/容器层加入内存、CPU、磁盘和并发限制。加密、损坏、空扫描件解析失败后不会保留 chunk，需重新上传创建新论文 ID 重试。
+
+此阶段没有新增公开 API 或数据库迁移：使用初始 schema 已有的论文解析租约字段和 paper_chunks 表。启动 Parser Worker 不会修改已有任务/原文件/hash；Mock Runner 仍不读取 chunks，也不产生研究证据或真实结论。原生 PostgreSQL 17+ 多连接、并行 Parser Worker 和进程资源隔离仍需部署环境验收。

@@ -1,6 +1,6 @@
 # Literature Research Agent Assistant — API 契约
 
-版本：v1 · 更新日期：2026-11-11。本文供前端、应用后端和 Agent 集成使用。MVP-0 接口及独立 Mock Worker 已实现，启动方式见 `backend/README.md`；不表示服务已经部署，也不表示真实解析或 Agent 已实现。
+版本：v1 · 更新日期：2026-11-11。本文供前端、应用后端和 Agent 集成使用。MVP-0 API、Mock Worker 与 MVP-1A 独立 PDF Parser Worker 已实现，启动方式见 `backend/README.md`；不表示服务已部署，也不表示 Agent 已实现。
 
 需求依据：`docs/Proposal.md` 第 2、3 节。数据库设计见 `docs/database-design.md`，参考 DDL 见 `backend/sql/schema.sql`。
 
@@ -19,7 +19,8 @@
 | 阶段 | 范围 |
 | --- | --- |
 | MVP-0 | 上传 PDF、持久化任务、Mock Runner、轮询、明确标注的模拟结果 |
-| MVP-1 | 真实解析、带证据的摘要与问答；沿用相同响应结构 |
+| MVP-1A | 本地文本 PDF 解析、按物理页码保存片段、摘要/问答/综述任务前置要求解析就绪 |
+| MVP-1B | 真实 Runner、证据引用校验与摘要/问答 |
 | MVP-2 | 搜索、跨论文综述与比较、扩展工作流 |
 
 `extended` 是保留的合法工作流枚举，MVP-0 返回 `422 WORKFLOW_NOT_AVAILABLE`。`is_mock` 由服务器配置决定，不能由请求指定。
@@ -42,7 +43,7 @@
 | error | Error / null | 仅 failed 时非空 |
 | created_at, updated_at | datetime | 创建/修改时间 |
 
-生命周期为 `uploaded → processing → ready / failed`。MVP-0 上传后保持 uploaded，不伪造解析进度。PDF 页码从 1 开始，表示物理页序号，不使用印刷页码。服务器不返回 storage_key、解析租约或绝对路径。
+生命周期为 `uploaded → processing → ready / failed`。独立 Parser Worker 未启动时论文保持 uploaded。MVP-1A 仅支持可提取文本的 PDF，不运行 OCR；损坏、加密、纯扫描件和解析超限会进入 failed，需重新上传来重试。ready 表示文本已提取，不表示论文已被 Agent 分析。PDF 页码从 1 开始，表示物理页序号，空白页不会造成后续页号偏移，不使用印刷页码。服务器不返回 storage_key、解析租约或绝对路径。
 
 ### 2.2 Task
 
@@ -395,7 +396,7 @@ Task.error/Paper.error 直接使用内层 `{code,message,details}`，正常为 n
 | Task.error | WORKER_LOST | Worker 租约过期 |
 | Task.error | TASK_TIMEOUT / BUDGET_EXCEEDED | 超时/预算耗尽 |
 | Task.error | AGENT_EXECUTION_FAILED / INVALID_AGENT_RESULT | Agent 异常/产物不合法 |
-| Paper.error | PDF_PARSE_FAILED / PDF_PARSE_TIMEOUT / NO_EXTRACTABLE_TEXT | 后续真实解析失败 |
+| Paper.error | PDF_INVALID / PDF_ENCRYPTED / PDF_NO_TEXT / PDF_LIMIT_EXCEEDED / PDF_PARSE_TIMEOUT / PARSER_LOST / PDF_SOURCE_CHANGED / FILE_UNAVAILABLE | 文本解析失败，需查看 message 并重新上传 |
 
 FastAPI 默认校验异常也必须转换为相同格式，不能遗留第二种 422 响应。
 

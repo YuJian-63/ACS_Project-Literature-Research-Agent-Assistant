@@ -161,6 +161,11 @@ main { width: 100%; max-width: 1512px; margin: 0 auto; padding: 34px 38px 46px; 
 .input-panel h3 { margin: 18px 0 8px; }
 .input-panel h3 span { color: var(--muted); font-size: 11px; font-weight: 400; margin-left: 6px; }
 .source-papers { list-style: none; padding: 0; margin: 0; }
+.paper-parse-state > small { display: block; margin-top: 6px; color: var(--muted); }
+.paper-parse-state abbr { display: block; margin-top: 3px; cursor: help; }
+.paper-parse-state details { margin-top: 6px; font-size: 12px; overflow-wrap: anywhere; }
+.paper-parse-state summary { cursor: pointer; color: var(--blue); }
+.paper-parse-state details p { margin-top: 6px; }
 .form-section .panel-heading > a { flex-shrink: 0; white-space: nowrap; }
 .source-papers li { display: flex; justify-content: space-between; align-items: start; gap: 14px; padding: 10px 0; font-size: 12px; border-bottom: 1px solid #f0f3f8; }
 .source-papers li > a { overflow-wrap: anywhere; line-height: 1.8; }

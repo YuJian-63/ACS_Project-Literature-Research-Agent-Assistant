@@ -59,6 +59,6 @@ export function PaperUpload({ onUploaded }: { onUploaded: () => void }) {
     </Upload.Dragger>
     {busy && <div className="upload-progress" aria-live="polite"><Progress percent={progress} size="small" />{progress >= 99 && <span>正在确认文件保存结果…</span>}</div>}
     {error && <Alert type="error" showIcon title="上传未完成" description={<>{error.message}{error.requestId && <small className="request-id">请求编号：{error.requestId}</small>}</>} closable onClose={() => setError(undefined)} />}
-    <p className="section-footnote">当前仅保存文件，尚未解析论文。上传成功不代表内容已通过分析。</p>
+    <p className="section-footnote">上传后由独立解析 Worker 提取文本；未启动时保持“已上传”。上传成功或解析就绪均不代表已完成研究分析。</p>
   </section>;
 }

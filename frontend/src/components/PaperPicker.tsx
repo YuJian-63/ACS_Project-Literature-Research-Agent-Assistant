@@ -4,14 +4,14 @@ import { api } from '../api/client';
 import type { Paper } from '../api/types';
 import { useResource } from '../hooks/useResource';
 import { ErrorNotice, PaginationBar } from './Common';
-import { canSelectPaper, PaperTable, selectedPaperRows } from './PaperTable';
+import { canSelectPaper, hasPendingPapers, PaperTable, selectedPaperRows } from './PaperTable';
 
 export function PaperPicker({ value, onChange, disabled }: { value: Paper[]; onChange: (papers: Paper[]) => void; disabled: boolean }) {
   const { message } = App.useApp();
   const [query, setQuery] = useState('');
   const [page, setPage] = useState(1);
   const load = useCallback((signal: AbortSignal) => api.papers({ limit: 20, offset: (page - 1) * 20, q: query || undefined }, signal), [page, query]);
-  const resource = useResource(load);
+  const resource = useResource(load, 2000, hasPendingPapers);
   const keys = value.map((paper) => paper.id);
   return <div className="paper-picker">
     <div className="picker-toolbar"><Input.Search placeholder="搜索已上传论文" aria-label="搜索待选论文" maxLength={200} allowClear disabled={disabled} onSearch={(text) => { setQuery(text); setPage(1); }} /><span>已选 {value.length} / 20 篇</span></div>

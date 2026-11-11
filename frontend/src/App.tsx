@@ -29,7 +29,7 @@ export default function App() {
     <div className="workspace-body">
       <header className="topbar"><Link to="/papers" className="mobile-brand"><BookOutlined /> 研序</Link><span className="topbar-title">文献研究助手</span><span className="environment-label">本地工作区 <span className="mode-label">MVP-0</span></span></header>
       <nav className="mobile-nav" aria-label="移动导航"><NavLink to="/papers">论文库</NavLink><NavLink to="/tasks" end>研究任务</NavLink><NavLink to="/tasks/new">新建任务</NavLink></nav>
-      <div className="mock-notice"><ExperimentOutlined /><strong>模拟模式</strong><span>当前用于验证研究流程，尚未解析或分析论文，不生成真实研究结论。</span></div>
+      <div className="mock-notice"><ExperimentOutlined /><strong>研究模拟模式</strong><span>可独立解析 PDF 文本；研究任务尚未接入 Agent，不生成真实研究结论。</span></div>
       <main id="main-content" tabIndex={-1}><Suspense fallback={<div className="page-loading"><Spin description="正在加载页面" size="large"><div className="loading-placeholder" /></Spin></div>}><Routes>
         <Route path="/" element={<Navigate to="/papers" replace />} />
         <Route path="/papers" element={<PapersPage />} />

@@ -28,6 +28,8 @@ export default function NewTaskPage() {
   const [submitError, setSubmitError] = useState<ApiError>();
   const [submitting, setSubmitting] = useState(false);
   const [attempted, setAttempted] = useState(false);
+  const [paperQueryError, setPaperQueryError] = useState<ApiError>();
+  const [paperRevision, setPaperRevision] = useState(0);
   const lastAttempt = useRef<{ signature: string; key: string } | null>(null);
   const controller = useRef<AbortController | null>(null);
   const inFlight = useRef(false);
@@ -69,6 +71,30 @@ export default function NewTaskPage() {
     })();
     return () => pending.abort();
   }, [form, queryString, initialRevision]);
+
+  const selectedIds = papers.map((paper) => paper.id).join(',');
+  useEffect(() => {
+    if (initialLoading || !selectedIds || papers.every((paper) => paper.status === 'ready' || paper.status === 'failed')) return;
+    const pending = new AbortController();
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    let keepPolling = true;
+    setPaperQueryError(undefined);
+    async function updateSelected() {
+      try {
+        const updated = await Promise.all(selectedIds.split(',').map((id) => api.paper(id, pending.signal)));
+        if (pending.signal.aborted) return;
+        setPapers(updated);
+        setPaperQueryError(undefined);
+        keepPolling = updated.some((paper) => paper.status === 'uploaded' || paper.status === 'processing');
+      } catch (error) {
+        if (!pending.signal.aborted && !isCanceled(error)) setPaperQueryError(asApiError(error));
+      } finally {
+        if (!pending.signal.aborted && keepPolling) timer = setTimeout(() => { void updateSelected(); }, 2000);
+      }
+    }
+    void updateSelected();
+    return () => { pending.abort(); if (timer) clearTimeout(timer); };
+  }, [selectedIds, initialLoading, paperRevision]);
 
   const countError = selectionError(taskType, papers.length);
   const unavailable = papers.some((paper) => !canSelectPaper(paper));
@@ -113,6 +139,7 @@ export default function NewTaskPage() {
         <section className="content-panel form-section"><div className="panel-heading"><div><h2>选择研究资料</h2><p>{taskType === 'review' ? '综述需选择 2—20 篇论文。' : '摘要和问答需选择 1 篇论文。'}仅支持已上传或已就绪的论文。</p></div><Link to="/papers">上传论文</Link></div>
           {attempted && countError && <Alert title={countError} type="error" showIcon className="inline-alert" />}
           {unavailable && <Alert title="部分论文正在解析或已解析失败，请移除后重新选择。" type="warning" showIcon className="inline-alert" />}
+          {paperQueryError && <ErrorNotice error={paperQueryError} title="选定论文状态查询失败" retry={() => setPaperRevision((value) => value + 1)} />}
           <PaperPicker value={papers} onChange={setPapers} disabled={submitting || initialLoading} />
         </section>
       </div><aside className="creation-aside">
