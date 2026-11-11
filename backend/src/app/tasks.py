@@ -43,7 +43,13 @@ def submit_task(
                 if existing is not None:
                     return replay(existing, digest)
             if request.workflow_type != "baseline":
-                raise APIError(422, "WORKFLOW_NOT_AVAILABLE", "Mock 阶段仅开放 baseline 工作流")
+                raise APIError(422, "WORKFLOW_NOT_AVAILABLE", "当前阶段仅开放 baseline 工作流")
+            runner_type = settings.task_runner
+            if runner_type == "langgraph":
+                if not settings.real_runner_configured:
+                    raise APIError(503, "RUNNER_NOT_CONFIGURED", "真实研究模型尚未配置")
+                if request.task_type not in {"summary", "qa"}:
+                    raise APIError(422, "TASK_TYPE_NOT_AVAILABLE", "真实 Runner 当前仅支持摘要和问答")
             papers = list(session.scalars(
                 select(Paper).where(Paper.id.in_(request.paper_ids)).order_by(Paper.id).with_for_update()
             ))
@@ -52,12 +58,23 @@ def submit_task(
                 raise APIError(404, "PAPER_NOT_FOUND", "部分论文不存在", {
                     "missing_paper_ids": [str(paper_id) for paper_id in missing]
                 })
-            if any(paper.status not in {"uploaded", "ready"} for paper in papers):
+            allowed_statuses = {"ready"} if runner_type == "langgraph" else {"uploaded", "ready"}
+            if any(paper.status not in allowed_statuses for paper in papers):
                 raise APIError(409, "PAPER_NOT_READY", "选定论文尚不可用于执行任务")
+            run_config = {"mock_step_delay_seconds": settings.mock_step_delay_seconds}
+            if runner_type == "langgraph":
+                run_config = {
+                    "model_base_url": settings.llm_base_url,
+                    "model_timeout_seconds": settings.llm_timeout_seconds,
+                    "evidence_context_chars": settings.evidence_context_chars,
+                }
             task = Task(
                 id=uuid4(), task_type=request.task_type, question=request.question,
-                workflow_type=request.workflow_type, runner_type="mock", workflow_version="mock-v1",
-                run_config={"mock_step_delay_seconds": settings.mock_step_delay_seconds},
+                workflow_type=request.workflow_type, runner_type=runner_type,
+                workflow_version="mock-v1" if runner_type == "mock" else "langgraph-v1",
+                prompt_version=None if runner_type == "mock" else "evidence-v1",
+                model_id=None if runner_type == "mock" else settings.llm_model_id,
+                run_config=run_config,
                 **request.budget.model_dump(), idempotency_key=key, request_hash=digest,
                 last_event_seq=1,
             )

@@ -23,7 +23,7 @@
 | MVP-1B | 真实 Runner、证据引用校验与摘要/问答 |
 | MVP-2 | 搜索、跨论文综述与比较、扩展工作流 |
 
-`extended` 是保留的合法工作流枚举，MVP-0 返回 `422 WORKFLOW_NOT_AVAILABLE`。`is_mock` 由服务器配置决定，不能由请求指定。
+`extended` 是保留的合法工作流枚举，当前返回 `422 WORKFLOW_NOT_AVAILABLE`。`is_mock` 由服务器端 `TASK_RUNNER` 配置决定，不能由请求指定；默认 `mock`，设为 `langgraph` 时仅提供真实摘要和问答。
 
 ## 2. 资源与状态
 
@@ -191,7 +191,7 @@ Content-Type 为 application/json；可选 Idempotency-Key 请求头，语义见
 | workflow_type | 否 | 默认 baseline，MVP-0 不开放 extended |
 | budget | 否 | 见 Budget，缺失字段填默认值 |
 
-paper_ids 视为集合，转 UUID 标准字符串后排序。不存在论文返回 404，details.missing_paper_ids 列出缺失 ID。Mock 允许 uploaded/ready，processing/failed 返回 409 PAPER_NOT_READY；真实 Runner 只允许 ready。
+paper_ids 视为集合，转 UUID 标准字符串后排序。不存在论文返回 404，details.missing_paper_ids 列出缺失 ID。Mock 允许 uploaded/ready，processing/failed 返回 409 PAPER_NOT_READY；真实 Runner 只允许 ready。真实模式需配置 `LLM_BASE_URL`、`LLM_MODEL_ID` 和 `LLM_API_KEY`；缺少任一项时返回 `503 RUNNER_NOT_CONFIGURED`，不创建任务且不降级为 Mock。真实模式下 `review` 返回 `422 TASK_TYPE_NOT_AVAILABLE`。
 
 runner_type、is_mock、model_id、status、stage、thread_id 及存储配置均不接受客户端写入。后端冻结 Runner、工作流版本和模型等执行配置，后续配置变更不能改变已提交任务。
 
@@ -339,6 +339,7 @@ summary/qa 的 comparison_table 为 null；真实 review 使用下述对象。Mo
   "id": "dddddddd-dddd-4ddd-8ddd-dddddddddddd",
   "citation_key": "C1",
   "paper_id": "11111111-1111-4111-8111-111111111111",
+  "paper_title": "Example research paper",
   "chunk_id": "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
   "page_number": 3,
   "quote": "A verbatim passage from the stored paper chunk."
@@ -390,12 +391,15 @@ Task.error/Paper.error 直接使用内层 `{code,message,details}`，正常为 n
 | 422 | INVALID_REQUEST | 缺字段、非法 UUID/枚举、数量、重复 ID、预算、未知字段等 |
 | 422 | INVALID_PDF / INVALID_FILENAME | 文件内容或名称不合法 |
 | 422 | WORKFLOW_NOT_AVAILABLE | 扩展工作流未开放 |
+| 422 | TASK_TYPE_NOT_AVAILABLE | 真实 Runner 当前不支持该任务类型 |
 | 500 | STORAGE_WRITE_FAILED / FILE_UNAVAILABLE | 文件写入/读取失败 |
 | 500 | INTERNAL_ERROR | 未预期接口错误 |
 | 503 | SERVICE_NOT_READY | 数据库/迁移未就绪 |
+| 503 | RUNNER_NOT_CONFIGURED | 真实 Runner 缺少模型服务配置，任务不会创建 |
 | Task.error | WORKER_LOST | Worker 租约过期 |
 | Task.error | TASK_TIMEOUT / BUDGET_EXCEEDED | 超时/预算耗尽 |
 | Task.error | AGENT_EXECUTION_FAILED / INVALID_AGENT_RESULT | Agent 异常/产物不合法 |
+| Task.error | PAPER_SOURCE_CHANGED / PAPER_NOT_READY | 任务执行期间选定论文来源变化或不再就绪 |
 | Paper.error | PDF_INVALID / PDF_ENCRYPTED / PDF_NO_TEXT / PDF_LIMIT_EXCEEDED / PDF_PARSE_TIMEOUT / PARSER_LOST / PDF_SOURCE_CHANGED / FILE_UNAVAILABLE | 文本解析失败，需查看 message 并重新上传 |
 
 FastAPI 默认校验异常也必须转换为相同格式，不能遗留第二种 422 响应。

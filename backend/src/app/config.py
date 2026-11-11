@@ -1,4 +1,6 @@
 from pathlib import Path
+from typing import Literal
+from urllib.parse import urlsplit
 
 from pydantic import Field, SecretStr, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -20,6 +22,37 @@ class Settings(BaseSettings):
     task_monitor_enabled: bool = True
     mock_step_delay_seconds: float = Field(default=0.5, ge=0, le=10, allow_inf_nan=False)
     parser_timeout_seconds: float = Field(default=120, ge=1, le=600, allow_inf_nan=False)
+    task_runner: Literal["mock", "langgraph"] = "mock"
+    llm_base_url: str | None = None
+    llm_model_id: str | None = None
+    llm_api_key: SecretStr | None = None
+    llm_timeout_seconds: float = Field(default=60, ge=1, le=300, allow_inf_nan=False)
+    evidence_context_chars: int = Field(default=24000, ge=1000, le=100000)
+
+    @field_validator("llm_base_url")
+    @classmethod
+    def validate_llm_base_url(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        value = value.rstrip("/")
+        parsed = urlsplit(value)
+        if parsed.scheme not in {"http", "https"} or not parsed.netloc or parsed.username or parsed.password or parsed.query or parsed.fragment:
+            raise ValueError("LLM_BASE_URL must be an HTTP(S) URL without credentials, query, or fragment")
+        return value
+
+    @field_validator("llm_model_id")
+    @classmethod
+    def validate_llm_model_id(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        value = value.strip()
+        if not value or len(value) > 256:
+            raise ValueError("LLM_MODEL_ID must contain 1–256 characters")
+        return value
+
+    @property
+    def real_runner_configured(self) -> bool:
+        return bool(self.llm_base_url and self.llm_model_id and self.llm_api_key and self.llm_api_key.get_secret_value())
 
     @field_validator("storage_root")
     @classmethod

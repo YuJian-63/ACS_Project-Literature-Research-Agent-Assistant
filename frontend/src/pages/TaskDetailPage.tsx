@@ -39,7 +39,7 @@ function TaskDetail({ taskId }: { taskId: string }) {
         <section className="content-panel result-panel">
           {task.status === 'succeeded' ? <>
             {state.artifactError ? <ErrorNotice error={state.artifactError} title="结果查询失败，任务仍为已完成" retry={state.refresh} /> : state.artifacts === undefined ? <Skeleton active paragraph={{ rows: 5 }} /> : state.artifacts.length ? <Suspense fallback={<Spin><div className="loading-placeholder" /></Spin>}>{state.artifacts.map((artifact) => <ArtifactView key={artifact.id} artifact={artifact} />)}</Suspense> : <Alert type="warning" showIcon title="尚未取得任务产物，请重试查询。" action={<Button onClick={state.refresh}>重试查询</Button>} />}
-          </> : <><div className="panel-heading"><h2>研究结果</h2></div><div className="waiting-result"><Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={task.status === 'queued' ? '任务正在等待执行' : task.status === 'running' ? '任务执行中，结果尚未生成' : '此任务没有生成研究结果'} /><p>{task.status === 'queued' ? '请确认后端 Mock Worker 已启动。排队期间可以离开页面，稍后按任务 ID 恢复查询。' : task.status === 'running' ? '页面会在每次查询完成后等待 2 秒再刷新，执行记录持续保存在后端。' : '请查看失败原因，调整输入或预算后重新创建任务。'}</p></div></>}
+          </> : <><div className="panel-heading"><h2>研究结果</h2></div><div className="waiting-result"><Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={task.status === 'queued' ? '任务正在等待执行' : task.status === 'running' ? '任务执行中，结果尚未生成' : '此任务没有生成研究结果'} /><p>{task.status === 'queued' ? '请确认对应的后端 Worker 已启动。排队期间可以离开页面，稍后按任务 ID 恢复查询。' : task.status === 'running' ? '页面会在每次查询完成后等待 2 秒再刷新，执行记录持续保存在后端。' : '请查看失败原因，调整输入或预算后重新创建任务。'}</p></div></>}
         </section>
         <TaskInputs task={task} />
       </div><aside className="detail-aside">

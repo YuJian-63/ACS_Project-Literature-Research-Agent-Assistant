@@ -6,7 +6,8 @@ from uuid import UUID
 from sqlalchemy import func, or_, select, text
 from sqlalchemy.orm import Session, sessionmaker
 
-from app.db.models import Artifact, Task, TaskEvent
+from app.db.models import Artifact, Citation, Task, TaskEvent
+from app.result_validation import ValidatedResult
 
 logger = logging.getLogger(__name__)
 LEASE_SECONDS = 60
@@ -35,22 +36,38 @@ def owns_task(task: Task | None, owner: UUID, now: datetime) -> bool:
     )
 
 
-def claim_task(sessions: sessionmaker[Session], owner: UUID) -> UUID | None:
+def claim_task(sessions: sessionmaker[Session], owner: UUID, runner_type: str = "mock") -> UUID | None:
+    if runner_type not in {"mock", "langgraph"}:
+        raise ValueError("Unsupported runner type")
     with sessions.begin() as session:
         task = session.scalar(
-            select(Task).where(Task.status == "queued", Task.runner_type == "mock")
+            select(Task).where(Task.status == "queued", Task.runner_type == runner_type)
             .order_by(Task.created_at, Task.id).limit(1).with_for_update(skip_locked=True)
         )
         if task is None:
             return None
         now = database_time(session)
         task.status = "running"
-        task.stage = "mock_preparing"
+        task.stage = "mock_preparing" if runner_type == "mock" else "retrieving"
         task.worker_id = owner
         task.started_at = now
         task.lease_expires_at = now + timedelta(seconds=LEASE_SECONDS)
-        append_event(session, task, now, "模拟任务开始执行，尚未分析论文", "status")
+        message = "模拟任务开始执行，尚未分析论文" if runner_type == "mock" else "真实研究任务开始，正在读取已解析证据"
+        append_event(session, task, now, message, "status")
         return task.id
+
+
+def set_task_stage(
+    sessions: sessionmaker[Session], task_id: UUID, owner: UUID, expected: str, stage: str, message: str
+) -> bool:
+    with sessions.begin() as session:
+        task = locked_task(session, task_id)
+        now = database_time(session)
+        if not owns_task(task, owner, now) or task.stage != expected:
+            return False
+        task.stage = stage
+        append_event(session, task, now, message, "stage")
+        return True
 
 
 def locked_task(session: Session, task_id: UUID) -> Task | None:
@@ -131,6 +148,55 @@ def complete_mock(sessions: sessionmaker[Session], task_id: UUID, owner: UUID) -
         task.worker_id = None
         task.lease_expires_at = None
         append_event(session, task, now, "模拟流程完成，结果不代表论文结论", "status")
+        return True
+
+
+def complete_real(
+    sessions: sessionmaker[Session], task_id: UUID, owner: UUID, result: ValidatedResult,
+    *, input_tokens: int | None, output_tokens: int | None, model_calls: int,
+) -> bool:
+    for value in (input_tokens, output_tokens, model_calls):
+        if value is not None and (type(value) is not int or value < 0):
+            raise ValueError("Invalid model usage")
+    if type(model_calls) is not int:
+        raise ValueError("Model call count is required")
+    with sessions.begin() as session:
+        task = locked_task(session, task_id)
+        now = database_time(session)
+        if not owns_task(task, owner, now) or task.runner_type != "langgraph":
+            return False
+        if task.stage not in {"generating", "writing"}:
+            return False
+        if input_tokens is not None and output_tokens is not None and input_tokens + output_tokens > task.max_tokens:
+            mark_failed(session, task, now, "BUDGET_EXCEEDED", "模型用量超过任务 Token 预算")
+            return False
+        title = "论文摘要" if task.task_type == "summary" else "论文问答"
+        artifact = Artifact(
+            task_id=task.id, title=title, content_markdown=result.content_markdown,
+            comparison_table=None, created_at=now,
+        )
+        session.add(artifact)
+        session.flush()
+        session.add_all([
+            Citation(
+                artifact_id=artifact.id, task_id=task.id, citation_key=citation.citation_key,
+                paper_id=citation.paper_id, chunk_id=citation.chunk_id,
+                page_number=citation.page_number, quote=citation.quote, created_at=now,
+            ) for citation in result.citations
+        ])
+        task.input_tokens = input_tokens
+        task.output_tokens = output_tokens
+        task.model_calls = model_calls
+        task.tool_calls = 0
+        task.status = "succeeded"
+        task.stage = "completed"
+        task.finished_at = now
+        task.worker_id = None
+        task.lease_expires_at = None
+        task.error_code = None
+        task.error_message = None
+        task.error_details = None
+        append_event(session, task, now, "研究结果生成完成，引用来源已校验", "status")
         return True
 
 

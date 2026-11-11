@@ -14,7 +14,7 @@ from starlette.datastructures import UploadFile
 from starlette.exceptions import HTTPException
 from starlette.responses import StreamingResponse
 
-from app.db.models import Artifact, Paper, Task, TaskEvent
+from app.db.models import Artifact, Citation, Paper, Task, TaskEvent
 from app.errors import APIError
 from app.schemas import (
     ArtifactList, ErrorResponse, EventPage, HealthResponse, Page, PaperResponse, PaperStatus,
@@ -212,11 +212,22 @@ def task_artifacts(request: Request, task_id: UUID) -> dict:
         if task.status != "succeeded":
             return {"items": []}
         artifact = session.scalar(select(Artifact).where(Artifact.task_id == task_id))
-        if artifact is None or task.runner_type != "mock":
+        if artifact is None or task.runner_type not in {"mock", "langgraph"}:
             raise APIError(500, "INTERNAL_ERROR", "任务结果不可用")
+        citation_rows = list(session.execute(
+            select(Citation, Paper.title).join(Paper, Paper.id == Citation.paper_id)
+            .where(Citation.artifact_id == artifact.id)
+        ))
+        citation_rows.sort(key=lambda row: int(row[0].citation_key[1:]))
         return {"items": [{
             **{name: getattr(artifact, name) for name in (
                 "id", "task_id", "schema_version", "title", "content_markdown", "comparison_table", "created_at"
             )},
-            "task_type": task.task_type, "is_mock": True, "citations": [],
+            "task_type": task.task_type, "is_mock": task.runner_type == "mock",
+            "citations": [{
+                "id": citation.id, "citation_key": citation.citation_key,
+                "paper_id": citation.paper_id, "paper_title": paper_title,
+                "chunk_id": citation.chunk_id, "page_number": citation.page_number,
+                "quote": citation.quote,
+            } for citation, paper_title in citation_rows],
         }]}

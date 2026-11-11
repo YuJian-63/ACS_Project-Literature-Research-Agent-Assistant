@@ -105,6 +105,7 @@ export interface Citation {
   id: string;
   citation_key: string;
   paper_id: string;
+  paper_title: string;
   chunk_id: string;
   page_number: number;
   quote: string;

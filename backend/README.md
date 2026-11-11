@@ -1,6 +1,6 @@
 # 后端开发
 
-当前已实现数据库基础设施、MVP-0 API/Mock Worker 与 MVP-1A 文本 PDF Parser Worker。支持真实逐页文本提取、物理页码片段、解析状态恢复和 Worker 内部证据读取；尚未实现 OCR、真实研究 Agent 或引用生成。接口规范见 `../docs/api-contract.md`。
+当前已实现 MVP-0 API/Mock Worker、MVP-1A 文本 PDF Parser Worker，以及 MVP-1B 真实摘要/问答 Runner。真实 Runner 使用可替换的模型接口和证据引用校验；尚未实现 OCR、review/跨论文综述或联网搜索。真实模型服务需单独配置，不代表本地已接入外部模型。接口规范见 `../docs/api-contract.md`。
 
 ## 1. 首次启动
 
@@ -23,7 +23,7 @@ uv run --locked uvicorn app.main:create_app --factory --host 127.0.0.1 --port 80
 uv run --locked python -m app.worker
 ```
 
-API 和 Worker 必须使用同一个数据库及 STORAGE_ROOT。仅启动 API 时，提交的任务会持久化为 queued，不会执行；后续启动 Worker 后才会被领取。API 不依赖 FastAPI BackgroundTasks 执行任务，也不自动建表或迁移。
+API 和 Worker 必须使用同一个数据库及 STORAGE_ROOT。Mock Worker 仅领取 mock 任务；真实模式还需配置 TASK_RUNNER=langgraph、LLM_BASE_URL、LLM_MODEL_ID、LLM_API_KEY，并启动 `python -m app.runner_worker`。未配置模型时，API 返回 `RUNNER_NOT_CONFIGURED`，不创建任务。API 不依赖 FastAPI BackgroundTasks 执行任务，也不自动建表或迁移。
 
 浏览器访问 `http://127.0.0.1:8000/docs` 使用自动生成的交互式接口文档，`/openapi.json` 为机器可读契约。先检查 `/health` 和 `/ready`，再上传 PDF、提交任务并轮询结果。停止 API 和 Worker 不会删除数据库和论文文件。
 
@@ -46,6 +46,9 @@ Linux/macOS 将复制命令替换为 `cp .env.example .env`。其他命令相同
 | TASK_MONITOR_ENABLED | 默认 true；API 启动时及每 10 秒恢复过期任务，Worker 也运行独立恢复监控 |
 | MOCK_STEP_DELAY_SECONDS | 默认 0.5，范围 0—10；每个模拟步骤的等待秒数，提交时冻结到任务，不影响已有任务 |
 | PARSER_TIMEOUT_SECONDS | 默认 120 秒，范围 1—600；限制每份 PDF 的子进程解析时间，超时失败且不会保存部分片段 |
+| TASK_RUNNER | 默认 mock；可设 langgraph 选择真实摘要/问答 Runner，review 不支持 |
+| LLM_BASE_URL / LLM_MODEL_ID / LLM_API_KEY | 真实 Runner 的 OpenAI-compatible 服务地址、模型 ID 与密钥；密钥只从环境读取 |
+| LLM_TIMEOUT_SECONDS / EVIDENCE_CONTEXT_CHARS | 单次模型调用超时与证据上下文字符上限 |
 | CORS_ORIGINS | JSON 字符串数组；默认允许 localhost:5173 和 127.0.0.1:5173，不接受逗号分隔的裸字符串 |
 
 应用在宿主机运行，示例 DATABASE_URL 连接 `127.0.0.1:5432`。若已有独立 PostgreSQL 17+，可直接配置其 DATABASE_URL，跳过 Compose。修改用户、密码、端口或数据库名时，必须同步修改 DATABASE_URL；已初始化的数据卷不会因为更改 POSTGRES_* 自动修改已有数据库账号。
@@ -129,7 +132,7 @@ PGlite socket 不等价于原生 PostgreSQL 多连接模型。PostgreSQL 17+ 上
 
 2026-11-11 增量验证：14 组 HTTP/数据库集成检查通过，覆盖统一错误与跨域头、PDF 头/文件名/精确 20 MiB 上限、重复上传、字面搜索、来源与预算校验、幂等规范化/重放/冲突、唯一冲突后的新事务重查、无 Worker 保持 queued、事件游标、Mock 产物、原子回滚、失联/超时与旧 Worker 写入拒绝、文件写入失败及不确定提交补偿。此前 12 项数据库基础校验也通过回归。
 
-另以独立 Uvicorn 和 Worker 进程完成真实 HTTP 冒烟验证：排队后重启 API 仍可查询；独立 Worker 消费并生成模拟产物；终态幂等重放；API 重启时恢复失联任务；文件持久化读取。验证使用 PostgreSQL 18.6 / PGlite 0.5.16，并为多进程启用 socket 连接复用。这不等价于原生 PostgreSQL 多连接事务：本机 Docker 守护进程仍未运行，PostgreSQL 17+ 上真实双 Worker 竞争、并发幂等竞争及锁行为仍待验收。临时验证脚本在忽略的 runtime 目录；httpx 仅是开发验证依赖。
+独立 Uvicorn/Worker 进程及真实 Runner 的 PGlite 集成验证记录在忽略的 runtime 脚本中；PGlite 不等价于原生 PostgreSQL 多连接事务，本机 PostgreSQL 17+ 双 Worker 竞争与锁行为仍需部署环境验收。httpx 是 Runner 的运行时 HTTP 依赖。
 
 ## 6. 最小业务闭环
 
@@ -153,7 +156,7 @@ Invoke-RestMethod "http://127.0.0.1:8000/api/v1/tasks/$($task.id)/artifacts"
 - 仅用于受信本机单用户环境，无鉴权；API 默认绑定 127.0.0.1。公开部署前另行添加身份验证、访问控制、TLS、代理上传限制及配额。
 - 上传实际文件最大 20 MiB，分块统计大小并计算 SHA-256；额外限制 multipart 整体为 20 MiB + 64 KiB，避免解析阶段无限写临时文件。上传只检查 PDF 文件头；未启动独立 Parser Worker 时论文保持 uploaded，page_count/parser_version 为 null。
 - Mock Worker 领取事务使用行锁及 SKIP LOCKED，租约 60 秒，独立心跳 20 秒；开始时间后的 timeout_seconds 到期优先标为 TASK_TIMEOUT，否则租约到期标为 WORKER_LOST。不自动重跑失联任务，旧 Worker 不能覆盖失败结果。
-- 模拟产物明确标注未分析论文、引用为空、比较表为 null。原子写入产物、成功状态与事件；真实研究结论与证据校验留待真实 Runner 阶段实现。
+- 模拟产物明确标注未分析论文、引用为空、比较表为 null。真实 Runner 仅支持摘要/问答，验证来源片段、页码和原文后原子写入产物与引用。
 - 上传在明确未提交时清除本次临时/目标文件；提交结果不确定时保留文件并新建会话核对。暂时无法确认返回 503，日志仅记录 paper_id；请先查询论文列表，不要直接删除 uploads 下文件。当前没有自动孤儿文件清理命令，人工核对需先确认原事务已结束，并保留宽限期及备份。
 - 默认上传目录和临时验证产物均被 Git 忽略；自定义 STORAGE_ROOT 应放在仓库外或自行确认 ignore 规则。停止所有服务时不会即时恢复任务，下一次 API/Worker 启动时恢复。
 
@@ -168,4 +171,17 @@ Parser Worker 与 API/Mock Worker 必须使用相同的数据库和 `STORAGE_ROO
 
 MVP-1A 使用 pypdf 提取文本，不运行 OCR。默认拒绝超过 500 页、8 MiB 提取文本、10000 个片段、单页 16 MiB 解码内容流的文档；连续片段最大 2000 字符。超限不做部分成功；worker 子进程有 120 秒 wall-clock 超时。内容流限制在 pypdf 解码后检查，**不等同于操作系统 RAM 上限**；服务于不可信公网 PDF 前，应在操作系统/容器层加入内存、CPU、磁盘和并发限制。加密、损坏、空扫描件解析失败后不会保留 chunk，需重新上传创建新论文 ID 重试。
 
-此阶段没有新增公开 API 或数据库迁移：使用初始 schema 已有的论文解析租约字段和 paper_chunks 表。启动 Parser Worker 不会修改已有任务/原文件/hash；Mock Runner 仍不读取 chunks，也不产生研究证据或真实结论。原生 PostgreSQL 17+ 多连接、并行 Parser Worker 和进程资源隔离仍需部署环境验收。
+此阶段没有新增数据库迁移；真实 Runner 复用既有 paper_chunks、citations 和 artifact 表。启动 Parser Worker 不会修改已有任务/原文件/hash；Mock Runner 仍不读取 chunks，也不产生研究证据或真实结论。原生 PostgreSQL 17+ 多连接、并行 Worker 和进程资源隔离仍需部署环境验收。
+
+## 8. 真实 Runner（可选）
+
+默认 `TASK_RUNNER=mock`，维持模拟结果。需要运行真实摘要/问答时，在 `backend/.env` 设置 `TASK_RUNNER=langgraph`、`LLM_BASE_URL`、`LLM_MODEL_ID` 和 `LLM_API_KEY`；地址须指向 OpenAI-compatible Chat Completions 服务。`LLM_API_KEY` 只从环境读取，不写入任务或日志。真实 Runner 仅接受已解析完成的单篇论文，`review` 仍不可用。
+
+保持 API 与 Parser Worker 运行，在另一个终端启动真实 Runner：
+
+```powershell
+cd backend
+uv run --locked python -m app.runner_worker
+```
+
+Mock 与真实 Runner 分别领取对应队列。当前没有可用远端模型凭据时，可用假模型测试逻辑，但不声称真实供应商联调已完成。

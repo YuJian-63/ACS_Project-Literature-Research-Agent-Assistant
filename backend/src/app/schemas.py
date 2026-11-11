@@ -153,6 +153,7 @@ class CitationResponse(BaseModel):
     id: UUID
     citation_key: str
     paper_id: UUID
+    paper_title: str
     chunk_id: UUID
     page_number: int
     quote: str
