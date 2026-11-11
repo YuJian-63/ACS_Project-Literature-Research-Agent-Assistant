@@ -9,7 +9,8 @@ def create_database_engine(settings: Settings) -> Engine:
         settings.database_url.get_secret_value(),
         pool_pre_ping=True,
         isolation_level="READ COMMITTED",
-        connect_args={"options": "-c timezone=UTC"},
+        connect_args={"options": "-c timezone=UTC", "connect_timeout": 5},
+        pool_timeout=5,
     )
 
 

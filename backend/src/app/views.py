@@ -1,0 +1,73 @@
+from datetime import datetime
+
+from app.db.models import Paper, Task
+
+
+def resource_error(resource: Paper | Task) -> dict | None:
+    if resource.error_code is None:
+        return None
+    return {
+        "code": resource.error_code,
+        "message": resource.error_message,
+        "details": resource.error_details or {},
+    }
+
+
+def paper_view(paper: Paper) -> dict:
+    fields = (
+        "id", "title", "original_filename", "content_type", "size_bytes", "sha256",
+        "status", "page_count", "parser_version", "created_at", "updated_at",
+    )
+    return {**{name: getattr(paper, name) for name in fields}, "error": resource_error(paper)}
+
+
+def accepted_view(task: Task) -> dict:
+    return {
+        **{name: getattr(task, name) for name in (
+            "id", "task_type", "workflow_type", "status", "stage", "created_at"
+        )},
+        "is_mock": task.runner_type == "mock",
+    }
+
+
+def summary_view(task: Task, paper_ids: list) -> dict:
+    return {
+        **accepted_view(task),
+        **{name: getattr(task, name) for name in (
+            "question", "updated_at", "started_at", "finished_at"
+        )},
+        "paper_ids": paper_ids,
+        "error": resource_error(task),
+    }
+
+
+def elapsed_ms(start: datetime | None, end: datetime | None) -> int | None:
+    if start is None or end is None:
+        return None
+    duration = end - start
+    return duration.days * 86400000 + duration.seconds * 1000 + duration.microseconds // 1000
+
+
+def task_view(task: Task, paper_ids: list) -> dict:
+    total_tokens = None
+    if task.input_tokens is not None and task.output_tokens is not None:
+        total_tokens = task.input_tokens + task.output_tokens
+    return {
+        **summary_view(task, paper_ids),
+        "budget": {name: getattr(task, name) for name in (
+            "max_steps", "max_tokens", "timeout_seconds"
+        )},
+        "versions": {name: getattr(task, name) for name in (
+            "model_id", "workflow_version", "prompt_version", "dataset_version"
+        )},
+        "stats": {
+            "queue_ms": elapsed_ms(task.created_at, task.started_at),
+            "execution_ms": elapsed_ms(task.started_at, task.finished_at),
+            "end_to_end_ms": elapsed_ms(task.created_at, task.finished_at),
+            "total_tokens": total_tokens,
+            **{name: getattr(task, name) for name in (
+                "input_tokens", "output_tokens", "model_calls", "tool_calls"
+            )},
+        },
+        "last_event_seq": task.last_event_seq,
+    }

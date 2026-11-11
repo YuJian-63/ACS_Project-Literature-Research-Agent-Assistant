@@ -1,0 +1,183 @@
+import logging
+from datetime import datetime, timedelta
+from threading import Event, Thread
+from uuid import UUID
+
+from sqlalchemy import func, or_, select, text
+from sqlalchemy.orm import Session, sessionmaker
+
+from app.db.models import Artifact, Task, TaskEvent
+
+logger = logging.getLogger(__name__)
+LEASE_SECONDS = 60
+HEARTBEAT_SECONDS = 20
+MONITOR_SECONDS = 10
+
+
+def database_time(session: Session) -> datetime:
+    return session.scalar(select(func.clock_timestamp()))
+
+
+def append_event(session: Session, task: Task, now: datetime, message: str, event_type: str) -> None:
+    task.last_event_seq += 1
+    task.updated_at = now
+    session.add(TaskEvent(
+        task_id=task.id, seq=task.last_event_seq, event_type=event_type,
+        status=task.status, stage=task.stage, message=message, payload={}, created_at=now,
+    ))
+
+
+def owns_task(task: Task | None, owner: UUID, now: datetime) -> bool:
+    return (
+        task is not None and task.status == "running" and task.worker_id == owner
+        and task.lease_expires_at > now
+        and task.started_at + timedelta(seconds=task.timeout_seconds) > now
+    )
+
+
+def claim_task(sessions: sessionmaker[Session], owner: UUID) -> UUID | None:
+    with sessions.begin() as session:
+        task = session.scalar(
+            select(Task).where(Task.status == "queued", Task.runner_type == "mock")
+            .order_by(Task.created_at, Task.id).limit(1).with_for_update(skip_locked=True)
+        )
+        if task is None:
+            return None
+        now = database_time(session)
+        task.status = "running"
+        task.stage = "mock_preparing"
+        task.worker_id = owner
+        task.started_at = now
+        task.lease_expires_at = now + timedelta(seconds=LEASE_SECONDS)
+        append_event(session, task, now, "模拟任务开始执行，尚未分析论文", "status")
+        return task.id
+
+
+def locked_task(session: Session, task_id: UUID) -> Task | None:
+    return session.scalar(select(Task).where(Task.id == task_id).with_for_update())
+
+
+def heartbeat(sessions: sessionmaker[Session], task_id: UUID, owner: UUID) -> bool:
+    with sessions.begin() as session:
+        task = locked_task(session, task_id)
+        now = database_time(session)
+        if not owns_task(task, owner, now):
+            return False
+        task.lease_expires_at = now + timedelta(seconds=LEASE_SECONDS)
+        task.updated_at = now
+        return True
+
+
+def advance_task(sessions: sessionmaker[Session], task_id: UUID, owner: UUID) -> bool:
+    with sessions.begin() as session:
+        task = locked_task(session, task_id)
+        now = database_time(session)
+        if not owns_task(task, owner, now):
+            return False
+        if task.stage != "mock_preparing":
+            return False
+        task.stage = "mock_generating"
+        append_event(session, task, now, "正在生成流程演示用模拟结果", "stage")
+        return True
+
+
+def mark_failed(session: Session, task: Task, now: datetime, code: str, message: str) -> None:
+    task.status = "failed"
+    task.stage = "failed"
+    task.finished_at = now
+    task.worker_id = None
+    task.lease_expires_at = None
+    task.error_code = code
+    task.error_message = message
+    task.error_details = {}
+    append_event(session, task, now, message, "error")
+
+
+def fail_owned(
+    sessions: sessionmaker[Session], task_id: UUID, owner: UUID, code: str, message: str
+) -> bool:
+    with sessions.begin() as session:
+        task = locked_task(session, task_id)
+        now = database_time(session)
+        if not owns_task(task, owner, now):
+            return False
+        mark_failed(session, task, now, code, message)
+        return True
+
+
+def complete_mock(sessions: sessionmaker[Session], task_id: UUID, owner: UUID) -> bool:
+    content = (
+        "## 模拟结果\n\n此内容仅用于验证上传、排队、执行与轮询流程。"
+        "尚未解析或分析论文，未调用模型，不代表论文结论。\n\n"
+        "不提供模拟证据、引用或研究指标；请勿将此结果用于模型效果评估。"
+    )
+    if not content.strip() or len(content.encode("utf-8")) > 2 * 1024 * 1024:
+        raise ValueError("Invalid mock result")
+    with sessions.begin() as session:
+        task = locked_task(session, task_id)
+        now = database_time(session)
+        if not owns_task(task, owner, now) or task.stage != "mock_generating":
+            return False
+        if task.runner_type != "mock":
+            raise ValueError("Mock result requires mock task")
+        titles = {"summary": "论文摘要", "qa": "论文问答", "review": "论文综述"}
+        session.add(Artifact(
+            task_id=task.id, title=f"{titles[task.task_type]}（模拟结果）",
+            content_markdown=content, comparison_table=None, created_at=now,
+        ))
+        task.status = "succeeded"
+        task.stage = "mock_completed"
+        task.finished_at = now
+        task.worker_id = None
+        task.lease_expires_at = None
+        append_event(session, task, now, "模拟流程完成，结果不代表论文结论", "status")
+        return True
+
+
+def reap_expired(sessions: sessionmaker[Session]) -> int:
+    with sessions.begin() as session:
+        tasks = list(session.scalars(
+            select(Task).where(
+                Task.status == "running",
+                or_(
+                    Task.lease_expires_at <= func.clock_timestamp(),
+                    Task.started_at + Task.timeout_seconds * text("interval '1 second'") <= func.clock_timestamp(),
+                ),
+            ).order_by(Task.id).limit(100).with_for_update(skip_locked=True)
+        ))
+        now = database_time(session)
+        count = 0
+        for task in tasks:
+            if task.started_at + timedelta(seconds=task.timeout_seconds) <= now:
+                mark_failed(session, task, now, "TASK_TIMEOUT", "任务超过执行时间预算")
+                count += 1
+            elif task.lease_expires_at <= now:
+                mark_failed(session, task, now, "WORKER_LOST", "Worker 租约已过期")
+                count += 1
+        return count
+
+
+class TaskMonitor:
+    def __init__(self, sessions: sessionmaker[Session]) -> None:
+        self.sessions = sessions
+        self.stopped = Event()
+        self.thread = Thread(target=self.run, name="task-monitor", daemon=True)
+
+    def sweep(self) -> None:
+        try:
+            while reap_expired(self.sessions) == 100 and not self.stopped.is_set():
+                pass
+        except Exception:
+            logger.warning("Task recovery deferred; database may not be ready")
+
+    def start(self) -> None:
+        self.sweep()
+        self.thread.start()
+
+    def run(self) -> None:
+        while not self.stopped.wait(MONITOR_SECONDS):
+            self.sweep()
+
+    def close(self) -> None:
+        self.stopped.set()
+        self.thread.join()

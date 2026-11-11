@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from pydantic import SecretStr, field_validator
+from pydantic import Field, SecretStr, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from sqlalchemy.engine import make_url
 from sqlalchemy.exc import ArgumentError
@@ -15,6 +15,17 @@ class Settings(BaseSettings):
     )
 
     database_url: SecretStr
+    storage_root: Path = Path(__file__).resolve().parents[2] / "runtime" / "storage"
+    cors_origins: list[str] = ["http://localhost:5173", "http://127.0.0.1:5173"]
+    task_monitor_enabled: bool = True
+    mock_step_delay_seconds: float = Field(default=0.5, ge=0, le=10, allow_inf_nan=False)
+
+    @field_validator("storage_root")
+    @classmethod
+    def normalize_storage_root(cls, value: Path) -> Path:
+        if not value.is_absolute():
+            value = Path(__file__).resolve().parents[2] / value
+        return value.resolve()
 
     @field_validator("database_url")
     @classmethod

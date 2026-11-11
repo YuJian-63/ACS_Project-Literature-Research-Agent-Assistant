@@ -1,6 +1,6 @@
 # Literature Research Agent Assistant — API 契约
 
-版本：v1 · 更新日期：2026-11-10。本文供前端、应用后端和 Agent 集成使用，是待实现的接口规范，不表示服务已经部署。
+版本：v1 · 更新日期：2026-11-11。本文供前端、应用后端和 Agent 集成使用。MVP-0 接口及独立 Mock Worker 已实现，启动方式见 `backend/README.md`；不表示服务已经部署，也不表示真实解析或 Agent 已实现。
 
 需求依据：`docs/Proposal.md` 第 2、3 节。数据库设计见 `docs/database-design.md`，参考 DDL 见 `backend/sql/schema.sql`。
 
