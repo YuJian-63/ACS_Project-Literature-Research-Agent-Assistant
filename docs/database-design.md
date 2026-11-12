@@ -1,6 +1,6 @@
 # 后端数据库设计
 
-版本：v1 · 更新日期：2026-11-12。需求依据：`docs/Proposal.md`；接口对应 `docs/api-contract.md`；当前参考 DDL：`backend/sql/schema.sql`。第 9 节为 MVP-3 待实施增量设计，不表示新表/迁移已存在。
+版本：v1 · 更新日期：2026-11-13。需求依据：`docs/Proposal.md`；接口对应 `docs/api-contract.md`；当前参考 DDL：`backend/sql/schema.sql`。第 9 节 MVP-3 增量 ORM、迁移和 head DDL 已落地并通过隔离 PGlite 等价检查；2026-11-13 用户在独立原生 PostgreSQL 17.6 验收库完成 head 迁移、无结构漂移检查和八组并发/恢复/共享许可专项验收。未对现有业务数据库执行迁移；原生专项范围及用户输出记录见 `docs/superpowers/plans/2026-11-12-mvp-3-arxiv-search-import.md`。
 
 本文记录数据设计；应用通过 backend/alembic 的版本迁移建库，backend/sql/schema.sql 保留作结构对照。模型和迁移已落地，操作说明见 backend/README.md；未连接现有业务数据库。
 
@@ -276,9 +276,9 @@ schema.sql 不含凭据、演示业务数据或扩展安装命令；只在新建
 - 原生 UUID 函数：`https://www.postgresql.org/docs/17/functions-uuid.html`
 - PGlite 的 PostgreSQL WASM 引擎：`https://pglite.dev/docs/`
 
-## 9. MVP-3 来源与导入增量设计（待实现）
+## 9. MVP-3 来源与导入增量设计
 
-计划 revision 20261112_0002，down_revision=20261110_0001；新增三表，不改变原七表历史、Paper 四态、来源 hash 外键或手动重复上传规则。实施前 ORM/DDL/迁移仍为原结构；实施时更新参考 DDL 为 head，不重写初始 revision。
+当前 head revision 20261112_0002，down_revision=20261110_0001；新增三表，不改变原七表历史、Paper 四态、来源 hash 外键或手动重复上传规则。参考 DDL 已更新为 head，初始 revision 保持不变；已升级旧结构保留原有论文，并验证安全降级保护。
 
 ### 9.1 paper_sources：已保存 PDF 的来源
 

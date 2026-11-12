@@ -81,7 +81,11 @@ class ErrorMiddleware:
             }}, status_code=500)(scope, receive, send)
 
 
-def create_app(settings: Settings | None = None, engine: Engine | None = None) -> FastAPI:
+def create_app(settings: Settings | None = None, engine: Engine | None = None, *, arxiv_client=None) -> FastAPI:
+    from app.arxiv import ArxivClient, ArxivError
+    from app.arxiv_transport import SupervisedArxivTransport
+    from app.paper_import_api import router as import_router
+    from app.source_access import SearchCache, source_permit
     settings = settings or Settings()
 
     @asynccontextmanager
@@ -89,6 +93,11 @@ def create_app(settings: Settings | None = None, engine: Engine | None = None) -
         database = engine if engine is not None else create_database_engine(settings)
         application.state.engine = database
         application.state.sessions = create_session_factory(database)
+        application.state.arxiv_client = arxiv_client
+        if arxiv_client is None and settings.arxiv_configured:
+            application.state.arxiv_client = ArxivClient(SupervisedArxivTransport(
+                settings.arxiv_contact_email, lambda: source_permit(application.state.sessions),
+            ))
         monitor = TaskMonitor(application.state.sessions) if settings.task_monitor_enabled else None
         try:
             if monitor is not None:
@@ -102,11 +111,19 @@ def create_app(settings: Settings | None = None, engine: Engine | None = None) -
 
     application = FastAPI(title="Literature Research Agent Assistant", version="0.1.0", lifespan=lifespan)
     application.state.settings = settings
+    application.state.arxiv_cache = SearchCache()
     application.state.migration_heads = set(ScriptDirectory(str(Path(__file__).resolve().parents[2] / "alembic")).get_heads())
 
     @application.exception_handler(APIError)
     async def api_error_handler(request: Request, error: APIError):
-        return JSONResponse({"error": error.error}, status_code=error.status_code)
+        return JSONResponse({"error": error.error}, status_code=error.status_code, headers=error.headers)
+
+    @application.exception_handler(ArxivError)
+    async def arxiv_error_handler(request: Request, error: ArxivError):
+        status = {"ARXIV_RATE_LIMITED": 429, "ARXIV_TIMEOUT": 504}.get(error.code, 502)
+        details = {"retry_after_seconds": error.retry_after} if error.retry_after else {}
+        headers = {"Retry-After": str(error.retry_after)} if error.retry_after else None
+        return JSONResponse({"error": {"code": error.code, "message": error.message, "details": details}}, status_code=status, headers=headers)
 
     @application.exception_handler(RequestValidationError)
     async def validation_error_handler(request: Request, error: RequestValidationError):
@@ -131,11 +148,12 @@ def create_app(settings: Settings | None = None, engine: Engine | None = None) -
         }}, status_code=503)
 
     application.include_router(router)
+    application.include_router(import_router)
     application.add_middleware(ErrorMiddleware)
     application.add_middleware(
         CORSMiddleware, allow_origins=settings.cors_origins, allow_methods=["GET", "POST"],
         allow_headers=["Content-Type", "Idempotency-Key"],
-        expose_headers=["X-Request-ID", "Location", "Idempotency-Replayed"],
+        expose_headers=["X-Request-ID", "Location", "Idempotency-Replayed", "Retry-After"],
     )
     application.add_middleware(RequestMiddleware)
     return application

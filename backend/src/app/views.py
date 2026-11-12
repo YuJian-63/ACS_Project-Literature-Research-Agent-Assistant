@@ -18,7 +18,13 @@ def paper_view(paper: Paper) -> dict:
         "id", "title", "original_filename", "content_type", "size_bytes", "sha256",
         "status", "page_count", "parser_version", "created_at", "updated_at",
     )
-    return {**{name: getattr(paper, name) for name in fields}, "error": resource_error(paper)}
+    from app.arxiv import ArxivPaper
+
+    source = paper.source
+    provenance = ArxivPaper(
+        **source.source_metadata, provider=source.provider, external_id=source.external_id,
+    ).source_view() if source is not None else None
+    return {**{name: getattr(paper, name) for name in fields}, "error": resource_error(paper), "source": provenance}
 
 
 def accepted_view(task: Task) -> dict:

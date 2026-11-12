@@ -28,6 +28,22 @@ class Settings(BaseSettings):
     llm_api_key: SecretStr | None = None
     llm_timeout_seconds: float = Field(default=60, ge=1, le=300, allow_inf_nan=False)
     evidence_context_chars: int = Field(default=24000, ge=1000, le=100000)
+    arxiv_enabled: bool = False
+    arxiv_contact_email: str | None = None
+
+    @field_validator("arxiv_contact_email")
+    @classmethod
+    def validate_arxiv_contact(cls, value: str | None) -> str | None:
+        if value is None or value == "":
+            return None
+        from app.arxiv_transport import SupervisedArxivTransport
+
+        SupervisedArxivTransport(value, lambda: None)
+        return value
+
+    @property
+    def arxiv_configured(self) -> bool:
+        return self.arxiv_enabled and bool(self.arxiv_contact_email)
 
     @field_validator("llm_base_url")
     @classmethod

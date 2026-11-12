@@ -66,7 +66,22 @@ class TaskCreate(StrictModel):
         return self
 
 
+class PaperSourceResponse(BaseModel):
+    provider: Literal["arxiv"]
+    external_id: str
+    title: str
+    authors: list[str]
+    abstract: str
+    doi: str | None
+    categories: list[str]
+    published_at: datetime
+    source_updated_at: datetime
+    abstract_url: str
+    pdf_url: str
+
+
 class PaperResponse(BaseModel):
+    source: PaperSourceResponse | None = None
     id: UUID
     title: str
     original_filename: str

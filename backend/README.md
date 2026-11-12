@@ -1,6 +1,6 @@
 # 后端开发
 
-当前已实现 MVP-0 API/Mock Worker、MVP-1A 文本 PDF Parser Worker、MVP-1B 真实摘要/问答 Runner，以及 MVP-2 多论文综述与比较表。真实 Runner 使用可替换的模型接口和证据引用校验；尚未实现 OCR 或联网搜索。真实模型服务需单独配置，不代表本地已接入外部模型。接口规范见 `../docs/api-contract.md`。
+当前已实现 MVP-0 API/Mock Worker、MVP-1A 文本 PDF Parser Worker、MVP-1B 真实摘要/问答 Runner、MVP-2 多论文综述与比较表，以及 MVP-3 arXiv 搜索和指定版本 PDF 导入。真实 Runner 使用可替换的模型接口和证据引用校验；尚未实现 OCR。arXiv 默认关闭，真实来源和模型服务需单独配置，不代表本地已完成外部服务验收。接口规范见 `../docs/api-contract.md`。
 
 ## 1. 首次启动
 
@@ -27,7 +27,7 @@ API 和 Worker 必须使用同一个数据库及 STORAGE_ROOT。Mock Worker 仅�
 
 浏览器访问 `http://127.0.0.1:8000/docs` 使用自动生成的交互式接口文档，`/openapi.json` 为机器可读契约。先检查 `/health` 和 `/ready`，再上传 PDF、提交任务并轮询结果。停止 API 和 Worker 不会删除数据库和论文文件。
 
-Linux/macOS 将复制命令替换为 `cp .env.example .env`。其他命令相同。迁移成功后的 revision 是 `20261110_0001`；数据库包含七张业务表和 Alembic 自己的版本表。`alembic check` 正常输出 `No new upgrade operations detected.`。
+Linux/macOS 将复制命令替换为 `cp .env.example .env`。其他命令相同。迁移成功后的 revision 是 `20261112_0002`；数据库包含原七张表、新增三张来源/导入/共享访问许可表，以及 Alembic 自己的版本表。`alembic check` 正常输出 `No new upgrade operations detected.`。
 
 依赖版本由 `uv.lock` 固定，当前使用可访问的清华公共 PyPI 镜像，项目不依赖个人机器的全局镜像设置。本次环境访问官方 PyPI 出现 TLS 失败；需要换源时修改 `pyproject.toml` 的 index 并重新生成锁文件，不手工替换锁文件中的包地址。
 
@@ -116,7 +116,7 @@ uv run --locked alembic upgrade head --sql
 uv run --locked alembic downgrade 20261110_0001:base --sql
 ```
 
-不加 `--sql` 的 `alembic downgrade base` 会实际删除七张业务表及其中数据，只适用于可丢弃开发库。停止本地数据库可执行 `docker compose down`，该命令保留命名数据卷。
+不加 `--sql` 的 `alembic downgrade base` 会实际删除业务表及其中数据，只适用于可丢弃开发库；新迁移在存在导入或来源记录时拒绝降级，不能通过删除来源绕过保护。停止本地数据库可执行 `docker compose down`，该命令保留命名数据卷。
 
 ## 5. 已执行验证与边界
 
@@ -189,3 +189,42 @@ Mock 与真实 Runner 分别领取对应队列。当前没有可用远端模型�
 综述先为每篇有片段的论文预留一个最短片段，再按问题相关度轮流追加证据，受总字符数和 32 个片段上限约束。最小覆盖无法满足时以 `BUDGET_EXCEEDED` 失败，不调用模型或写部分产物。所有论文均无片段时，不调用模型，返回明确的证据不足和逐篇证据状态表，Token/模型/工具计数均为 0。部分论文无证据时，其比较内容为 null，不编造结论。
 
 正常综述使用单次模型调用，步骤预算至少 1；输出上限为剩余 Token 预算与 2048 的较小值，多篇/多列结果过长可能因结构不完整而校验失败。表格恰好覆盖所有选定论文；每个非空研究内容单元格必须引用本行论文的有效原文，服务端统一生成 C 编号后与正文、引用、usage 和成功状态原子写入。引用来源一致只证明可追溯，不等于语义正确性已获得人工验收。
+
+## 9. arXiv 搜索与导入（MVP-3）
+
+### 开启步骤
+
+1. 启动 Docker Desktop，等引擎就绪。先按第 1 节启动 PostgreSQL；已有数据库先备份，再运行 `uv run --locked alembic upgrade head` 和 `uv run --locked alembic check`，确认 revision 为 `20261112_0002`。不要执行 schema.sql 或删除数据卷。
+2. 只在本地 `backend/.env` 设置 `ARXIV_ENABLED=true`，并将 `ARXIV_CONTACT_EMAIL` 填为你自己的有效联系邮箱；不要把邮箱/配置文件提交 Git。首次配置才复制 `.env.example`，不要覆盖现有配置。无需填写任何模型密钥。
+3. 重启 API，让它读取新配置。在独立终端启动导入 Worker，另一个终端保持 Parser Worker 运行；所有进程共用 DATABASE_URL 和 STORAGE_ROOT：
+
+```powershell
+cd backend
+uv run --locked python -m app.import_worker
+```
+
+```powershell
+cd backend
+uv run --locked python -m app.parser_worker
+```
+
+4. 打开前端 `/papers/search`，提交一次小范围关键词搜索，选择一个带明确 `vN` 的结果导入。等待「已导入 · 可用于研究」，在论文库核对来源、PDF、页数并进入任务预选。不要连续刷新来源；429 时等倒计时结束再手动操作。Import Worker 未启动时保持「等待导入」，Parser 未启动时保持「已导入 · 正在解析」。
+5. 需要查看任务产物时继续运行 Mock Worker（无需模型）或单独配置真实 Runner；Mock 结果不代表论文结论。关闭联网只需设 `ARXIV_ENABLED=false`、重启 API 并停止 Import Worker；历史和手动上传不受影响。
+
+### 实现与限制
+
+- 搜索只访问固定官方 HTTPS API；PDF 只允许同版本官方路径和最多 2 次受控重定向，不接收客户端 URL、代理或下载路径。查询最多 200 字符/20 词、每页最多 20 篇、offset 至多 1000。
+- 搜索缓存仅保存上游成功元数据，600 秒/100 页；每次查询重新投影本地导入和解析状态。来源关闭或缺少邮箱返回 `503 ARXIV_NOT_CONFIGURED`，读取历史不要求联网配置。
+- API 和所有 Import Worker 共用数据库许可：一次一个来源请求，完成后至少 3 秒，429/503 应用 Retry-After。Worker 首次等待许可受 180 秒总尝试限制；取得许可后元数据预算 20 秒，PDF 含重定向/后续许可等待共用 90 秒，读/连超时各 5 秒，PDF 最大 20 MiB。
+- 网络在最小环境的独立子进程运行；父进程可终止超时/取消请求，子进程也有独立总时限 watchdog，避免父进程异常后连接跨越 120 秒许可租约。此为本机 MVP 防护，不是 OS 级内存/CPU/权限沙箱。
+- 导入 lease 30 秒/心跳 10 秒；同一版本始终复用一条导入记录。普通 POST 不重试失败，显式重试必须携带 `expected_attempt`；响应丢失后的重放不增加额外 attempt。
+- 下载完成才原子发布 Paper(uploaded)、PaperSource 和导入成功，随后由现有解析器独立处理。导入不会生成研究产物/引用，也不按文件 hash 合并手动上传。
+- 回滚清理、超时恢复和提交结果核对都通过 Import 行锁/attempt fencing 保护；不确定事务结果时保留最终文件，等待恢复，不删除可能已被成功论文引用的 PDF。不得手工重用 UUID 路径。
+
+### 验收边界
+
+2026-11-12 已在隔离 PGlite 检查旧结构升级、降级保护、三表约束、ORM/迁移/DDL 等价、共享访问许可、缓存、导入 API、Worker/解析器、重试重放和事务/文件补偿。真实子进程测试覆盖大小/安全 URL/超时/停止/父监督缺失；浏览器使用受控夹具验证搜索状态及完整独立进程闭环。
+
+2026-11-13 用户在独立 PostgreSQL 17.6 验收库完成 head 迁移、无结构漂移检查及八组原生多进程/行锁/恢复/共享许可专项验收。随后真实搜索一次、导入 `2512.19700v1`，重复提交复用同一记录且 attempt=1；独立 Import Worker 完成下载，Parser Worker 将本地 PDF 解析为 ready（9 页）。用户同时确认前端历史恢复、来源与本地 PDF 访问、论文预选、Mock 任务成功及结果刷新恢复。上述证据来自用户提供的输出和人工确认，未由代理独立重跑；详细标识与记录见 `../docs/superpowers/plans/2026-11-12-mvp-3-arxiv-search-import.md`。
+
+原生验收覆盖八组专项场景，不代表此前全部 PGlite 故障注入均已在原生环境重跑。真实来源验收仅覆盖一次搜索和一个版本下载，不代表真实上游限流、重定向或故障已被人工触发。Mock 结果不代表论文结论；MVP-2.1 的真实模型验证仍独立待办。

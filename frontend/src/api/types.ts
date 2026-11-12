@@ -9,6 +9,7 @@ export interface ResourceError {
 }
 
 export interface Paper {
+  source: PaperSource | null;
   id: string;
   title: string;
   original_filename: string;
@@ -21,6 +22,44 @@ export interface Paper {
   error: ResourceError | null;
   created_at: string;
   updated_at: string;
+}
+
+export interface PaperSource {
+  provider: 'arxiv';
+  external_id: string;
+  title: string;
+  authors: string[];
+  abstract: string;
+  doi: string | null;
+  categories: string[];
+  published_at: string;
+  source_updated_at: string;
+  abstract_url: string;
+  pdf_url: string;
+}
+
+export type ImportStatus = 'queued' | 'running' | 'succeeded' | 'failed';
+
+export interface PaperImport {
+  id: string;
+  provider: 'arxiv';
+  external_id: string;
+  attempt: number;
+  status: ImportStatus;
+  paper_id: string | null;
+  paper_status: PaperStatus | null;
+  error: ResourceError | null;
+  created_at: string;
+  updated_at: string;
+  started_at: string | null;
+  finished_at: string | null;
+}
+
+export interface SearchPaper extends PaperSource {
+  import_id: string | null;
+  import_status: ImportStatus | null;
+  paper_id: string | null;
+  paper_status: PaperStatus | null;
 }
 
 export interface Page<T> {

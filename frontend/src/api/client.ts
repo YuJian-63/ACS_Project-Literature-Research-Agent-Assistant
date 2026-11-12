@@ -1,5 +1,5 @@
 import axios, { type AxiosRequestConfig } from 'axios';
-import type { Artifact, EventPage, Page, Paper, PaperStatus, Task, TaskAccepted, TaskCreate, TaskStatus, TaskSummary, TaskType } from './types';
+import type { Artifact, EventPage, Page, Paper, PaperImport, PaperStatus, SearchPaper, Task, TaskAccepted, TaskCreate, TaskStatus, TaskSummary, TaskType } from './types';
 
 const baseURL = (import.meta.env.VITE_API_BASE_URL || '').replace(/\/$/, '');
 const client = axios.create({ baseURL, timeout: 30000 });
@@ -9,6 +9,7 @@ export class ApiError extends Error {
   readonly requestId: string | null;
   readonly status: number | null;
   readonly details: Record<string, unknown>;
+  retryAfterSeconds: number | null = null;
 
   constructor(message: string, code = 'NETWORK_ERROR', status: number | null = null, requestId: string | null = null, details: Record<string, unknown> = {}) {
     super(message);
@@ -31,13 +32,16 @@ export function asApiError(error: unknown): ApiError {
     const message = typeof resourceError?.message === 'string'
       ? resourceError.message
       : error.response ? `请求未成功（HTTP ${error.response.status}），请重试。` : '无法连接后端或请求超时，请检查服务后重试。';
-    return new ApiError(
+    const result = new ApiError(
       message,
       typeof resourceError?.code === 'string' ? resourceError.code : 'NETWORK_ERROR',
       error.response?.status ?? null,
       typeof error.response?.headers['x-request-id'] === 'string' ? error.response.headers['x-request-id'] : null,
       resourceError?.details && typeof resourceError.details === 'object' && !Array.isArray(resourceError.details) ? resourceError.details : {},
     );
+    const retryAfter = Number(error.response?.headers['retry-after']);
+    if (Number.isFinite(retryAfter) && retryAfter > 0) result.retryAfterSeconds = Math.min(86400, Math.max(3, retryAfter));
+    return result;
   }
   return new ApiError('请求未完成，请重试。', 'CLIENT_ERROR');
 }
@@ -52,6 +56,15 @@ async function request<T>(configuration: AxiosRequestConfig): Promise<T> {
 }
 
 export const api = {
+  searchPapers: (parameters: { q: string; limit: number; offset: number }, signal: AbortSignal) =>
+    request<Page<SearchPaper>>({ url: '/api/v1/paper-search', params: parameters, signal }),
+  imports: (parameters: { limit?: number; offset?: number }, signal: AbortSignal) =>
+    request<Page<PaperImport>>({ url: '/api/v1/paper-imports', params: parameters, signal }),
+  paperImport: (id: string, signal: AbortSignal) => request<PaperImport>({ url: `/api/v1/paper-imports/${encodeURIComponent(id)}`, signal }),
+  importPaper: (external_id: string, signal: AbortSignal) =>
+    request<PaperImport>({ url: '/api/v1/paper-imports', method: 'POST', data: { provider: 'arxiv', external_id }, signal }),
+  retryImport: (id: string, expected_attempt: number, signal: AbortSignal) =>
+    request<PaperImport>({ url: `/api/v1/paper-imports/${encodeURIComponent(id)}/retry`, method: 'POST', data: { expected_attempt }, signal }),
   papers: (parameters: { limit?: number; offset?: number; q?: string; status?: PaperStatus }, signal: AbortSignal) =>
     request<Page<Paper>>({ url: '/api/v1/papers', params: parameters, signal }),
   paper: (id: string, signal: AbortSignal) => request<Paper>({ url: `/api/v1/papers/${encodeURIComponent(id)}`, signal }),

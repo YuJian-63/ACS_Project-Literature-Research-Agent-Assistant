@@ -1,6 +1,6 @@
 # Literature Research Agent Assistant — API 契约
 
-版本：v1 · 更新日期：2026-11-12。已实现 API/Mock Worker、独立 PDF Parser、真实摘要/问答 Runner 和多论文综述；不表示实际模型服务或原生 PostgreSQL 已验收。第 10 节为 MVP-3 待实现契约，不代表当前已有对应接口。启动方式见 `backend/README.md`。
+版本：v1 · 更新日期：2026-11-13。已实现 API/Mock Worker、独立 PDF Parser、真实摘要/问答 Runner、多论文综述及第 10 节 arXiv 搜索/导入接口。用户已完成 MVP-3 的隔离原生 PostgreSQL 八组专项验收、真实 arXiv 单版本搜索/下载/解析及浏览器 Mock 任务闭环；详细证据范围见实施记录，实际模型服务验收仍待完成。启动方式见 `backend/README.md`。
 
 需求依据：`docs/Proposal.md` 第 2、3 节。数据库设计见 `docs/database-design.md`，参考 DDL 见 `backend/sql/schema.sql`。
 
@@ -14,7 +14,7 @@
 - 所有响应返回 UUID 格式的 `X-Request-ID`，用于定位日志，不用于鉴权。
 - 普通列表默认 `limit=20, offset=0`；limit 为 1—100，offset 非负；按 `created_at DESC, id DESC` 排序，不保证跨请求快照一致。
 - 创建论文返回 201，创建异步任务返回 202；错误统一采用第 8 节的结构。
-- 当前不提供删除、取消、研究任务原地重试、外部论文搜索、SSE 或模型配置写入接口；计划新增的搜索和导入重试见第 10 节。
+- 当前不提供删除、取消、研究任务原地重试、SSE 或模型配置写入接口；arXiv 搜索和导入显式重试见第 10 节，默认关闭联网。
 
 | 阶段 | 范围 |
 | --- | --- |
@@ -22,7 +22,7 @@
 | MVP-1A | 本地文本 PDF 解析、按物理页码保存片段、摘要/问答/综述任务前置要求解析就绪 |
 | MVP-1B | 真实 Runner、证据引用校验与摘要/问答 |
 | MVP-2 | 已实现跨论文综述与比较；不包含搜索或扩展工作流 |
-| MVP-3 | 待实现：arXiv 单源搜索、指定版本 PDF 导入与解析闭环 |
+| MVP-3 | 已实现 arXiv 单源搜索、指定版本 PDF 导入与解析；外部服务验收待配置 |
 
 `extended` 是保留枚举，当前返回 `422 WORKFLOW_NOT_AVAILABLE`。`is_mock` 由服务端 TASK_RUNNER 配置决定，不能由请求指定；默认 mock，langgraph 提供真实摘要、问答和多论文综述；搜索/导入不调用模型。
 
@@ -424,9 +424,9 @@ FastAPI 默认校验异常也必须转换为相同格式，不能遗留第二种
 
 FastAPI 实现阶段从 Pydantic 生成 OpenAPI，并逐项核对本文，不同时手工维护另一份易漂移的 OpenAPI。
 
-## 10. MVP-3：arXiv 搜索与导入（待实现）
+## 10. MVP-3：arXiv 搜索与导入
 
-本节为开发契约，不代表 API 已实现。限流、安全、补偿与 UI 细节见 `docs/superpowers/specs/2026-11-12-mvp-3-arxiv-search-import.md`。
+本节接口已实现。2026-11-13 用户完成隔离原生 PostgreSQL 专项验收及真实 arXiv 单版本搜索/导入/解析与 Mock 任务闭环；证据范围见 `docs/superpowers/plans/2026-11-12-mvp-3-arxiv-search-import.md`。限流、安全、补偿与 UI 细节见 `docs/superpowers/specs/2026-11-12-mvp-3-arxiv-search-import.md`。
 
 ### 10.1 类型与版本身份
 

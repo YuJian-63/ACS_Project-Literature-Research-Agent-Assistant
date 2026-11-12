@@ -17,7 +17,7 @@ from sqlalchemy import (
     text,
 )
 from sqlalchemy.dialects.postgresql import JSONB
-from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base, CreatedAt, UpdatedAt, UUIDPrimaryKey
 
@@ -39,6 +39,8 @@ class Paper(UUIDPrimaryKey, CreatedAt, UpdatedAt, Base):
     error_code: Mapped[str | None] = mapped_column(String(64))
     error_message: Mapped[str | None] = mapped_column(Text)
     error_details: Mapped[dict[str, Any] | None] = mapped_column(JSONB(none_as_null=True))
+
+    source: Mapped["PaperSource | None"] = relationship(lazy="selectin", uselist=False)
 
     __table_args__ = (
         CheckConstraint("length(btrim(title)) > 0"),
@@ -290,4 +292,93 @@ class Citation(UUIDPrimaryKey, CreatedAt, Base):
         ),
         Index("citations_chunk_idx", "chunk_id", "paper_id", "page_number"),
         Index("citations_task_paper_idx", "task_id", "paper_id"),
+    )
+
+
+ARXIV_SOURCE_ID = r"^([0-9]{2}(0[1-9]|1[0-2])\.[0-9]{4,5}|[a-z][a-z-]*(\.[A-Z]{2})?/[0-9]{2}(0[1-9]|1[0-2])[0-9]{3})v[1-9][0-9]*$"
+
+
+class PaperSource(UUIDPrimaryKey, CreatedAt, Base):
+    __tablename__ = "paper_sources"
+
+    paper_id: Mapped[UUID] = mapped_column(ForeignKey("papers.id", ondelete="RESTRICT"), unique=True)
+    provider: Mapped[str] = mapped_column(Text)
+    external_id: Mapped[str] = mapped_column(String(80))
+    source_metadata: Mapped[dict[str, Any]] = mapped_column("metadata", JSONB)
+
+    __table_args__ = (
+        CheckConstraint("provider = 'arxiv'"),
+        CheckConstraint(f"external_id ~ '{ARXIV_SOURCE_ID}'"),
+        CheckConstraint("jsonb_typeof(metadata) = 'object'"),
+        UniqueConstraint("provider", "external_id", name="paper_sources_identity"),
+    )
+
+
+class PaperImport(UUIDPrimaryKey, CreatedAt, UpdatedAt, Base):
+    __tablename__ = "paper_imports"
+
+    provider: Mapped[str] = mapped_column(Text)
+    external_id: Mapped[str] = mapped_column(String(80))
+    attempt: Mapped[int] = mapped_column(Integer, server_default=text("1"))
+    status: Mapped[str] = mapped_column(Text, server_default="queued")
+    paper_id: Mapped[UUID | None] = mapped_column(ForeignKey("papers.id", ondelete="RESTRICT"), unique=True)
+    worker_id: Mapped[UUID | None]
+    lease_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    error_code: Mapped[str | None] = mapped_column(String(64))
+    error_message: Mapped[str | None] = mapped_column(Text)
+    error_details: Mapped[dict[str, Any] | None] = mapped_column(JSONB(none_as_null=True))
+
+    __table_args__ = (
+        CheckConstraint("provider = 'arxiv'"),
+        CheckConstraint(f"external_id ~ '{ARXIV_SOURCE_ID}'"),
+        CheckConstraint("attempt > 0"),
+        CheckConstraint("status IN ('queued', 'running', 'succeeded', 'failed')"),
+        UniqueConstraint("provider", "external_id", name="paper_imports_identity"),
+        CheckConstraint(
+            "(status = 'succeeded' AND paper_id IS NOT NULL AND paper_id = id) "
+            "OR (status <> 'succeeded' AND paper_id IS NULL)", name="paper_imports_result",
+        ),
+        CheckConstraint(
+            "(status = 'queued' AND worker_id IS NULL AND lease_expires_at IS NULL AND started_at IS NULL AND finished_at IS NULL) "
+            "OR (status = 'running' AND worker_id IS NOT NULL AND lease_expires_at IS NOT NULL AND started_at IS NOT NULL AND finished_at IS NULL) "
+            "OR (status IN ('succeeded', 'failed') AND worker_id IS NULL AND lease_expires_at IS NULL AND started_at IS NOT NULL AND finished_at IS NOT NULL)",
+            name="paper_imports_execution",
+        ),
+        CheckConstraint(
+            "(status = 'failed' AND error_code IS NOT NULL AND length(btrim(error_code)) > 0 "
+            "AND error_message IS NOT NULL AND length(btrim(error_message)) > 0 "
+            "AND error_details IS NOT NULL AND jsonb_typeof(error_details) = 'object' "
+            "AND error_details ? 'retryable' AND jsonb_typeof(error_details->'retryable') = 'boolean') "
+            "OR (status <> 'failed' AND error_code IS NULL AND error_message IS NULL AND error_details IS NULL)",
+            name="paper_imports_errors",
+        ),
+        CheckConstraint(
+            "updated_at >= created_at AND (started_at IS NULL OR started_at >= created_at) "
+            "AND (finished_at IS NULL OR finished_at >= started_at) "
+            "AND (lease_expires_at IS NULL OR lease_expires_at > started_at)", name="paper_imports_times",
+        ),
+        Index("paper_imports_created_idx", text("created_at DESC"), text("id DESC")),
+        Index("paper_imports_status_created_idx", "status", text("created_at DESC"), text("id DESC")),
+        Index("paper_imports_queue_idx", "created_at", "id", postgresql_where=text("status = 'queued'")),
+        Index("paper_imports_expired_lease_idx", "lease_expires_at", postgresql_where=text("status = 'running'")),
+    )
+
+
+class SourceRequestGate(Base):
+    __tablename__ = "source_request_gates"
+
+    provider: Mapped[str] = mapped_column(Text, primary_key=True)
+    next_allowed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=text("now()"))
+    owner_id: Mapped[UUID | None]
+    lease_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    blocked_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+    __table_args__ = (
+        CheckConstraint("provider = 'arxiv'"),
+        CheckConstraint(
+            "(owner_id IS NULL AND lease_expires_at IS NULL) OR (owner_id IS NOT NULL AND lease_expires_at IS NOT NULL)",
+            name="source_request_gates_owner",
+        ),
     )
