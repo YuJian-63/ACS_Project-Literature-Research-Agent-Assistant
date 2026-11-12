@@ -1,6 +1,6 @@
 # Literature Research Agent Assistant — API 契约
 
-版本：v1 · 更新日期：2026-11-11。本文供前端、应用后端和 Agent 集成使用。MVP-0 API、Mock Worker 与 MVP-1A 独立 PDF Parser Worker 已实现，启动方式见 `backend/README.md`；不表示服务已部署，也不表示 Agent 已实现。
+版本：v1 · 更新日期：2026-11-12。已实现 API/Mock Worker、独立 PDF Parser、真实摘要/问答 Runner 和多论文综述；不表示实际模型服务或原生 PostgreSQL 已验收。第 10 节为 MVP-3 待实现契约，不代表当前已有对应接口。启动方式见 `backend/README.md`。
 
 需求依据：`docs/Proposal.md` 第 2、3 节。数据库设计见 `docs/database-design.md`，参考 DDL 见 `backend/sql/schema.sql`。
 
@@ -14,16 +14,17 @@
 - 所有响应返回 UUID 格式的 `X-Request-ID`，用于定位日志，不用于鉴权。
 - 普通列表默认 `limit=20, offset=0`；limit 为 1—100，offset 非负；按 `created_at DESC, id DESC` 排序，不保证跨请求快照一致。
 - 创建论文返回 201，创建异步任务返回 202；错误统一采用第 8 节的结构。
-- 首版不提供删除、取消、原地重试、外部论文搜索、SSE 或模型配置写入接口。
+- 当前不提供删除、取消、研究任务原地重试、外部论文搜索、SSE 或模型配置写入接口；计划新增的搜索和导入重试见第 10 节。
 
 | 阶段 | 范围 |
 | --- | --- |
 | MVP-0 | 上传 PDF、持久化任务、Mock Runner、轮询、明确标注的模拟结果 |
 | MVP-1A | 本地文本 PDF 解析、按物理页码保存片段、摘要/问答/综述任务前置要求解析就绪 |
 | MVP-1B | 真实 Runner、证据引用校验与摘要/问答 |
-| MVP-2 | 搜索、跨论文综述与比较、扩展工作流 |
+| MVP-2 | 已实现跨论文综述与比较；不包含搜索或扩展工作流 |
+| MVP-3 | 待实现：arXiv 单源搜索、指定版本 PDF 导入与解析闭环 |
 
-`extended` 是保留的合法工作流枚举，当前返回 `422 WORKFLOW_NOT_AVAILABLE`。`is_mock` 由服务器端 `TASK_RUNNER` 配置决定，不能由请求指定；默认 `mock`，设为 `langgraph` 时仅提供真实摘要和问答。
+`extended` 是保留枚举，当前返回 `422 WORKFLOW_NOT_AVAILABLE`。`is_mock` 由服务端 TASK_RUNNER 配置决定，不能由请求指定；默认 mock，langgraph 提供真实摘要、问答和多论文综述；搜索/导入不调用模型。
 
 ## 2. 资源与状态
 
@@ -422,3 +423,82 @@ FastAPI 默认校验异常也必须转换为相同格式，不能遗留第二种
 首批验收覆盖上传异常、论文数量/状态、幂等并发、无 Worker 时保持 queued、租约失败、产物与成功原子提交、刷新恢复、事件游标、Mock 标识及空引用、跨论文/错页引用拒绝、统一错误格式。
 
 FastAPI 实现阶段从 Pydantic 生成 OpenAPI，并逐项核对本文，不同时手工维护另一份易漂移的 OpenAPI。
+
+## 10. MVP-3：arXiv 搜索与导入（待实现）
+
+本节为开发契约，不代表 API 已实现。限流、安全、补偿与 UI 细节见 `docs/superpowers/specs/2026-11-12-mvp-3-arxiv-search-import.md`。
+
+### 10.1 类型与版本身份
+
+- provider 固定 arxiv；external_id 最长 80 字符，必须带明确正整数 vN，支持新旧标识；拒绝 URL、无版本 ID、路径/查询注入。
+- 时间、UUID、未知字段处理沿用基本约定。搜索结果不等于 Paper，未下载前不进入可研究论文库。
+- PaperResponse 增加 `source: PaperSource | null`，手动上传为 null。PaperSource 为 provider/external_id/title/authors/abstract/doi/categories/published_at/source_updated_at/abstract_url/pdf_url；链接由服务端从 ID 生成。
+- 元数据上限：title 2000 字符、abstract 20000、authors 200 项/每项 300、categories 50 项/每项 64、doi 可空/512。拒绝 NUL/无效 UTF-8；数组可空，title/作者项/分类项须非空，abstract 可空字符串。
+
+### GET /api/v1/paper-search
+
+q 必填，规范化后 1—200 字符/最多 20 词，普通关键词而非原始高级语法。limit 默认 10/范围 1—20；offset 默认 0/范围 0—1000。不接受上游 URL/provider/排序。
+
+200：`{items: SearchPaper[], total: number, limit: number, offset: number}`。SearchPaper 为 PaperSource 加可空 import_id/import_status/paper_id/paper_status。import_status 为 queued/running/succeeded/failed；paper_status 为既有 PaperStatus。total 是上游本次报告，不保证跨页快照。
+
+成功上游数据缓存 600 秒/每进程最多 100 页，本地导入/解析投影每次重查。无匹配返回空数组和 total=0；offset 越过结果末尾时 items=[]，但保留上游 total。上游错误不能伪装空结果。
+
+### POST /api/v1/paper-imports
+
+请求：`{"provider":"arxiv","external_id":"1706.03762v7"}`。不接受客户端元数据、URL 或 storage_key。
+
+按版本自然键创建/复用，不在提交时下载。queued/running 返回 202，已 succeeded/failed 返回 200，均为 PaperImport。无需 Idempotency-Key；普通重复 POST 不能重试 failed 或生成重复 Paper；不同版本独立。
+
+```json
+{
+  "id": "12c45b4d-01db-4e7b-88dd-9a03ba749ff1",
+  "provider": "arxiv",
+  "external_id": "1706.03762v7",
+  "attempt": 1,
+  "status": "queued",
+  "paper_id": null,
+  "paper_status": null,
+  "error": null,
+  "created_at": "2026-11-12T18:00:00Z",
+  "updated_at": "2026-11-12T18:00:00Z",
+  "started_at": null,
+  "finished_at": null
+}
+```
+
+仅 succeeded 有 paper_id；paper_status 是关联 Paper 当前状态。下载成功/解析失败仍 Import succeeded、Paper failed；错误由 Paper 详情获取，禁止用导入重试覆盖文件。内部 worker/lease/路径不公开。
+
+### GET /api/v1/paper-imports
+
+limit 默认 20/范围 1—100，offset 默认 0/非负，可选 status。返回 Page<PaperImport>，created_at DESC/id DESC；供刷新后恢复。
+
+### GET /api/v1/paper-imports/{import_id}
+
+200 为 PaperImport；不存在返回 404 PAPER_IMPORT_NOT_FOUND。
+
+### POST /api/v1/paper-imports/{import_id}/retry
+
+请求 `{"expected_attempt":1}`，必须严格正整数，不接受 bool/额外字段。
+
+- failed、attempt 匹配且 error.details.retryable=true：原子 attempt+1，清除旧执行信息回 queued，202。
+- 已是 expected_attempt+1：重放当前记录，queued/running 为 202、终态为 200；即使已再次失败也不重入队。
+- 其他冲突 409 IMPORT_RETRY_CONFLICT；非可重试失败 409 IMPORT_NOT_RETRYABLE；不存在 404。
+- 不修改研究 Task 重试规则；Worker 不自动重试网络或失效执行。
+
+### 10.2 配置、错误与轮询
+
+ARXIV_ENABLED 默认 false，启用必须配置 ARXIV_CONTACT_EMAIL。搜索/新提交/重试未启用或配置不全返回 503 ARXIV_NOT_CONFIGURED；历史导入/论文读取不依赖上游。
+
+| 情况 | HTTP / code |
+| --- | --- |
+| 输入不合法 | 422 INVALID_REQUEST |
+| 共享许可忙碌/上游限流 | 429 ARXIV_RATE_LIMITED |
+| 上游网络/服务失败 | 502 ARXIV_UNAVAILABLE |
+| 非法上游响应 | 502 ARXIV_INVALID_RESPONSE |
+| 搜索总超时 | 504 ARXIV_TIMEOUT |
+
+HTTP 错误沿用第 8 节 envelope；429 带整数秒 Retry-After 和相同 details.retry_after_seconds，不自动循环请求。
+
+已接收导入的执行失败返回 status=failed/error：ARXIV_NOT_FOUND、ARXIV_VERSION_MISMATCH、ARXIV_RATE_LIMITED、ARXIV_UNAVAILABLE、ARXIV_INVALID_RESPONSE、ARXIV_TIMEOUT、UNSAFE_SOURCE_URL、FILE_TOO_LARGE、INVALID_PDF、STORAGE_WRITE_FAILED、IMPORT_TIMEOUT、IMPORT_LEASE_EXPIRED、IMPORT_WORKER_STOPPED。details.retryable 必须为 boolean：暂时网络/服务/限流/超时/存储及 Worker 中断 true；不存在/版本不符/非法响应/不安全 URL/超限/非法 PDF false。错误不回显上游正文或内部路径。
+
+前端对 queued/running 每 2 秒轮询，终态停止；成功后跟踪 Paper 解析。失败仅 retryable=true 可重试。元数据作为纯文本显示，真正 ready 才允许真实研究任务。

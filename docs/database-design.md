@@ -1,6 +1,6 @@
 # 后端数据库设计
 
-版本：v1 · 更新日期：2026-11-10。需求依据：`docs/Proposal.md`；接口对应 `docs/api-contract.md`；可执行参考 DDL：`backend/sql/schema.sql`。
+版本：v1 · 更新日期：2026-11-12。需求依据：`docs/Proposal.md`；接口对应 `docs/api-contract.md`；当前参考 DDL：`backend/sql/schema.sql`。第 9 节为 MVP-3 待实施增量设计，不表示新表/迁移已存在。
 
 本文记录数据设计；应用通过 backend/alembic 的版本迁移建库，backend/sql/schema.sql 保留作结构对照。模型和迁移已落地，操作说明见 backend/README.md；未连接现有业务数据库。
 
@@ -275,3 +275,58 @@ schema.sql 不含凭据、演示业务数据或扩展安装命令；只在新建
 - SELECT 行锁与队列用法：`https://www.postgresql.org/docs/17/sql-select.html`
 - 原生 UUID 函数：`https://www.postgresql.org/docs/17/functions-uuid.html`
 - PGlite 的 PostgreSQL WASM 引擎：`https://pglite.dev/docs/`
+
+## 9. MVP-3 来源与导入增量设计（待实现）
+
+计划 revision 20261112_0002，down_revision=20261110_0001；新增三表，不改变原七表历史、Paper 四态、来源 hash 外键或手动重复上传规则。实施前 ORM/DDL/迁移仍为原结构；实施时更新参考 DDL 为 head，不重写初始 revision。
+
+### 9.1 paper_sources：已保存 PDF 的来源
+
+| 字段 | 类型/约束 |
+| --- | --- |
+| id | uuid PK |
+| paper_id | uuid 非空唯一，FK papers(id) ON DELETE RESTRICT |
+| provider | text 非空，CHECK ='arxiv' |
+| external_id | varchar(80) 非空，带版本规范 ID，与 provider 联合唯一 |
+| metadata | jsonb 非空对象，服务层验证 title/authors/abstract/doi/categories/published_at/source_updated_at |
+| created_at | timestamptz 非空 |
+
+不保存任意 URL，链接由 ID 生成；DOI 不唯一；新旧 ID 的版本语法由 DB CHECK 与服务层验证。完整标题最多 2000 字符，Paper.title 为前 255 字符。JSON 外层由 DB 检查，具体字段/长度/UTF-8/NUL 由服务层验证。手动上传无 Source。来源只在 PDF 完成事务创建，之后不原地改写；研究任务仍固定 Paper/SHA-256。
+
+### 9.2 paper_imports：持久化状态与重试
+
+| 字段 | 类型/约束 |
+| --- | --- |
+| id | uuid PK，成功 Paper 使用同一 UUID |
+| provider, external_id | 同上，联合唯一，失败重试保持同一记录 |
+| attempt | integer 非空默认 1，>0 |
+| status | text，queued/running/succeeded/failed |
+| paper_id | uuid 可空唯一，FK papers(id) ON DELETE RESTRICT；仅 succeeded 非空且等于 id |
+| worker_id, lease_expires_at | uuid/timestamptz，仅 running 同时非空 |
+| started_at, finished_at | queued 均空，running 仅 started 非空，终态均非空 |
+| error_code, error_message, error_details | 仅 failed 非空；details 为对象且 retryable 为 boolean |
+| created_at, updated_at | timestamptz 非空；updated>=created，执行时间不早于 created，finished>=started |
+
+queued/running/failed 无 paper_id，非 failed 无错误。索引：created_at DESC/id DESC、status/created_at/id、queued partial queue、running lease-expiry partial index。来源唯一键用于去重。
+
+重试锁行并以 expected_attempt CAS，failed/retryable 才 attempt+1/清空旧执行字段；已到 expected_attempt+1 只重放，不重新下载。旧 Worker 写回检查 owner/attempt/运行态/有效租约。
+
+### 9.3 source_request_gates：跨进程上游许可
+
+| 字段 | 类型/约束 |
+| --- | --- |
+| provider | text PK，CHECK ='arxiv'，迁移初始化一行 |
+| next_allowed_at | timestamptz 非空，下次允许请求的数据库时间 |
+| owner_id, lease_expires_at | uuid/timestamptz，同空或同非空，owner 是每次许可 token |
+| blocked_until | timestamptz 可空，上游共享冷却期限 |
+
+短事务锁行；间隔/冷却满足且无有效 owner 时授予。过期许可额外留 3 秒再回收；连接关闭后匹配 token 释放，将 next_allowed_at 推进至至少 DB 当前时间+3 秒。许可 120 秒；元数据/PDF 总时限 20/90 秒且必须可终止；冷却取较晚期限。不得跨 HTTP 持行锁。
+
+### 9.4 原子性、补偿与验收
+
+- 并发提交依赖来源自然键唯一约束；冲突后回滚、开启新事务重查。
+- 同事务创建 Paper uploaded、Source、Import succeeded，Parser 提交后才可见；解析失败不改写导入成功。
+- 文件系统不是 DB 原子事务：受控 staging/fsync、固定 UUID、fencing 和对账。commit 不确定保留文件；仅确认回滚/无引用/无活动拥有者时清理，禁止盲删获胜文件。
+- Import SKIP LOCKED 领取、租约 30 秒/心跳 10 秒/总时限 180 秒，失效置 failed，仅显式重试回 queued。
+- downgrade 存在 Source/Import 时拒绝，不能静默丢来源；空增量表可撤销三表，不触碰原业务表。
+- 验收升级/回退/老数据保留、唯一键/FK/状态、并发去重/共享 gate、retry 重放、fencing/回滚/不确定提交；PGlite 与原生 PostgreSQL 多连接/进程证据分开报告。
