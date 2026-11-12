@@ -170,10 +170,12 @@ def complete_real(
         if input_tokens is not None and output_tokens is not None and input_tokens + output_tokens > task.max_tokens:
             mark_failed(session, task, now, "BUDGET_EXCEEDED", "模型用量超过任务 Token 预算")
             return False
-        title = "论文摘要" if task.task_type == "summary" else "论文问答"
+        if (task.task_type == "review") != (result.comparison_table is not None):
+            raise ValueError("Comparison table does not match the task type")
+        title = {"summary": "论文摘要", "qa": "论文问答", "review": "论文综述"}[task.task_type]
         artifact = Artifact(
             task_id=task.id, title=title, content_markdown=result.content_markdown,
-            comparison_table=None, created_at=now,
+            comparison_table=result.comparison_table, created_at=now,
         )
         session.add(artifact)
         session.flush()

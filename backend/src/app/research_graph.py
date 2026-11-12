@@ -11,6 +11,7 @@ class ResearchState(TypedDict, total=False):
     task_type: str
     question: str | None
     evidence: list[EvidenceChunk]
+    selected_papers: list[dict[str, str]]
     model_id: str
     max_tokens: int
     timeout_seconds: float
@@ -30,7 +31,8 @@ def build_research_graph(model: ChatModel):
             }
             return {"output": json.dumps(payload, ensure_ascii=False), "input_tokens": 0, "output_tokens": 0, "model_calls": 0}
         completion = model.complete(
-            build_messages(state["task_type"], state.get("question"), evidence),
+            build_messages(state["task_type"], state.get("question"), evidence,
+                           selected_papers=state.get("selected_papers")),
             model_id=state["model_id"],
             max_tokens=state["max_tokens"],
             timeout_seconds=state.get("timeout_seconds", 60),

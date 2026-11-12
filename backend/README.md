@@ -1,6 +1,6 @@
 # 后端开发
 
-当前已实现 MVP-0 API/Mock Worker、MVP-1A 文本 PDF Parser Worker，以及 MVP-1B 真实摘要/问答 Runner。真实 Runner 使用可替换的模型接口和证据引用校验；尚未实现 OCR、review/跨论文综述或联网搜索。真实模型服务需单独配置，不代表本地已接入外部模型。接口规范见 `../docs/api-contract.md`。
+当前已实现 MVP-0 API/Mock Worker、MVP-1A 文本 PDF Parser Worker、MVP-1B 真实摘要/问答 Runner，以及 MVP-2 多论文综述与比较表。真实 Runner 使用可替换的模型接口和证据引用校验；尚未实现 OCR 或联网搜索。真实模型服务需单独配置，不代表本地已接入外部模型。接口规范见 `../docs/api-contract.md`。
 
 ## 1. 首次启动
 
@@ -46,7 +46,7 @@ Linux/macOS 将复制命令替换为 `cp .env.example .env`。其他命令相同
 | TASK_MONITOR_ENABLED | 默认 true；API 启动时及每 10 秒恢复过期任务，Worker 也运行独立恢复监控 |
 | MOCK_STEP_DELAY_SECONDS | 默认 0.5，范围 0—10；每个模拟步骤的等待秒数，提交时冻结到任务，不影响已有任务 |
 | PARSER_TIMEOUT_SECONDS | 默认 120 秒，范围 1—600；限制每份 PDF 的子进程解析时间，超时失败且不会保存部分片段 |
-| TASK_RUNNER | 默认 mock；可设 langgraph 选择真实摘要/问答 Runner，review 不支持 |
+| TASK_RUNNER | 默认 mock；可设 langgraph 选择真实摘要、问答及多论文综述 Runner |
 | LLM_BASE_URL / LLM_MODEL_ID / LLM_API_KEY | 真实 Runner 的 OpenAI-compatible 服务地址、模型 ID 与密钥；密钥只从环境读取 |
 | LLM_TIMEOUT_SECONDS / EVIDENCE_CONTEXT_CHARS | 单次模型调用超时与证据上下文字符上限 |
 | CORS_ORIGINS | JSON 字符串数组；默认允许 localhost:5173 和 127.0.0.1:5173，不接受逗号分隔的裸字符串 |
@@ -175,7 +175,7 @@ MVP-1A 使用 pypdf 提取文本，不运行 OCR。默认拒绝超过 500 页、
 
 ## 8. 真实 Runner（可选）
 
-默认 `TASK_RUNNER=mock`，维持模拟结果。需要运行真实摘要/问答时，在 `backend/.env` 设置 `TASK_RUNNER=langgraph`、`LLM_BASE_URL`、`LLM_MODEL_ID` 和 `LLM_API_KEY`；地址须指向 OpenAI-compatible Chat Completions 服务。`LLM_API_KEY` 只从环境读取，不写入任务或日志。真实 Runner 仅接受已解析完成的单篇论文，`review` 仍不可用。
+默认 `TASK_RUNNER=mock`，维持模拟结果。需要运行真实摘要、问答或综述时，在 `backend/.env` 设置 `TASK_RUNNER=langgraph`、`LLM_BASE_URL`、`LLM_MODEL_ID` 和 `LLM_API_KEY`；地址须指向 OpenAI-compatible Chat Completions 服务。`LLM_API_KEY` 只从环境读取，不写入任务或日志。真实 Runner 仅接受已解析完成的 ready 论文：summary/qa 一篇，review 2—20 篇且必须填写问题。
 
 保持 API 与 Parser Worker 运行，在另一个终端启动真实 Runner：
 
@@ -185,3 +185,7 @@ uv run --locked python -m app.runner_worker
 ```
 
 Mock 与真实 Runner 分别领取对应队列。当前没有可用远端模型凭据时，可用假模型测试逻辑，但不声称真实供应商联调已完成。
+
+综述先为每篇有片段的论文预留一个最短片段，再按问题相关度轮流追加证据，受总字符数和 32 个片段上限约束。最小覆盖无法满足时以 `BUDGET_EXCEEDED` 失败，不调用模型或写部分产物。所有论文均无片段时，不调用模型，返回明确的证据不足和逐篇证据状态表，Token/模型/工具计数均为 0。部分论文无证据时，其比较内容为 null，不编造结论。
+
+正常综述使用单次模型调用，步骤预算至少 1；输出上限为剩余 Token 预算与 2048 的较小值，多篇/多列结果过长可能因结构不完整而校验失败。表格恰好覆盖所有选定论文；每个非空研究内容单元格必须引用本行论文的有效原文，服务端统一生成 C 编号后与正文、引用、usage 和成功状态原子写入。引用来源一致只证明可追溯，不等于语义正确性已获得人工验收。

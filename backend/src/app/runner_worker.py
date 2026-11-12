@@ -18,8 +18,8 @@ from app.lifecycle import (
 )
 from app.model_client import ChatModel, ModelTimeoutError, OpenAICompatibleChatModel
 from app.research_graph import build_research_graph
-from app.result_validation import validate_result
-from app.retrieval import EvidenceChunk, build_messages, select_evidence
+from app.result_validation import evidence_insufficient_review, validate_result, validate_review_result
+from app.retrieval import EvidenceBudgetError, EvidenceChunk, build_messages, select_evidence, select_review_evidence
 
 logger = logging.getLogger(__name__)
 
@@ -38,6 +38,7 @@ class ResearchJob:
     started_at: datetime
     paper_title: str
     evidence: list[EvidenceChunk]
+    selected_papers: list[dict[str, str]]
 
 
 class TaskInputError(RuntimeError):
@@ -61,41 +62,52 @@ def load_research_job(sessions: sessionmaker[Session], task_id: UUID) -> Researc
             select(TaskPaper, Paper).join(Paper, Paper.id == TaskPaper.paper_id)
             .where(TaskPaper.task_id == task_id).order_by(TaskPaper.selection_order)
         ))
-        if len(rows) != 1:
-            raise TaskInputError("INVALID_AGENT_RESULT", "真实摘要和问答任务必须绑定一篇论文")
-        selection, paper = rows[0]
-        if paper.status != "ready":
-            raise TaskInputError("PAPER_NOT_READY", "选定论文尚未完成解析")
-        if paper.sha256 != selection.paper_sha256:
-            raise TaskInputError("PAPER_SOURCE_CHANGED", "论文文件与任务创建时不一致")
+        expected_count = 2 <= len(rows) <= 20 if task.task_type == "review" else len(rows) == 1
+        if not expected_count:
+            raise TaskInputError("INVALID_AGENT_RESULT", "任务选定论文数量不符合要求")
+        for selection, paper in rows:
+            if paper.status != "ready":
+                raise TaskInputError("PAPER_NOT_READY", "选定论文尚未完成解析")
+            if paper.sha256 != selection.paper_sha256:
+                raise TaskInputError("PAPER_SOURCE_CHANGED", "论文文件与任务创建时不一致")
+        papers = {paper.id: paper for _, paper in rows}
+        selected_papers = [{"paper_id": str(paper.id), "paper_title": paper.title} for _, paper in rows]
         chunks = list(session.scalars(
-            select(PaperChunk).where(PaperChunk.paper_id == paper.id).order_by(PaperChunk.chunk_index)
+            select(PaperChunk).where(PaperChunk.paper_id.in_(papers)).order_by(PaperChunk.paper_id, PaperChunk.chunk_index)
         ))
         evidence_source = [EvidenceChunk(
-            chunk_id=str(chunk.id), paper_id=str(paper.id), paper_title=paper.title,
+            chunk_id=str(chunk.id), paper_id=str(chunk.paper_id), paper_title=papers[chunk.paper_id].title,
             chunk_index=chunk.chunk_index, page_number=chunk.page_number, content=chunk.content,
         ) for chunk in chunks]
         run_config: dict[str, Any] = task.run_config
         if not task.model_id or not run_config.get("model_base_url"):
             raise TaskInputError("INVALID_AGENT_RESULT", "任务模型配置不可用")
-        evidence = select_evidence(
-            evidence_source, task.task_type, task.question,
-            int(run_config.get("evidence_context_chars", 24000)),
-        )
+        context_chars = int(run_config.get("evidence_context_chars", 24000))
+        if task.task_type == "review":
+            groups = {paper["paper_id"]: [] for paper in selected_papers}
+            for chunk in evidence_source:
+                groups[chunk.paper_id].append(chunk)
+            evidence = select_review_evidence(groups, task.question, context_chars)
+        else:
+            evidence = select_evidence(evidence_source, task.task_type, task.question, context_chars)
         return ResearchJob(
             task_id=task.id, task_type=task.task_type, question=task.question,
             model_id=task.model_id, model_base_url=run_config["model_base_url"],
             model_timeout_seconds=float(run_config.get("model_timeout_seconds", 60)),
             evidence_context_chars=int(run_config.get("evidence_context_chars", 24000)),
             max_tokens=task.max_tokens, timeout_seconds=task.timeout_seconds,
-            started_at=task.started_at, paper_title=paper.title, evidence=evidence,
+            started_at=task.started_at, paper_title=selected_papers[0]["paper_title"], evidence=evidence,
+            selected_papers=selected_papers,
         )
 
 
-def estimate_input_tokens(evidence: list[EvidenceChunk], task_type: str, question: str | None) -> int:
+def estimate_input_tokens(
+    evidence: list[EvidenceChunk], task_type: str, question: str | None,
+    selected_papers: list[dict[str, str]] | None = None,
+) -> int:
     if not evidence:
         return 0
-    messages = build_messages(task_type, question, evidence)
+    messages = build_messages(task_type, question, evidence, selected_papers=selected_papers)
     encoded_bytes = sum(len(message["content"].encode("utf-8")) for message in messages)
     return (encoded_bytes + 2) // 3 + 512
 
@@ -138,13 +150,19 @@ class RunnerWorker:
         thread.start()
         try:
             job = load_research_job(self.sessions, task_id)
-            estimated = estimate_input_tokens(job.evidence, job.task_type, job.question)
+            estimated = estimate_input_tokens(job.evidence, job.task_type, job.question, job.selected_papers)
             if job.evidence and estimated >= job.max_tokens:
                 fail_owned(self.sessions, task_id, self.owner, "BUDGET_EXCEEDED", "证据上下文超过任务 Token 预算")
                 return
             if not set_task_stage(self.sessions, task_id, self.owner, "retrieving", "generating", "正在生成带来源的研究结果"):
                 return
             if ownership_lost.is_set() or self.stopped.is_set():
+                return
+            if job.task_type == "review" and not job.evidence:
+                complete_real(
+                    self.sessions, task_id, self.owner, evidence_insufficient_review(job.selected_papers),
+                    input_tokens=0, output_tokens=0, model_calls=0,
+                )
                 return
             remaining = remaining_task_seconds(job.started_at, job.timeout_seconds)
             if remaining <= 0:
@@ -157,6 +175,7 @@ class RunnerWorker:
                 output = graph.invoke({
                     "task_type": job.task_type, "question": job.question,
                     "evidence": job.evidence, "model_id": job.model_id,
+                    "selected_papers": job.selected_papers,
                     "max_tokens": max(1, min(2048, job.max_tokens - estimated)),
                     "timeout_seconds": timeout,
                 })
@@ -165,7 +184,10 @@ class RunnerWorker:
             if ownership_lost.is_set() or self.stopped.is_set():
                 return
             try:
-                result = validate_result(output["output"], job.evidence)
+                result = (
+                    validate_review_result(output["output"], job.evidence, job.selected_papers)
+                    if job.task_type == "review" else validate_result(output["output"], job.evidence)
+                )
             except (KeyError, TypeError, ValueError) as error:
                 logger.warning("Runner returned invalid result: task_id=%s", task_id)
                 fail_owned(self.sessions, task_id, self.owner, "INVALID_AGENT_RESULT", "模型结果未通过证据校验")
@@ -180,6 +202,8 @@ class RunnerWorker:
                 input_tokens=input_tokens, output_tokens=output_tokens,
                 model_calls=output.get("model_calls", 1),
             )
+        except EvidenceBudgetError:
+            fail_owned(self.sessions, task_id, self.owner, "BUDGET_EXCEEDED", "上下文预算不足以覆盖所有选定论文")
         except TaskInputError as error:
             fail_owned(self.sessions, task_id, self.owner, error.code, error.message)
         except ModelTimeoutError:

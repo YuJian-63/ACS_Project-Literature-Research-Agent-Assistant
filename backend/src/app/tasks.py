@@ -48,8 +48,6 @@ def submit_task(
             if runner_type == "langgraph":
                 if not settings.real_runner_configured:
                     raise APIError(503, "RUNNER_NOT_CONFIGURED", "真实研究模型尚未配置")
-                if request.task_type not in {"summary", "qa"}:
-                    raise APIError(422, "TASK_TYPE_NOT_AVAILABLE", "真实 Runner 当前仅支持摘要和问答")
             papers = list(session.scalars(
                 select(Paper).where(Paper.id.in_(request.paper_ids)).order_by(Paper.id).with_for_update()
             ))
@@ -71,8 +69,8 @@ def submit_task(
             task = Task(
                 id=uuid4(), task_type=request.task_type, question=request.question,
                 workflow_type=request.workflow_type, runner_type=runner_type,
-                workflow_version="mock-v1" if runner_type == "mock" else "langgraph-v1",
-                prompt_version=None if runner_type == "mock" else "evidence-v1",
+                workflow_version="mock-v1" if runner_type == "mock" else ("langgraph-review-v1" if request.task_type == "review" else "langgraph-v1"),
+                prompt_version=None if runner_type == "mock" else ("evidence-review-v1" if request.task_type == "review" else "evidence-v1"),
                 model_id=None if runner_type == "mock" else settings.llm_model_id,
                 run_config=run_config,
                 **request.budget.model_dump(), idempotency_key=key, request_hash=digest,

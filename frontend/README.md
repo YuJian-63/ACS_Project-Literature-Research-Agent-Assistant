@@ -1,6 +1,6 @@
 # 前端研究工作台
 
-React + TypeScript + Vite 单页应用，使用 Ant Design、Axios、React Router 和 React Markdown，对接 `../docs/api-contract.md`。当前为本地单用户 MVP-1B：论文库、PDF 上传/解析状态、新建任务、任务列表和详情；后端默认 Mock，也可通过服务端配置启用真实摘要/问答 Runner。
+React + TypeScript + Vite 单页应用，使用 Ant Design、Axios、React Router 和 React Markdown，对接 `../docs/api-contract.md`。当前为本地单用户 MVP-2：论文库、PDF 上传/解析状态、新建任务、任务列表和详情；后端默认 Mock，也可通过服务端配置启用真实摘要、问答及跨论文综述 Runner。
 
 ## 1. 本地启动
 
@@ -41,6 +41,7 @@ npm.cmd run dev
 ## 4. 结果与安全边界
 
 - 页面仅在 Mock 任务显示模拟提示；Mock 产物不是研究结论，不调用模型且不提供虚构引用。真实产物展示已校验的论文标题、物理页码和原文引用。
+- 真实综述展示每篇论文的横向比较表；单元格引用跳转到同页来源卡片，论文和来源卡片可打开原 PDF。未报告项显示“未报告”，全无证据时展示证据状态而不生成研究结论。
 - 未报告的 Token/调用统计显示“—”，不把 `null` 当成 0。
 - Markdown 禁止原始 HTML 和内嵌图片，链接仅允许 HTTP(S) 或安全的同源相对地址；外链新窗口带 `noopener noreferrer`。有实际引用时支持原 PDF 页码跳转。
 - 当前仅适用于受信任的本机单用户环境，无登录和权限管理；公开部署前必须完善后端访问控制、TLS、上传限制与配额。

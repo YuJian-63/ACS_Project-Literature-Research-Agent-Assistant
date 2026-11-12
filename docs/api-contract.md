@@ -191,7 +191,7 @@ Content-Type 为 application/json；可选 Idempotency-Key 请求头，语义见
 | workflow_type | 否 | 默认 baseline，MVP-0 不开放 extended |
 | budget | 否 | 见 Budget，缺失字段填默认值 |
 
-paper_ids 视为集合，转 UUID 标准字符串后排序。不存在论文返回 404，details.missing_paper_ids 列出缺失 ID。Mock 允许 uploaded/ready，processing/failed 返回 409 PAPER_NOT_READY；真实 Runner 只允许 ready。真实模式需配置 `LLM_BASE_URL`、`LLM_MODEL_ID` 和 `LLM_API_KEY`；缺少任一项时返回 `503 RUNNER_NOT_CONFIGURED`，不创建任务且不降级为 Mock。真实模式下 `review` 返回 `422 TASK_TYPE_NOT_AVAILABLE`。
+paper_ids 视为集合，转 UUID 标准字符串后排序。不存在论文返回 404，details.missing_paper_ids 列出缺失 ID。Mock 允许 uploaded/ready，processing/failed 返回 409 PAPER_NOT_READY；真实 Runner 只允许 ready。真实模式需配置 `LLM_BASE_URL`、`LLM_MODEL_ID` 和 `LLM_API_KEY`；缺少任一项时返回 `503 RUNNER_NOT_CONFIGURED`，不创建任务且不降级为 Mock。真实模式支持 summary、qa 及 review；review 要求全部 2—20 篇论文 ready。
 
 runner_type、is_mock、model_id、status、stage、thread_id 及存储配置均不接受客户端写入。后端冻结 Runner、工作流版本和模型等执行配置，后续配置变更不能改变已提交任务。
 
@@ -326,9 +326,12 @@ summary/qa 的 comparison_table 为 null；真实 review 使用下述对象。Mo
 
 - columns 为 1—12 项；key 唯一且匹配 `[a-z][a-z0-9_]{0,31}`；label 为 1—80 字符。
 - rows 恰好覆盖任务选定论文，每篇一行；cells 的键与 columns 完全一致。
-- value 为非空字符串或 null；null 显示“未报告”，不能猜测。实验条件不同显式写“不可比较：原因”。
+- value 为 1—4000 字符的非空字符串或 null；null 显示“未报告”，不能猜测。实验条件不同显式写“不可比较：原因”。
 - citation_keys 不重复，必须引用同一 artifact 中存在且属于该行 paper_id 的引用。
+- 非 null 的研究内容至少有一条同论文引用；null 的引用列表必须为空。模型内部引用序号须经服务端校验后转换为 C 编号，不能直接信任模型自报的 citation_keys。
 - 数据库仅校验 JSON 外层结构，完整规则由结果写入服务校验，不能直接信任模型输出的 JSON。
+
+真实 review 的总上下文最多 32 个片段，并受冻结的 evidence_context_chars 限制；为每篇有片段论文至少预留一个最短片段，不足时任务以 BUDGET_EXCEEDED 失败且不调用模型。所有选定论文均无片段时，服务端返回证据不足正文与 evidence_status（证据状态）单列比较表，每行值为“未检索到可用解析证据”，无引用；该系统状态不是研究结论，允许非 null 且无引用。此路径 input_tokens、output_tokens、total_tokens、model_calls、tool_calls 均为 0。正常 review 使用 langgraph-review-v1/evidence-review-v1 版本，表格按任务冻结的选定顺序排列，部分无证据论文的研究内容 cell 必须为 null。
 
 ### 6.2 Citation
 
