@@ -9,7 +9,7 @@ export default function ArtifactView({ artifact }: { artifact: Artifact }) {
   useLocale();
   const comparison = artifact.comparison_table;
   return <article className="artifact" aria-label={t("研究结果")}>
-    <div className="artifact-heading"><h2>{artifact.title}</h2>{artifact.is_mock && <MockTag />}</div>
+    <div className="artifact-heading"><h2>{t(artifact.title)}</h2>{artifact.is_mock && <MockTag />}</div>
     <div className="markdown"><ReactMarkdown remarkPlugins={[remarkGfm]} skipHtml components={{
       img: () => null,
       a: ({ href, children }) => {
