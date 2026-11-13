@@ -63,14 +63,17 @@ def submit_task(
             if runner_type == "langgraph":
                 run_config = {
                     "model_base_url": settings.llm_base_url,
+                    "model_thinking_mode": settings.llm_thinking_mode,
                     "model_timeout_seconds": settings.llm_timeout_seconds,
                     "evidence_context_chars": settings.evidence_context_chars,
                 }
+                if request.task_type == "review":
+                    run_config["max_output_tokens"] = 4096
             task = Task(
                 id=uuid4(), task_type=request.task_type, question=request.question,
                 workflow_type=request.workflow_type, runner_type=runner_type,
                 workflow_version="mock-v1" if runner_type == "mock" else ("langgraph-review-v1" if request.task_type == "review" else "langgraph-v1"),
-                prompt_version=None if runner_type == "mock" else ("evidence-review-v1" if request.task_type == "review" else "evidence-v1"),
+                prompt_version=None if runner_type == "mock" else ("evidence-review-v2" if request.task_type == "review" else "evidence-v4"),
                 model_id=None if runner_type == "mock" else settings.llm_model_id,
                 run_config=run_config,
                 **request.budget.model_dump(), idempotency_key=key, request_hash=digest,

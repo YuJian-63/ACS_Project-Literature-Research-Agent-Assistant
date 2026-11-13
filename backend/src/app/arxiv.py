@@ -17,6 +17,10 @@ MAX_PDF_BYTES = 20 * 1024 * 1024
 ATOM = "{http://www.w3.org/2005/Atom}"
 OPENSEARCH = "{http://a9.com/-/spec/opensearch/1.1/}"
 ARXIV = "{http://arxiv.org/schemas/atom}"
+ERROR_PHASES = frozenset({
+    "unknown", "connect", "write", "pool", "response_headers", "response_body",
+    "deadline", "source_gate", "provider_status", "response_validation",
+})
 IDENTIFIER = re.compile(
     r"(?:[0-9]{2}(?:0[1-9]|1[0-2])\.[0-9]{4,5}|"
     r"[a-z][a-z-]*(?:\.[A-Z]{2})?/[0-9]{2}(?:0[1-9]|1[0-2])[0-9]{3})v[1-9][0-9]*"
@@ -24,16 +28,17 @@ IDENTIFIER = re.compile(
 
 
 class ArxivError(Exception):
-    def __init__(self, code: str, message: str, *, retryable: bool = False, retry_after: int | None = None):
+    def __init__(self, code: str, message: str, *, retryable: bool = False, retry_after: int | None = None, phase: str = "unknown"):
         super().__init__(message)
         self.code = code
         self.message = message
         self.retryable = retryable
         self.retry_after = retry_after
+        self.phase = phase
 
 
 def invalid_response() -> ArxivError:
-    return ArxivError("ARXIV_INVALID_RESPONSE", "arXiv 返回了不合法的响应")
+    return ArxivError("ARXIV_INVALID_RESPONSE", "arXiv 返回了不合法的响应", phase="response_validation")
 
 
 def normalize_arxiv_id(value: str) -> str:
@@ -249,14 +254,15 @@ def check_status(reply: ProviderReply) -> None:
         from app.arxiv_transport import retry_after_seconds
 
         raise ArxivError("ARXIV_RATE_LIMITED", "arXiv 请求过于频繁，请稍后再试", retryable=True,
-                         retry_after=retry_after_seconds(reply.headers.get("retry-after")))
+                         retry_after=retry_after_seconds(reply.headers.get("retry-after")), phase="provider_status")
     if reply.status_code == 404:
-        raise ArxivError("ARXIV_NOT_FOUND", "未找到指定版本的论文")
+        raise ArxivError("ARXIV_NOT_FOUND", "未找到指定版本的论文", phase="provider_status")
     if reply.status_code == 503 or reply.status_code >= 500:
         from app.arxiv_transport import retry_after_seconds
 
         raise ArxivError("ARXIV_UNAVAILABLE", "arXiv 服务暂不可用", retryable=True,
-                         retry_after=retry_after_seconds(reply.headers.get("retry-after")) if reply.status_code == 503 else None)
+                         retry_after=retry_after_seconds(reply.headers.get("retry-after")) if reply.status_code == 503 else None,
+                         phase="provider_status")
     raise invalid_response()
 
 

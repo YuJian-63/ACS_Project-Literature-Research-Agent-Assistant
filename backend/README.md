@@ -48,6 +48,7 @@ Linux/macOS 将复制命令替换为 `cp .env.example .env`。其他命令相同
 | PARSER_TIMEOUT_SECONDS | 默认 120 秒，范围 1—600；限制每份 PDF 的子进程解析时间，超时失败且不会保存部分片段 |
 | TASK_RUNNER | 默认 mock；可设 langgraph 选择真实摘要、问答及多论文综述 Runner |
 | LLM_BASE_URL / LLM_MODEL_ID / LLM_API_KEY | 真实 Runner 的 OpenAI-compatible 服务地址、模型 ID 与密钥；密钥只从环境读取 |
+| LLM_THINKING_MODE | provider_default（默认）不发送思考参数；disabled/enabled 显式发送 thinking.type，仅用于支持该扩展的模型服务；提交任务时冻结 |
 | LLM_TIMEOUT_SECONDS / EVIDENCE_CONTEXT_CHARS | 单次模型调用超时与证据上下文字符上限 |
 | CORS_ORIGINS | JSON 字符串数组；默认允许 localhost:5173 和 127.0.0.1:5173，不接受逗号分隔的裸字符串 |
 
@@ -177,6 +178,18 @@ MVP-1A 使用 pypdf 提取文本，不运行 OCR。默认拒绝超过 500 页、
 
 默认 `TASK_RUNNER=mock`，维持模拟结果。需要运行真实摘要、问答或综述时，在 `backend/.env` 设置 `TASK_RUNNER=langgraph`、`LLM_BASE_URL`、`LLM_MODEL_ID` 和 `LLM_API_KEY`；地址须指向 OpenAI-compatible Chat Completions 服务。`LLM_API_KEY` 只从环境读取，不写入任务或日志。真实 Runner 仅接受已解析完成的 ready 论文：summary/qa 一篇，review 2—20 篇且必须填写问题。
 
+DeepSeek 本轮验收使用官方服务和本地密钥，并设置 `LLM_THINKING_MODE=disabled`，显式关闭思考后先验证单篇摘要和引用；单篇任务保持 2048 Token 生成上限，新综述的独立输出预算调整见下文。其他服务保持默认 `provider_default`，请求中不附加 `thinking`。此模式随新任务冻结到 run_config，旧任务缺少该字段时仍使用 provider_default；Worker 后续修改配置不改变已提交任务的模式。设置 disabled 不保证输出必然完整，仍需真实任务验收。
+
+进程环境变量优先于 `.env`。从其他工具或终端继承了模型地址/密钥时，应在用于启动 API 和真实 Runner 的各自终端清除对应覆盖，再读取本地配置。只检查地址、模型、思考模式和密钥是否存在，不打印密钥；配置齐全不代表服务可用或密钥有效。
+
+真实任务若以 `INVALID_AGENT_RESULT` 失败，接口 error.details 中的 validation_reason 会区分 invalid_json、schema_mismatch、quote_mismatch、unknown_evidence、引用标记/序号/未使用/重复引用等原因；model_finish_reason 仅保存模型结束原因的白名单值（如 stop、length），未知值记录 unknown。Worker 日志仅记录任务 ID 和这两个分类，不记录提示、模型正文、论文原文或密钥。校验仍严格拒绝非逐字引文和越界来源；没有自动重试，失败不发布产物。旧失败记录没有这些诊断，不能据此推断原始失败原因，也不会被修改。
+
+新建真实 summary/qa 任务使用 `evidence-v4`：后端将选中的存储文本分为最长 1000 字符的连续证据片段，提供 E1 等任务内 ID；模型返回 paragraphs，每段包含 content_markdown 与支持该段的 evidence_ids。后端按 ID 取原样引文、片段身份和物理页码，并统一生成引用编号；模型不再自行抄写引文或 UUID。没有模糊匹配或排版归一化，最终仍执行逐字来源与大小校验。未知 ID、同段重复 ID、模型自写编号或额外 quote/来源字段会失败。paragraphs/evidence_ids 仅是内部模型协议，对外产物仍为 content_markdown 与 citations，无需更改前端或数据库。
+
+版本随任务保存并由 Runner 按原版本执行；已有 `evidence-v1`/`evidence-v2`/`evidence-v3` 任务及 `evidence-review-v1` 综述规则保持原行为。升级后须重启 API 和真实 Runner，再新建任务验收；旧任务和幂等重放不会自动切换版本。2026-11-13 真实问答在 v2 下出现 `unused_citation`，v3 则出现 `quote_mismatch`，两次结束原因均为 `stop`。v4 将原文提取也交由后端完成，不增加模型调用或自动重试；本次真实问答执行及人工验收记录见下，不能以本地测试代替真实验收。设计见 `../docs/superpowers/specs/2026-11-13-evidence-selection.md`。
+
+新建真实 review 使用 `evidence-review-v2`，工作流版本仍为 `langgraph-review-v1`。复用同一原样证据摘录机制，输入证据额外标明所属 paper_id，E 编号在整个任务内唯一。模型返回 paragraphs 和 comparison_table：正文段落与表格单元格均只选择 evidence_ids，单元格仍有 value。后端先遍历段落，再按选定论文及声明列顺序遍历表格，为同一证据统一分配 C 编号；允许证据只用于表格。非 null 的研究单元格必须选择本行论文的证据，未报告信息用 null 和空 evidence_ids。未知/重复 ID、跨论文单元格引用、伪造引文/页码/引用编号字段及正文、单元格、列标题中的模型自写引用标记均会失败，不做修复或重试。最终仍复用既有严格综述校验，外部正文、引用和比较表结构不变，无需数据库迁移。旧版或缺少提示版本的 review 任务继续按 v1 执行，不自动升级。设计及验证记录见 `../docs/superpowers/specs/2026-11-13-review-evidence-selection.md`。
+
 保持 API 与 Parser Worker 运行，在另一个终端启动真实 Runner：
 
 ```powershell
@@ -186,9 +199,17 @@ uv run --locked python -m app.runner_worker
 
 Mock 与真实 Runner 分别领取对应队列。当前没有可用远端模型凭据时，可用假模型测试逻辑，但不声称真实供应商联调已完成。
 
+2026-11-13 真实单篇摘要验收：DeepSeek `deepseek-flash`、thinking=disabled，任务 `e12f73c7-6f45-45da-a784-75807081101d` 已成功，非 Mock，模型调用 1 次，记录输入/输出 Token 为 7650/759。API 读取确认持久化结果及 5 条所选论文引用；用户人工确认正文显示、引文/物理页码、结论支持和刷新恢复均正常。此前一次 INVALID_AGENT_RESULT 原因未能追溯，后续成功不等于生成问题已修复。多论文综述及正式测试/CI 仍待后续验收；详见 `../docs/superpowers/plans/2026-11-13-model-thinking-mode.md`。
+
+2026-11-13 真实单篇问答验收通过：任务 `27da56a0-a3aa-4f0b-b1d7-9aa04cde0231` 使用 `evidence-v4`，已成功，非 Mock，模型调用 1 次，输入/输出 Token 为 6733/528。独立读取确认 7 条引用均在正文使用，逐字匹配已存原文，页码与来源片段一致，且来自 v4 证据表。用户人工确认回答覆盖数据、分析方法和局限，未报告信息明确说明，7 条引文及物理页码、结论支持、PDF 导航和刷新恢复均正常。该结论限于本次任务，不代表一般生成可靠性或真实多论文综述已验收。
+
 综述先为每篇有片段的论文预留一个最短片段，再按问题相关度轮流追加证据，受总字符数和 32 个片段上限约束。最小覆盖无法满足时以 `BUDGET_EXCEEDED` 失败，不调用模型或写部分产物。所有论文均无片段时，不调用模型，返回明确的证据不足和逐篇证据状态表，Token/模型/工具计数均为 0。部分论文无证据时，其比较内容为 null，不编造结论。
 
-正常综述使用单次模型调用，步骤预算至少 1；输出上限为剩余 Token 预算与 2048 的较小值，多篇/多列结果过长可能因结构不完整而校验失败。表格恰好覆盖所有选定论文；每个非空研究内容单元格必须引用本行论文的有效原文，服务端统一生成 C 编号后与正文、引用、usage 和成功状态原子写入。引用来源一致只证明可追溯，不等于语义正确性已获得人工验收。
+正常综述使用单次模型调用，步骤预算至少 1。新建真实综述由服务端冻结 `run_config.max_output_tokens=4096`；实际请求上限为该值与「任务总 Token 预算减去预估输入」的较小值。预估输入已耗尽总预算时不调用模型，返回 `BUDGET_EXCEEDED`；调用后仍以供应商报告的实际输入/输出用量检查总预算。旧任务缺少该字段时保持 2048，包括已存在的 review-v2；摘要、问答及 Mock 不变。字段不接受客户端指定；持久化值必须为精确整数，review 仅支持 2048/4096，单篇仅支持 2048，异常值执行前失败。增加上限可能增加费用，不保证 JSON 一定完整；截断仍严格失败，不自动续写、修补 JSON 或重试。表格恰好覆盖所有选定论文；每个非空研究内容单元格必须引用本行论文的有效原文，服务端统一生成 C 编号后与正文、引用、usage 和成功状态原子写入。引用来源一致只证明可追溯，不等于语义正确性已获得人工验收。
+
+历史任务 `6111bd43-31fb-449b-ab42-f0605a35ae27` 已实际到达官方模型，但返回 `INVALID_AGENT_RESULT`，details 为 `invalid_json` / `length`。只读核对确认其总预算 16000、预估输入 10780，Worker 当时仍把输出限制为 2048。随后实施新建真实综述冻结 4096 输出上限的调整，并指导用户在保留正确密钥的原终端分别重启 API 与真实 Runner；重启不会改写旧任务或幂等重放的配置。新建验收沿用两篇 ready 论文、总预算 16000、步骤 10、执行超时 180 秒。
+
+2026-11-13 用户反馈新任务 `3cd9c072-c9f5-4b03-9d91-af2abd358570` 执行成功，并逐项确认真实运行信息、综述正文与比较表、两篇论文引用及 PDF 物理页码、刷新恢复全部正常。本次双论文真实综述端到端人工验收通过；证据为用户反馈，代理未独立重跑或只读核对该任务的冻结配置、实际 Token 用量及完整产物，不声称实际输出超过 2048 或证明普遍可靠性。该结果不改变严格引用校验，不解决真实 arXiv 后续超时。详细记录见 `../docs/superpowers/plans/2026-11-13-real-review-acceptance.md`；设计与离线验证见 `../docs/superpowers/specs/2026-11-13-review-output-budget.md`。
 
 ## 9. arXiv 搜索与导入（MVP-3）
 
@@ -215,7 +236,8 @@ uv run --locked python -m app.parser_worker
 
 - 搜索只访问固定官方 HTTPS API；PDF 只允许同版本官方路径和最多 2 次受控重定向，不接收客户端 URL、代理或下载路径。查询最多 200 字符/20 词、每页最多 20 篇、offset 至多 1000。
 - 搜索缓存仅保存上游成功元数据，600 秒/100 页；每次查询重新投影本地导入和解析状态。来源关闭或缺少邮箱返回 `503 ARXIV_NOT_CONFIGURED`，读取历史不要求联网配置。
-- API 和所有 Import Worker 共用数据库许可：一次一个来源请求，完成后至少 3 秒，429/503 应用 Retry-After。Worker 首次等待许可受 180 秒总尝试限制；取得许可后元数据预算 20 秒，PDF 含重定向/后续许可等待共用 90 秒，读/连超时各 5 秒，PDF 最大 20 MiB。
+- 搜索来源失败时，API 输出一条安全诊断日志：`request_id`、`phase`、`elapsed_ms`、`code`。阶段仅允许 `connect`、`write`、`pool`、`response_headers`、`response_body`、`deadline`、`source_gate`、`provider_status`、`response_validation`、`unknown`；普通连接失败不进一步推断 TCP/TLS 原因。日志不包含关键词、联系邮箱、原始异常、响应正文或密钥，可用浏览器错误中的请求编号关联。阶段不进入公开错误 envelope。子进程 watchdog 以 124 退出时，父进程明确归类为 `ARXIV_TIMEOUT` / `deadline`。
+- API 和所有 Import Worker 共用数据库许可：一次一个来源请求，完成后至少 3 秒，429/503 应用 Retry-After。Worker 首次等待许可受 180 秒总尝试限制；取得许可后元数据预算 20 秒，其中搜索和指定版本元数据的读取等待最多 15 秒，连接/写入/连接池等待最多 5 秒；各阶段均不超过剩余预算，父监督及子进程 watchdog 仍限制整体时长，不自动重试。PDF 含重定向/后续许可等待共用 90 秒，各网络阶段仍最多 5 秒，PDF 最大 20 MiB。
 - 网络在最小环境的独立子进程运行；父进程可终止超时/取消请求，子进程也有独立总时限 watchdog，避免父进程异常后连接跨越 120 秒许可租约。此为本机 MVP 防护，不是 OS 级内存/CPU/权限沙箱。
 - 导入 lease 30 秒/心跳 10 秒；同一版本始终复用一条导入记录。普通 POST 不重试失败，显式重试必须携带 `expected_attempt`；响应丢失后的重放不增加额外 attempt。
 - 下载完成才原子发布 Paper(uploaded)、PaperSource 和导入成功，随后由现有解析器独立处理。导入不会生成研究产物/引用，也不按文件 hash 合并手动上传。
@@ -227,4 +249,4 @@ uv run --locked python -m app.parser_worker
 
 2026-11-13 用户在独立 PostgreSQL 17.6 验收库完成 head 迁移、无结构漂移检查及八组原生多进程/行锁/恢复/共享许可专项验收。随后真实搜索一次、导入 `2512.19700v1`，重复提交复用同一记录且 attempt=1；独立 Import Worker 完成下载，Parser Worker 将本地 PDF 解析为 ready（9 页）。用户同时确认前端历史恢复、来源与本地 PDF 访问、论文预选、Mock 任务成功及结果刷新恢复。上述证据来自用户提供的输出和人工确认，未由代理独立重跑；详细标识与记录见 `../docs/superpowers/plans/2026-11-12-mvp-3-arxiv-search-import.md`。
 
-原生验收覆盖八组专项场景，不代表此前全部 PGlite 故障注入均已在原生环境重跑。真实来源验收仅覆盖一次搜索和一个版本下载，不代表真实上游限流、重定向或故障已被人工触发。Mock 结果不代表论文结论；MVP-2.1 的真实模型验证仍独立待办。
+原生验收覆盖八组专项场景，不代表此前全部 PGlite 故障注入均已在原生环境重跑。真实来源验收仅覆盖一次搜索和一个版本下载，不代表真实上游限流、重定向或故障已被人工触发，也不代表后续超时已恢复。Mock 结果不代表论文结论；后续真实单篇摘要、问答及双论文综述的独立验收记录见第 8 节，正式测试/CI 仍待办。

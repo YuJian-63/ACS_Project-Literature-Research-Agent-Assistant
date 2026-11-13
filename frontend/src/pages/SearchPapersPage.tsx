@@ -6,6 +6,8 @@ import { api, asApiError, isCanceled, type ApiError } from '../api/client';
 import type { Page, PaperImport, SearchPaper } from '../api/types';
 import { ErrorNotice, PageHeader, PaginationBar } from '../components/Common';
 
+type SearchSnapshot = { page: Page<SearchPaper>; query: string; receivedAt: string };
+
 function pending(item: PaperImport): boolean {
   return item.status === 'queued' || item.status === 'running' || (item.status === 'succeeded' && (item.paper_status === 'uploaded' || item.paper_status === 'processing'));
 }
@@ -26,12 +28,16 @@ function arxivUrl(identity: string, kind: 'abs' | 'pdf'): string | undefined {
 export default function SearchPapersPage() {
   const [draft, setDraft] = useState('');
   const [query, setQuery] = useState('');
-  const [result, setResult] = useState<Page<SearchPaper> | null>(null);
+  const [requestedOffset, setRequestedOffset] = useState(0);
+  const [snapshot, setSnapshot] = useState<SearchSnapshot | null>(null);
+  const result = snapshot?.page ?? null;
   const [searching, setSearching] = useState(false);
   const [searchError, setSearchError] = useState<ApiError | null>(null);
   const [actionError, setActionError] = useState<ApiError | null>(null);
   const [cooldownUntil, setCooldownUntil] = useState(0);
+  const [searchRetryUntil, setSearchRetryUntil] = useState(0);
   const [seconds, setSeconds] = useState(0);
+  const [searchSeconds, setSearchSeconds] = useState(0);
   const [history, setHistory] = useState<Page<PaperImport> | null>(null);
   const [historyPage, setHistoryPage] = useState(1);
   const [historyError, setHistoryError] = useState<ApiError | null>(null);
@@ -60,12 +66,16 @@ export default function SearchPapersPage() {
   }
 
   useEffect(() => {
-    const tick = () => setSeconds(Math.max(0, Math.ceil((cooldownUntil - Date.now()) / 1000)));
+    const tick = () => {
+      const now = Date.now();
+      setSeconds(Math.max(0, Math.ceil((cooldownUntil - now) / 1000)));
+      setSearchSeconds(Math.max(0, Math.ceil((Math.max(cooldownUntil, searchRetryUntil) - now) / 1000)));
+    };
     tick();
-    if (!cooldownUntil) return;
+    if (!cooldownUntil && !searchRetryUntil) return;
     const timer = window.setInterval(tick, 250);
     return () => window.clearInterval(timer);
-  }, [cooldownUntil]);
+  }, [cooldownUntil, searchRetryUntil]);
 
   useEffect(() => () => {
     sequence.current += 1;
@@ -102,30 +112,40 @@ export default function SearchPapersPage() {
   }, [historyPage, refresh]);
 
   async function search(term: string, offset = 0) {
-    if (Date.now() < cooldownUntil || !term.trim()) return;
+    if (Date.now() < Math.max(cooldownUntil, searchRetryUntil) || !term.trim()) return;
     searchRequest.current?.abort();
     const controller = new AbortController();
     searchRequest.current = controller;
     const current = ++sequence.current;
     setSearching(true);
     setQuery(term.trim());
-    setResult(null);
+    setRequestedOffset(offset);
     setSearchError(null);
     try {
       const page = await api.searchPapers({ q: term.trim(), limit: 10, offset }, controller.signal);
       if (current === sequence.current && !controller.signal.aborted) {
-        setResult(page);
+        setSearching(false);
+        setSnapshot({ page, query: term.trim(), receivedAt: new Date().toISOString() });
         const imported = page.items.filter((paper) => paper.import_id);
-        const locals = await Promise.all(imported.map((paper) => api.paperImport(paper.import_id!, controller.signal)));
-        if (current === sequence.current && !controller.signal.aborted && locals.length) {
-          remember(locals);
-          setRefresh((value) => value + 1);
+        try {
+          const locals = await Promise.all(imported.map((paper) => api.paperImport(paper.import_id!, controller.signal)));
+          if (current === sequence.current && !controller.signal.aborted && locals.length) {
+            remember(locals);
+            setRefresh((value) => value + 1);
+          }
+        } catch (error) {
+          if (current === sequence.current && !isCanceled(error) && !controller.signal.aborted) {
+            const failure = asApiError(error);
+            setHistoryError(failure);
+            rateLimit(failure);
+          }
         }
       }
     } catch (error) {
       if (current === sequence.current && !isCanceled(error) && !controller.signal.aborted) {
         const failure = asApiError(error);
         setSearchError(failure);
+        if (failure.code === 'ARXIV_TIMEOUT') setSearchRetryUntil(Date.now() + 5000);
         rateLimit(failure);
       }
     } finally {
@@ -179,17 +199,20 @@ export default function SearchPapersPage() {
     <section className="content-panel search-panel">
       <form className="arxiv-search-form" onSubmit={submit}>
         <label htmlFor="arxiv-keywords">arXiv 关键词</label>
-        <div><Input id="arxiv-keywords" value={draft} maxLength={200} placeholder="例如：attention transformer" onChange={(event) => setDraft(event.target.value)} /><Button type="primary" htmlType="submit" icon={<SearchOutlined />} disabled={!draft.trim() || seconds > 0}>搜索</Button></div>
+        <div><Input id="arxiv-keywords" value={draft} maxLength={200} placeholder="例如：attention transformer" onChange={(event) => setDraft(event.target.value)} /><Button type="primary" htmlType="submit" icon={<SearchOutlined />} disabled={!draft.trim() || searchSeconds > 0}>搜索</Button></div>
         <p>多个词按 AND 匹配；仅提交时搜索，每页 10 篇。不支持输入网址或高级检索语法。</p>
       </form>
       {seconds > 0 && <Alert type="warning" showIcon title={`${seconds} 秒后可重试`} description="共享来源访问额度正在冷却。不会自动重新搜索或下载。" />}
+      {seconds === 0 && searchSeconds > 0 && <Alert type="warning" showIcon title={`${searchSeconds} 秒后可重试搜索`} description="本次搜索超时。不会自动重试；已有论文和导入记录不受影响。" />}
       {searchError && (searchError.code === 'ARXIV_NOT_CONFIGURED'
         ? <Alert type="info" showIcon title="arXiv 尚未配置" description={<>请在后端配置联系邮箱并启用 arXiv；现有导入记录仍可查看，也可以<Link to="/papers">手动上传 PDF</Link>。</>} />
-        : <ErrorNotice error={searchError} retry={seconds ? undefined : () => void search(query)} />)}
+        : <ErrorNotice error={searchError} retry={searchSeconds ? undefined : () => void search(query, requestedOffset)} />)}
       {actionError && <ErrorNotice error={actionError} title="导入请求未完成" />}
       {searching && <div className="search-loading" role="status"><Spin size="small" /> 正在查询 arXiv…</div>}
-      {result && <div aria-live="polite">
+      {snapshot && result && <div aria-live="polite">
+        {(searching || searchError) && <Alert type="info" showIcon title="仍显示上次成功结果" description={searching ? '新请求正在进行，以下结果尚未更新。关键词、页码和接收时间以结果区标注为准。' : '本次请求未完成，以下不是本次请求的新结果。关键词、页码和接收时间以结果区标注为准。'} />}
         <div className="search-result-heading"><h2>检索结果</h2><span>共 {result.total} 篇 · 第 {Math.floor(result.offset / 10) + 1} 页</span></div>
+        <p className="search-result-context">关键词：<strong>{snapshot.query}</strong> · 接收时间：<time dateTime={snapshot.receivedAt}>{new Date(snapshot.receivedAt).toLocaleString('zh-CN', { hour12: false })}</time></p>
         {result.items.length === 0 && <Empty description="没有找到匹配论文" />}
         <div className="search-results">{result.items.map((paper) => {
           const item = records[paper.external_id];
@@ -203,7 +226,7 @@ export default function SearchPapersPage() {
             </div>
           </article>;
         })}</div>
-        {result.items.length > 0 && <div className="pagination-bar"><span>第 {Math.floor(result.offset / 10) + 1} 页 · 最多浏览至第 101 页</span><div className="source-links"><Button disabled={seconds > 0 || result.offset === 0} onClick={() => void search(query, result.offset - 10)}>上一页</Button><Button disabled={seconds > 0 || result.offset >= 1000 || result.offset + result.items.length >= result.total} onClick={() => void search(query, result.offset + 10)}>下一页</Button></div></div>}
+        {result.items.length > 0 && <div className="pagination-bar"><span>第 {Math.floor(result.offset / 10) + 1} 页 · 最多浏览至第 101 页</span><div className="source-links"><Button disabled={searchSeconds > 0 || result.offset === 0} onClick={() => void search(snapshot.query, result.offset - 10)}>上一页</Button><Button disabled={searchSeconds > 0 || result.offset >= 1000 || result.offset + result.items.length >= result.total} onClick={() => void search(snapshot.query, result.offset + 10)}>下一页</Button></div></div>}
       </div>}
       {!query && <div className="search-intro"><SearchOutlined /><h2>发现文献，再开始研究</h2><p>搜索只读取来源元数据。点击「导入 PDF」后，由独立 Worker 下载并交给解析器，不会调用模型。</p></div>}
     </section>

@@ -77,7 +77,7 @@ def source_permit(sessions: sessionmaker[Session]):
     permit = acquire_source_permit(sessions, "arxiv")
     if permit is None:
         raise ArxivError("ARXIV_RATE_LIMITED", "arXiv 访问额度暂不可用，请稍后重试", retryable=True,
-                         retry_after=source_wait_seconds(sessions))
+                         retry_after=source_wait_seconds(sessions), phase="source_gate")
     delay = None
 
     def cooldown(seconds: int) -> None:

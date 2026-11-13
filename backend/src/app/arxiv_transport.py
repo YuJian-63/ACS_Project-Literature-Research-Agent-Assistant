@@ -18,7 +18,7 @@ from urllib.parse import urlsplit
 import httpx
 
 from app.arxiv import (
-    API_URL, MAX_METADATA_BYTES, MAX_PDF_BYTES, ArxivError, DownloadReceipt,
+    API_URL, ERROR_PHASES, MAX_METADATA_BYTES, MAX_PDF_BYTES, ArxivError, DownloadReceipt,
     ProviderReply, invalid_response, normalize_arxiv_id, validate_pdf_url,
 )
 
@@ -77,7 +77,11 @@ def perform_request(
 ) -> ProviderReply:
     validate_request(url, params, destination)
     maximum = MAX_PDF_BYTES if destination is not None else MAX_METADATA_BYTES
-    timeout = httpx.Timeout(min(5.0, timeout_seconds))
+    timeout = httpx.Timeout(
+        min(5.0, timeout_seconds),
+        read=min(15.0 if destination is None else 5.0, timeout_seconds),
+    )
+    phase = "response_headers"
     try:
         with httpx.Client(timeout=timeout, trust_env=False, follow_redirects=False) as client:
             with client.stream("GET", url, params=params, headers={"User-Agent": user_agent, "Accept-Encoding": "identity"}) as response:
@@ -99,6 +103,7 @@ def perform_request(
                 header = b""
                 digest = hashlib.sha256()
                 output = destination.open("wb") if destination is not None else None
+                phase = "response_body"
                 try:
                     for chunk in response.iter_bytes(chunk_size=64 * 1024):
                         size += len(chunk)
@@ -120,10 +125,18 @@ def perform_request(
                         output.close()
                 receipt = DownloadReceipt(size, digest.hexdigest()) if destination is not None else None
                 return ProviderReply(response.status_code, headers, bytes(body), receipt)
-    except httpx.TimeoutException:
-        raise ArxivError("ARXIV_TIMEOUT", "arXiv 请求超时", retryable=True) from None
-    except httpx.HTTPError:
-        raise ArxivError("ARXIV_UNAVAILABLE", "arXiv 网络服务暂不可用", retryable=True) from None
+    except httpx.HTTPError as error:
+        if isinstance(error, (httpx.ConnectTimeout, httpx.ConnectError)):
+            phase = "connect"
+        elif isinstance(error, (httpx.WriteTimeout, httpx.WriteError)):
+            phase = "write"
+        elif isinstance(error, httpx.PoolTimeout):
+            phase = "pool"
+        elif not isinstance(error, (httpx.ReadTimeout, httpx.ReadError)):
+            phase = "unknown"
+        if isinstance(error, httpx.TimeoutException):
+            raise ArxivError("ARXIV_TIMEOUT", "arXiv 请求超时", retryable=True, phase=phase) from None
+        raise ArxivError("ARXIV_UNAVAILABLE", "arXiv 网络服务暂不可用", retryable=True, phase=phase) from None
     except OSError:
         raise ArxivError("STORAGE_WRITE_FAILED", "导入临时文件写入失败", retryable=True) from None
 
@@ -172,7 +185,7 @@ class SupervisedArxivTransport:
         if self.cancelled():
             raise ArxivError("REQUEST_CANCELLED", "论文来源请求已中止", retryable=True)
         if not math.isfinite(deadline) or time.monotonic() >= deadline:
-            raise ArxivError("ARXIV_TIMEOUT", "arXiv 请求超时", retryable=True)
+            raise ArxivError("ARXIV_TIMEOUT", "arXiv 请求超时", retryable=True, phase="deadline")
 
     def request(
         self, url: str, *, params: dict | None = None,
@@ -224,6 +237,8 @@ class SupervisedArxivTransport:
                 except subprocess.TimeoutExpired:
                     first = False
             self.check_active(deadline)
+            if process.returncode == 124:
+                raise ArxivError("ARXIV_TIMEOUT", "arXiv 请求超时", retryable=True, phase="deadline")
             if process.returncode != 0 or len(output) > 3 * MAX_METADATA_BYTES:
                 raise invalid_response()
             try:
@@ -238,7 +253,10 @@ class SupervisedArxivTransport:
                     }
                     if code not in messages:
                         raise ValueError
-                    raise ArxivError(code, messages[code], retryable=code in {"ARXIV_TIMEOUT", "ARXIV_UNAVAILABLE", "STORAGE_WRITE_FAILED"})
+                    phase = result.get("phase", "unknown")
+                    if not isinstance(phase, str) or phase not in ERROR_PHASES:
+                        raise ValueError
+                    raise ArxivError(code, messages[code], retryable=code in {"ARXIV_TIMEOUT", "ARXIV_UNAVAILABLE", "STORAGE_WRITE_FAILED"}, phase=phase)
                 status = result["status_code"]
                 headers = result["headers"]
                 if type(status) is not int or not 100 <= status <= 599 or not isinstance(headers, dict):
@@ -278,9 +296,9 @@ def main() -> None:
             "receipt": {"size_bytes": reply.receipt.size_bytes, "sha256": reply.receipt.sha256} if reply.receipt else None,
         }
     except ArxivError as error:
-        result = {"error": error.code}
+        result = {"error": error.code, "phase": error.phase}
     except Exception:
-        result = {"error": "ARXIV_INVALID_RESPONSE"}
+        result = {"error": "ARXIV_INVALID_RESPONSE", "phase": "response_validation"}
     finally:
         if watchdog is not None:
             watchdog.cancel()

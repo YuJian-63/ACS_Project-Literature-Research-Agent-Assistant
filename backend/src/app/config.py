@@ -26,6 +26,7 @@ class Settings(BaseSettings):
     llm_base_url: str | None = None
     llm_model_id: str | None = None
     llm_api_key: SecretStr | None = None
+    llm_thinking_mode: Literal["provider_default", "disabled", "enabled"] = "provider_default"
     llm_timeout_seconds: float = Field(default=60, ge=1, le=300, allow_inf_nan=False)
     evidence_context_chars: int = Field(default=24000, ge=1000, le=100000)
     arxiv_enabled: bool = False

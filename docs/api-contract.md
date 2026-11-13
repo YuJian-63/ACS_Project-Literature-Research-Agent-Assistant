@@ -1,6 +1,6 @@
 # Literature Research Agent Assistant — API 契约
 
-版本：v1 · 更新日期：2026-11-13。已实现 API/Mock Worker、独立 PDF Parser、真实摘要/问答 Runner、多论文综述及第 10 节 arXiv 搜索/导入接口。用户已完成 MVP-3 的隔离原生 PostgreSQL 八组专项验收、真实 arXiv 单版本搜索/下载/解析及浏览器 Mock 任务闭环；详细证据范围见实施记录，实际模型服务验收仍待完成。启动方式见 `backend/README.md`。
+版本：v1 · 更新日期：2026-11-13。已实现 API/Mock Worker、独立 PDF Parser、真实摘要/问答 Runner、多论文综述及第 10 节 arXiv 搜索/导入接口。用户已完成 MVP-3 的隔离原生 PostgreSQL 八组专项验收、真实 arXiv 单版本搜索/下载/解析及浏览器 Mock 任务闭环；另已完成一次 DeepSeek 真实单篇摘要及人工引用/刷新核验，真实问答与多论文综述仍待验收。详细证据范围见实施记录；启动方式见 `backend/README.md`。
 
 需求依据：`docs/Proposal.md` 第 2、3 节。数据库设计见 `docs/database-design.md`，参考 DDL 见 `backend/sql/schema.sql`。
 
@@ -196,6 +196,18 @@ paper_ids 视为集合，转 UUID 标准字符串后排序。不存在论文返�
 
 runner_type、is_mock、model_id、status、stage、thread_id 及存储配置均不接受客户端写入。后端冻结 Runner、工作流版本和模型等执行配置，后续配置变更不能改变已提交任务。
 
+新建真实 review 由服务端冻结内部 `run_config.max_output_tokens=4096`，该字段不是客户端请求参数，不增加公开任务/产物字段。模型单次输出上限为冻结值与剩余预估总 Token 预算的较小值；预估输入已耗尽总预算时不调用模型。旧任务缺少字段时保持 2048，含既有 review-v2；summary/qa 保持 2048，Mock 不变。持久化值仅允许精确整数（review 为 2048/4096，单篇为 2048），非法配置在调用前失败。实际用量仍受原总预算约束，时间预算、单次调用、严格引用与原子写入不变；4096 不保证完整输出，不自动重试/续写或修复 JSON。重建任务是新提交；旧任务和原幂等键的重放不升级输出上限。
+
+新建真实 summary/qa 任务的 versions.prompt_version 为 `evidence-v4`。后端从已选存储片段生成最长 1000 字符的连续证据摘录，保留内部排版与 Unicode，不跨片段或物理页码，并分配任务内 evidence_id。内部模型结果按 paragraphs 返回每段正文与 evidence_ids，后端解析 ID、取原样引文与来源身份、按首次使用顺序分配引用编号，再执行原有严格来源、逐字引文及大小校验。跨段同一证据共享编号；未知 ID、同段重复 ID、模型自写引用标记或额外引文/来源字段会失败，不进行模糊匹配或静默替换。paragraphs/evidence_ids 不是对外 API 字段，产物仍返回 content_markdown 与 citations。
+
+新建真实 review 的 versions.prompt_version 为 `evidence-review-v2`，workflow_version 仍为 `langgraph-review-v1`。输入沿用原样证据摘录并标明所属 paper_id，evidence_id 在任务内唯一。内部模型返回 paragraphs 和 comparison_table；段落包含 content_markdown/evidence_ids，表格单元格包含 value/evidence_ids，不接收模型自报引文、页码或引用编号。后端先按段落、再按选定论文和声明列顺序解析 ID，跨正文与表格共享首次使用编号，允许仅在表格使用的引用。非 null 研究单元格必须引用本行论文；null 必须使用空 evidence_ids。未知 ID、同段/同单元格重复证据、跨论文单元格引用、模型自写引用标记或额外字段均会失败。后端生成原协议草稿后仍执行既有严格综述校验，外部 content_markdown/citations/comparison_table 结构不变。
+
+Runner 按已保存版本构造提示词、估算输入预算并选择解析器；历史 `evidence-v1`/`evidence-v2`/`evidence-v3` 和 `evidence-review-v1` 任务仍使用原提示词和严格校验，未使用引用或非逐字引文仍导致失败；缺少提示版本的旧 review 回退至 v1。版本由服务端决定，不接受客户端指定；幂等重放返回原任务，不切换版本。不增加模型调用、自动重试或失败时发布产物的行为。
+
+服务端可选 `LLM_THINKING_MODE=provider_default|disabled|enabled`，随真实任务冻结为 run_config.model_thinking_mode；不接受客户端指定。provider_default 不向模型发送 thinking 字段，另外两项发送对应 thinking.type，仅适用于支持该扩展的服务。旧任务缺少字段时使用 provider_default；不改变现有 Token/时间预算或引用校验。
+
+真实结果校验失败仍为 `INVALID_AGENT_RESULT`；新失败的 error.details 可包含 validation_reason（固定安全分类，如 invalid_json/schema_mismatch/quote_mismatch/unknown_evidence/unused_citation）与 model_finish_reason（白名单结束原因、unknown 或 null）。错误消息说明对应类别；不返回原始响应、引文、密钥或底层校验异常文本。历史失败 details={} 保持有效，不能追溯补齐。诊断不改变校验规则、自动重试策略或失败不发布产物的约定。
+
 202 返回 TaskAccepted；首次为 queued，幂等重放返回已有任务的当前状态：
 
 ```json
@@ -329,10 +341,10 @@ summary/qa 的 comparison_table 为 null；真实 review 使用下述对象。Mo
 - rows 恰好覆盖任务选定论文，每篇一行；cells 的键与 columns 完全一致。
 - value 为 1—4000 字符的非空字符串或 null；null 显示“未报告”，不能猜测。实验条件不同显式写“不可比较：原因”。
 - citation_keys 不重复，必须引用同一 artifact 中存在且属于该行 paper_id 的引用。
-- 非 null 的研究内容至少有一条同论文引用；null 的引用列表必须为空。模型内部引用序号须经服务端校验后转换为 C 编号，不能直接信任模型自报的 citation_keys。
+- 非 null 的研究内容至少有一条同论文引用；null 的引用列表必须为空。新 review 的模型内部 evidence_ids 由服务端解析和统一编号，历史 v1 的内部引用序号须经服务端校验后转换为 C 编号；均不能直接信任模型自报的 citation_keys。
 - 数据库仅校验 JSON 外层结构，完整规则由结果写入服务校验，不能直接信任模型输出的 JSON。
 
-真实 review 的总上下文最多 32 个片段，并受冻结的 evidence_context_chars 限制；为每篇有片段论文至少预留一个最短片段，不足时任务以 BUDGET_EXCEEDED 失败且不调用模型。所有选定论文均无片段时，服务端返回证据不足正文与 evidence_status（证据状态）单列比较表，每行值为“未检索到可用解析证据”，无引用；该系统状态不是研究结论，允许非 null 且无引用。此路径 input_tokens、output_tokens、total_tokens、model_calls、tool_calls 均为 0。正常 review 使用 langgraph-review-v1/evidence-review-v1 版本，表格按任务冻结的选定顺序排列，部分无证据论文的研究内容 cell 必须为 null。
+真实 review 的总上下文最多 32 个存储片段，并受冻结的 evidence_context_chars 限制；v2 可将单个存储片段划分为多条不跨页的原样摘录，32 限制针对存储片段而非摘录条数。为每篇有片段论文至少预留一个最短片段，不足时任务以 BUDGET_EXCEEDED 失败且不调用模型。所有选定论文均无片段时，服务端返回证据不足正文与 evidence_status（证据状态）单列比较表，每行值为“未检索到可用解析证据”，无引用；该系统状态不是研究结论，允许非 null 且无引用。此路径 input_tokens、output_tokens、total_tokens、model_calls、tool_calls 均为 0。新 review 使用 langgraph-review-v1/evidence-review-v2，旧任务保留 v1；表格按任务冻结的选定顺序排列，部分无证据论文的研究内容 cell 必须为 null。
 
 ### 6.2 Citation
 
@@ -498,6 +510,12 @@ ARXIV_ENABLED 默认 false，启用必须配置 ARXIV_CONTACT_EMAIL。搜索/新
 | 搜索总超时 | 504 ARXIV_TIMEOUT |
 
 HTTP 错误沿用第 8 节 envelope；429 带整数秒 Retry-After 和相同 details.retry_after_seconds，不自动循环请求。
+
+搜索和指定版本元数据请求仍受 20 秒整体时限约束。其读取等待最多 15 秒，连接/写入/连接池等待最多 5 秒，各阶段同时受剩余预算限制；较长读取等待不会延长父监督或子进程 watchdog 的总时限。PDF 下载各阶段仍最多 5 秒，总预算仍为 90 秒。共享许可、完成后冷却、Retry-After 和无自动重试规则保持不变。
+
+搜索来源失败时，服务端以请求对应的 `X-Request-ID` 记录 `phase`、`elapsed_ms` 和安全错误码；阶段限定为连接、写入、连接池、响应头、响应体、总时限、共享许可、来源 HTTP 状态、响应校验或未知，不记录检索词、联系邮箱、原始异常、响应正文或凭据。该诊断仅用于服务端日志，不添加到公开错误字段；watchdog 退出明确按总时限超时处理。
+
+前端可保留当前页面上一份成功结果，必须同时标注其原关键词、页码和接收时间，并在新请求未完成时说明尚未更新，不得将旧结果冒充新结果。重试重复失败请求的原关键词/offset；旧结果翻页使用其原关键词。`ARXIV_TIMEOUT` 后有 5 秒页面级手动搜索等待，不自动重试，不影响导入/历史读取；它不替代后端共享许可，也不承诺来源恢复时间。429 的服务端冷却规则不变。结果快照不跨刷新持久化，成功空结果会替换旧结果，导入历史仍由服务器保存。
 
 已接收导入的执行失败返回 status=failed/error：ARXIV_NOT_FOUND、ARXIV_VERSION_MISMATCH、ARXIV_RATE_LIMITED、ARXIV_UNAVAILABLE、ARXIV_INVALID_RESPONSE、ARXIV_TIMEOUT、UNSAFE_SOURCE_URL、FILE_TOO_LARGE、INVALID_PDF、STORAGE_WRITE_FAILED、IMPORT_TIMEOUT、IMPORT_LEASE_EXPIRED、IMPORT_WORKER_STOPPED。details.retryable 必须为 boolean：暂时网络/服务/限流/超时/存储及 Worker 中断 true；不存在/版本不符/非法响应/不安全 URL/超限/非法 PDF false。错误不回显上游正文或内部路径。
 

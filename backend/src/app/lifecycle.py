@@ -111,7 +111,8 @@ def mark_failed(session: Session, task: Task, now: datetime, code: str, message:
 
 
 def fail_owned(
-    sessions: sessionmaker[Session], task_id: UUID, owner: UUID, code: str, message: str
+    sessions: sessionmaker[Session], task_id: UUID, owner: UUID, code: str, message: str,
+    *, details: dict | None = None,
 ) -> bool:
     with sessions.begin() as session:
         task = locked_task(session, task_id)
@@ -119,6 +120,8 @@ def fail_owned(
         if not owns_task(task, owner, now):
             return False
         mark_failed(session, task, now, code, message)
+        if details is not None:
+            task.error_details = dict(details)
         return True
 
 

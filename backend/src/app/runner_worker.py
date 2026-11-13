@@ -18,7 +18,11 @@ from app.lifecycle import (
 )
 from app.model_client import ChatModel, ModelTimeoutError, OpenAICompatibleChatModel
 from app.research_graph import build_research_graph
-from app.result_validation import evidence_insufficient_review, validate_result, validate_review_result
+from app.result_validation import (
+    evidence_insufficient_review, invalid_result_diagnostic, validate_paragraph_result,
+    validate_result, validate_review_result, validate_selected_evidence_result,
+    validate_selected_review_result,
+)
 from app.retrieval import EvidenceBudgetError, EvidenceChunk, build_messages, select_evidence, select_review_evidence
 
 logger = logging.getLogger(__name__)
@@ -39,6 +43,9 @@ class ResearchJob:
     paper_title: str
     evidence: list[EvidenceChunk]
     selected_papers: list[dict[str, str]]
+    model_thinking_mode: str = "provider_default"
+    prompt_version: str | None = None
+    max_output_tokens: int = 2048
 
 
 class TaskInputError(RuntimeError):
@@ -82,6 +89,10 @@ def load_research_job(sessions: sessionmaker[Session], task_id: UUID) -> Researc
         run_config: dict[str, Any] = task.run_config
         if not task.model_id or not run_config.get("model_base_url"):
             raise TaskInputError("INVALID_AGENT_RESULT", "任务模型配置不可用")
+        max_output_tokens = run_config.get("max_output_tokens", 2048)
+        allowed_output_caps = {2048, 4096} if task.task_type == "review" else {2048}
+        if type(max_output_tokens) is not int or max_output_tokens not in allowed_output_caps:
+            raise TaskInputError("INVALID_AGENT_RESULT", "任务输出预算配置不可用")
         context_chars = int(run_config.get("evidence_context_chars", 24000))
         if task.task_type == "review":
             groups = {paper["paper_id"]: [] for paper in selected_papers}
@@ -98,16 +109,20 @@ def load_research_job(sessions: sessionmaker[Session], task_id: UUID) -> Researc
             max_tokens=task.max_tokens, timeout_seconds=task.timeout_seconds,
             started_at=task.started_at, paper_title=selected_papers[0]["paper_title"], evidence=evidence,
             selected_papers=selected_papers,
+            model_thinking_mode=run_config.get("model_thinking_mode", "provider_default"),
+            prompt_version=getattr(task, "prompt_version", None) or ("evidence-review-v1" if task.task_type == "review" else "evidence-v1"),
+            max_output_tokens=max_output_tokens,
         )
 
 
 def estimate_input_tokens(
     evidence: list[EvidenceChunk], task_type: str, question: str | None,
     selected_papers: list[dict[str, str]] | None = None,
+    *, prompt_version: str | None = None,
 ) -> int:
     if not evidence:
         return 0
-    messages = build_messages(task_type, question, evidence, selected_papers=selected_papers)
+    messages = build_messages(task_type, question, evidence, selected_papers=selected_papers, prompt_version=prompt_version)
     encoded_bytes = sum(len(message["content"].encode("utf-8")) for message in messages)
     return (encoded_bytes + 2) // 3 + 512
 
@@ -120,7 +135,9 @@ class RunnerWorker:
         self.sessions = sessions
         self.settings = settings
         self.model_factory = model_factory or (
-            lambda job, current: OpenAICompatibleChatModel(job.model_base_url, current.llm_api_key)
+            lambda job, current: OpenAICompatibleChatModel(
+                job.model_base_url, current.llm_api_key, thinking_mode=job.model_thinking_mode,
+            )
         )
         self.owner = uuid4()
         self.stopped = threading.Event()
@@ -150,7 +167,11 @@ class RunnerWorker:
         thread.start()
         try:
             job = load_research_job(self.sessions, task_id)
-            estimated = estimate_input_tokens(job.evidence, job.task_type, job.question, job.selected_papers)
+            prompt_version = getattr(job, "prompt_version", None) or ("evidence-review-v1" if job.task_type == "review" else "evidence-v1")
+            estimated = estimate_input_tokens(
+                job.evidence, job.task_type, job.question, job.selected_papers,
+                prompt_version=prompt_version,
+            )
             if job.evidence and estimated >= job.max_tokens:
                 fail_owned(self.sessions, task_id, self.owner, "BUDGET_EXCEEDED", "证据上下文超过任务 Token 预算")
                 return
@@ -176,7 +197,8 @@ class RunnerWorker:
                     "task_type": job.task_type, "question": job.question,
                     "evidence": job.evidence, "model_id": job.model_id,
                     "selected_papers": job.selected_papers,
-                    "max_tokens": max(1, min(2048, job.max_tokens - estimated)),
+                    "prompt_version": prompt_version,
+                    "max_tokens": max(1, min(getattr(job, "max_output_tokens", 2048), job.max_tokens - estimated)),
                     "timeout_seconds": timeout,
                 })
             finally:
@@ -184,13 +206,24 @@ class RunnerWorker:
             if ownership_lost.is_set() or self.stopped.is_set():
                 return
             try:
-                result = (
-                    validate_review_result(output["output"], job.evidence, job.selected_papers)
-                    if job.task_type == "review" else validate_result(output["output"], job.evidence)
-                )
+                if job.task_type == "review":
+                    if prompt_version == "evidence-review-v2":
+                        result = validate_selected_review_result(output["output"], job.evidence, job.selected_papers)
+                    else:
+                        result = validate_review_result(output["output"], job.evidence, job.selected_papers)
+                elif prompt_version == "evidence-v4":
+                    result = validate_selected_evidence_result(output["output"], job.evidence)
+                elif prompt_version == "evidence-v3":
+                    result = validate_paragraph_result(output["output"], job.evidence)
+                else:
+                    result = validate_result(output["output"], job.evidence)
             except (KeyError, TypeError, ValueError) as error:
-                logger.warning("Runner returned invalid result: task_id=%s", task_id)
-                fail_owned(self.sessions, task_id, self.owner, "INVALID_AGENT_RESULT", "模型结果未通过证据校验")
+                message, details = invalid_result_diagnostic(error, finish_reason=output.get("finish_reason"))
+                logger.warning(
+                    "Runner returned invalid result: task_id=%s reason=%s finish_reason=%s",
+                    task_id, details["validation_reason"], details["model_finish_reason"],
+                )
+                fail_owned(self.sessions, task_id, self.owner, "INVALID_AGENT_RESULT", message, details=details)
                 return
             input_tokens = output.get("input_tokens")
             output_tokens = output.get("output_tokens")

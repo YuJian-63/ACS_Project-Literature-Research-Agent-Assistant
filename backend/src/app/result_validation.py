@@ -4,7 +4,42 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
 
-from app.retrieval import EvidenceChunk
+from app.retrieval import EvidenceChunk, build_citation_passages
+from app.model_client import normalize_finish_reason
+
+
+def invalid_result_diagnostic(error: Exception, *, finish_reason: object = None) -> tuple[str, dict]:
+    reasons = {
+        "Model result contains an invalid citation marker": ("invalid_citation_marker", "正文引用标记格式不正确"),
+        "Model result references an unknown citation": ("unknown_citation", "正文引用了不存在的引用序号"),
+        "Every citation must be referenced in the result": ("unused_citation", "引用列表包含正文或表格未使用的引用"),
+        "Paragraph results must not contain citation markers": ("invalid_citation_marker", "段落结果应直接附带证据，不应由模型生成引用编号"),
+        "Citation references evidence outside the task context": ("unknown_evidence", "引用的片段不在本次证据上下文中"),
+        "Citation quote is not an exact source substring": ("quote_mismatch", "引用原文不是对应片段的逐字连续文本"),
+        "Duplicate citation": ("duplicate_citation", "引用列表包含重复引用"),
+        "Result content exceeds the byte limit": ("content_too_large", "结果正文超过大小限制"),
+    }
+    reason, description = "validation_failed", "模型结果未通过证据校验"
+    current = error
+    for _ in range(5):
+        if isinstance(current, json.JSONDecodeError):
+            reason, description = "invalid_json", "模型返回的 JSON 不完整或格式无效"
+            break
+        if isinstance(current, ValidationError):
+            invalid_json = any(item["type"] == "json_invalid" for item in current.errors(include_input=False))
+            reason = "invalid_json" if invalid_json else "schema_mismatch"
+            description = "模型返回的 JSON 不完整或格式无效" if invalid_json else "模型结果字段不符合约定结构"
+            break
+        if type(current) is ValueError and current.args and isinstance(current.args[0], str) and current.args[0] in reasons:
+            reason, description = reasons[current.args[0]]
+            break
+        if current.__cause__ is None:
+            break
+        current = current.__cause__
+    normalized_finish = normalize_finish_reason(finish_reason)
+    if normalized_finish == "length":
+        description += "；模型因生成长度限制而结束"
+    return description, {"validation_reason": reason, "model_finish_reason": normalized_finish}
 
 
 class CitationDraft(BaseModel):
@@ -34,6 +69,25 @@ class ResearchDraft(BaseModel):
             raise ValueError("Result content must contain visible text")
         value.encode("utf-8")
         return value
+
+
+class ParagraphResearchDraft(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    paragraphs: list[ResearchDraft] = Field(min_length=1, max_length=100)
+
+
+class EvidenceSelectionParagraph(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    content_markdown: str = Field(min_length=1, max_length=2 * 1024 * 1024)
+    evidence_ids: list[str] = Field(max_length=100)
+
+
+class EvidenceSelectionDraft(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    paragraphs: list[EvidenceSelectionParagraph] = Field(min_length=1, max_length=100)
 
 
 class ValidatedCitation(BaseModel):
@@ -106,6 +160,31 @@ class ReviewTable(BaseModel):
 
 class ReviewDraft(ResearchDraft):
     comparison_table: ReviewTable
+
+
+class EvidenceSelectionReviewCell(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    value: str | None = Field(max_length=4000)
+    evidence_ids: list[str] = Field(max_length=100)
+
+
+class EvidenceSelectionReviewRow(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    paper_id: UUID
+    cells: dict[str, EvidenceSelectionReviewCell]
+
+
+class EvidenceSelectionReviewTable(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    columns: list[ReviewColumn] = Field(min_length=1, max_length=12)
+    rows: list[EvidenceSelectionReviewRow] = Field(min_length=2, max_length=20)
+
+
+class EvidenceSelectionReviewDraft(EvidenceSelectionDraft):
+    comparison_table: EvidenceSelectionReviewTable
 
 
 def evidence_insufficient_review(selected_papers: list[dict[str, str]]) -> ValidatedResult:
@@ -203,3 +282,105 @@ def validate_result(raw: str, evidence: list[EvidenceChunk]) -> ValidatedResult:
     if len(content.encode("utf-8")) > 2 * 1024 * 1024:
         raise ValueError("Result content exceeds the byte limit")
     return ValidatedResult(content_markdown=content, citations=citations)
+
+
+def validate_paragraph_result(raw: str, evidence: list[EvidenceChunk]) -> ValidatedResult:
+    draft = ParagraphResearchDraft.model_validate_json(raw)
+    citation_indexes: dict[tuple[UUID, str], int] = {}
+    citations: list[dict] = []
+    paragraphs: list[str] = []
+    for paragraph in draft.paragraphs:
+        if re.search(r"\[\[\s*cite\b|\[\s*C\d+\s*\]", paragraph.content_markdown, re.IGNORECASE):
+            raise ValueError("Paragraph results must not contain citation markers")
+        seen: set[tuple[UUID, str]] = set()
+        markers: list[str] = []
+        for candidate in paragraph.citations:
+            identity = (candidate.chunk_id, candidate.quote)
+            if identity in seen:
+                raise ValueError("Duplicate citation")
+            seen.add(identity)
+            if identity not in citation_indexes:
+                citations.append(candidate.model_dump(mode="json"))
+                citation_indexes[identity] = len(citations)
+            markers.append(f"[[cite:{citation_indexes[identity]}]]")
+        content = paragraph.content_markdown.rstrip()
+        paragraphs.append(content + (" " + " ".join(markers) if markers else ""))
+    return validate_result(json.dumps({
+        "content_markdown": "\n\n".join(paragraphs),
+        "citations": citations,
+    }), evidence)
+
+
+def validate_selected_evidence_result(raw: str, evidence: list[EvidenceChunk]) -> ValidatedResult:
+    draft = EvidenceSelectionDraft.model_validate_json(raw)
+    passages = {passage.evidence_id: passage for passage in build_citation_passages(evidence)}
+    paragraphs: list[dict] = []
+    for paragraph in draft.paragraphs:
+        if len(set(paragraph.evidence_ids)) != len(paragraph.evidence_ids):
+            raise ValueError("Duplicate citation")
+        citations: list[dict] = []
+        for evidence_id in paragraph.evidence_ids:
+            passage = passages.get(evidence_id)
+            if passage is None:
+                raise ValueError("Citation references evidence outside the task context")
+            citations.append({"chunk_id": passage.chunk_id, "quote": passage.quote})
+        paragraphs.append({"content_markdown": paragraph.content_markdown, "citations": citations})
+    return validate_paragraph_result(json.dumps({"paragraphs": paragraphs}), evidence)
+
+
+def validate_selected_review_result(
+    raw: str, evidence: list[EvidenceChunk], selected_papers: list[dict[str, str]],
+) -> ValidatedResult:
+    draft = EvidenceSelectionReviewDraft.model_validate_json(raw)
+    passages = {passage.evidence_id: passage for passage in build_citation_passages(evidence)}
+    citation_indexes: dict[tuple[str, str], int] = {}
+    citations: list[dict] = []
+
+    def reject_markers(content: str | None) -> None:
+        if content is not None and re.search(r"\[\[\s*cite\b|\[\s*C\d+\s*\]", content, re.IGNORECASE):
+            raise ValueError("Paragraph results must not contain citation markers")
+
+    def resolve_ids(evidence_ids: list[str]) -> list[int]:
+        indexes: list[int] = []
+        seen: set[tuple[str, str]] = set()
+        for evidence_id in evidence_ids:
+            passage = passages.get(evidence_id)
+            if passage is None:
+                raise ValueError("Citation references evidence outside the task context")
+            identity = (passage.chunk_id, passage.quote)
+            if identity in seen:
+                raise ValueError("Duplicate citation")
+            seen.add(identity)
+            if identity not in citation_indexes:
+                citations.append({"chunk_id": passage.chunk_id, "quote": passage.quote})
+                citation_indexes[identity] = len(citations)
+            indexes.append(citation_indexes[identity])
+        return indexes
+
+    paragraphs: list[str] = []
+    for paragraph in draft.paragraphs:
+        content = ResearchDraft.validate_content(paragraph.content_markdown)
+        reject_markers(content)
+        markers = " ".join(f"[[cite:{index}]]" for index in resolve_ids(paragraph.evidence_ids))
+        paragraphs.append(content.rstrip() + (" " + markers if markers else ""))
+    column_keys = [column.key for column in draft.comparison_table.columns]
+    for column in draft.comparison_table.columns:
+        reject_markers(column.label)
+    rows: list[dict] = []
+    for row in draft.comparison_table.rows:
+        if set(row.cells) != set(column_keys):
+            raise ValueError("Review cells do not match the columns")
+        cells: dict[str, dict] = {}
+        for key in column_keys:
+            cell = row.cells[key]
+            reject_markers(cell.value)
+            cells[key] = {"value": cell.value, "citation_indexes": resolve_ids(cell.evidence_ids)}
+        rows.append({"paper_id": str(row.paper_id), "cells": cells})
+    return validate_review_result(json.dumps({
+        "content_markdown": "\n\n".join(paragraphs),
+        "citations": citations,
+        "comparison_table": {
+            "columns": [column.model_dump() for column in draft.comparison_table.columns],
+            "rows": rows,
+        },
+    }), evidence, selected_papers)

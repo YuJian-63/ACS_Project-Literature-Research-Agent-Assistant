@@ -1,3 +1,5 @@
+import logging
+import time
 from datetime import datetime
 from typing import Annotated, Literal
 from uuid import UUID
@@ -6,12 +8,13 @@ from fastapi import APIRouter, Query, Request, Response
 from pydantic import Field, field_validator
 from sqlalchemy import func, select
 
-from app.arxiv import build_search_query, normalize_arxiv_id
+from app.arxiv import ERROR_PHASES, ArxivError, build_search_query, normalize_arxiv_id
 from app.db.models import PaperImport
 from app.errors import APIError
 from app.paper_imports import get_import, import_view, retry_import, submit_import
 from app.schemas import Error, ErrorResponse, Page, PaperSourceResponse, PaperStatus, StrictModel
 
+logger = logging.getLogger(__name__)
 router = APIRouter(responses={status: {"model": ErrorResponse} for status in [404, 409, 422, 429, 502, 503, 504]})
 ImportStatus = Literal["queued", "running", "succeeded", "failed"]
 
@@ -73,7 +76,14 @@ def search_papers(
     cache = request.app.state.arxiv_cache
     page = cache.get(normalized, limit, offset)
     if page is None:
-        page = request.app.state.arxiv_client.search(normalized, limit=limit, offset=offset)
+        started = time.monotonic()
+        try:
+            page = request.app.state.arxiv_client.search(normalized, limit=limit, offset=offset)
+        except ArxivError as error:
+            phase = error.phase if isinstance(error.phase, str) and error.phase in ERROR_PHASES else "unknown"
+            logger.warning("arXiv search failed: request_id=%s phase=%s elapsed_ms=%d code=%s",
+                           request.state.request_id, phase, round((time.monotonic() - started) * 1000), error.code)
+            raise
         cache.put(normalized, limit, offset, page)
     with request.app.state.sessions() as session:
         identities = [paper.external_id for paper in page.items]
