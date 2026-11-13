@@ -29,6 +29,12 @@ class Settings(BaseSettings):
     llm_thinking_mode: Literal["provider_default", "disabled", "enabled"] = "provider_default"
     llm_timeout_seconds: float = Field(default=60, ge=1, le=300, allow_inf_nan=False)
     evidence_context_chars: int = Field(default=24000, ge=1000, le=100000)
+    review_context_tokens: int = Field(default=32768, ge=4096, le=1000000)
+    review_output_tokens: int = Field(default=4096, ge=1024, le=32768)
+    review_task_tokens: int = Field(default=100000, ge=1000, le=100000)
+    review_timeout_seconds: int = Field(default=1800, ge=60, le=1800)
+    review_call_timeout_seconds: float = Field(default=90, ge=5, le=300, allow_inf_nan=False)
+    review_evidence_chars: int = Field(default=4000, ge=1000, le=4000)
     arxiv_enabled: bool = False
     arxiv_contact_email: str | None = None
 

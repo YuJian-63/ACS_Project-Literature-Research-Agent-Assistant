@@ -11,7 +11,7 @@
 - PDF 保存到 STORAGE_ROOT/uploads；正文、比较表、引用与事件保存数据库。首版不额外部署对象存储、Redis 或独立日志数据库。
 - 七张目标表中，MVP-0 使用五张核心表；MVP-1A 开始写入真实解析的 paper_chunks，citations 仍只由后续 Runner 依据证据写入，Mock 不生成伪造片段或引用。
 - 引用使用关系表，避免在 artifact JSON 中再保存一套引用；比较表是结构可变的展示数据，采用 JSONB。
-- Agent checkpoint 由 LangGraph checkpointer 管理独立 schema，应用不手工复制它的内部表；task_id 与 thread_id 对应关系由适配器维护。
+- 当前分阶段综述的应用级快照保存在 tasks.review_state；不依赖 LangGraph 内部 checkpointer。如未来引入其内部表，应在独立 schema 使用官方初始化，应用不手工复制内部结构。
 - 暂不固定 embedding 维度或创建向量索引；按组员确定的 embedding 模型再迁移增加 pgvector 数据。
 
 ### 关系图
@@ -82,7 +82,8 @@ UNIQUE(id, paper_id, page_number) 供引用使用复合外键，同时锁定片�
 | 标识/输入 | id、task_type、question | task_type 为 summary/qa/review；qa/review 问题非空，最长 8000 字符；summary 可空，非空时同样最长 8000 字符 |
 | 路由 | workflow_type、runner_type | baseline/extended；mock/langgraph；由后端配置冻结 |
 | 版本 | workflow_version、prompt_version、model_id、dataset_version | 工作流版本必填，其余可空 |
-| 执行配置 | run_config JSONB | 非空对象，只放可记录的运行参数，不保存密钥 |
+| 执行配置 | run_config JSONB | 非空对象，只放可记录的运行参数，不保存密钥；新综述包含不可变 review_policy |
+| 综述快照 | review_state JSONB | 非空对象，默认 {}；冻结证据、阶段结果、请求预留与估算标识 |
 | 预算 | max_steps、max_tokens、timeout_seconds | 默认 10/8000/120，硬上限 100/100000/1800 |
 | 状态 | status、stage | queued/running/succeeded/failed；阶段允许新增规范代码 |
 | 所有权 | worker_id、lease_expires_at | 仅 running 必填，其他状态为空 |
@@ -254,7 +255,7 @@ SELECT claimed.* FROM claimed JOIN recorded ON recorded.task_id = claimed.id;
 
 1. 已提供 SQLAlchemy 七表模型和 20261110_0001 初始迁移；新开发库执行 alembic upgrade head。SQL 文件是设计参考，不应与迁移脚本在同一库重复执行。后续结构变化创建新 revision。
 2. MVP-0 只使用 papers、tasks、task_papers、task_events、artifacts；MVP-1A Parser Worker 原子写入 paper_chunks；citations 留待真实 Runner 按实际证据写入。
-3. LangGraph checkpointer 在独立 schema 执行其官方初始化；应用只持有稳定的线程映射，不共用 tasks 作为内部 checkpoint 表。
+3. 分阶段综述使用 tasks.review_state 保存应用级阶段状态；如另行启用 LangGraph checkpointer，应在独立 schema 执行官方初始化，不把此列作为其内部 checkpoint 表。
 4. 确认 embedding 模型后再引入 pgvector，建议单独建立 chunk_embeddings，固定模型标识、版本、维度和 chunk 关联；不同模型向量不能混用。
 5. pgvector 扩展需要相应 PostgreSQL 镜像/安装支持；本次 DDL 不假设普通 PostgreSQL 已安装该扩展。
 6. 多用户、搜索来源、任务取消/恢复、多个 artifact 和对象存储均通过独立迁移引入，同时升级 API 契约。
@@ -278,7 +279,7 @@ schema.sql 不含凭据、演示业务数据或扩展安装命令；只在新建
 
 ## 9. MVP-3 来源与导入增量设计
 
-当前 head revision 20261112_0002，down_revision=20261110_0001；新增三表，不改变原七表历史、Paper 四态、来源 hash 外键或手动重复上传规则。参考 DDL 已更新为 head，初始 revision 保持不变；已升级旧结构保留原有论文，并验证安全降级保护。
+MVP-3 对应 revision 20261112_0002，down_revision=20261110_0001（当前 head 为 20261114_0003）；新增三表，不改变原七表历史、Paper 四态、来源 hash 外键或手动重复上传规则。参考 DDL 已更新为 head，初始 revision 保持不变；已升级旧结构保留原有论文，并验证安全降级保护。
 
 ### 9.1 paper_sources：已保存 PDF 的来源
 
@@ -330,3 +331,15 @@ queued/running/failed 无 paper_id，非 failed 无错误。索引：created_at 
 - Import SKIP LOCKED 领取、租约 30 秒/心跳 10 秒/总时限 180 秒，失效置 failed，仅显式重试回 queued。
 - downgrade 存在 Source/Import 时拒绝，不能静默丢来源；空增量表可撤销三表，不触碰原业务表。
 - 验收升级/回退/老数据保留、唯一键/FK/状态、并发去重/共享 gate、retry 重放、fencing/回滚/不确定提交；PGlite 与原生 PostgreSQL 多连接/进程证据分开报告。
+
+## 10. 分阶段综述持久化（20261114_0003）
+
+revision 20261114_0003 基于 20261112_0002，新增 tasks.review_state 及对象 CHECK，更新 tasks_lifecycle。历史 run_config、论文、引用和产物不重写，旧任务 review_state 默认为空对象。
+
+新综述使用 langgraph-review-v2，run_config.review_policy 冻结版本、列/章节、证据 registry、单元上下文/输出上限、任务自动预算和重试额度。review_state 包含原始片段快照 evidence、units、usage 和 usage_estimated。每个 unit 以 paper:<UUID> 或 section:<key> 索引，attempts 记录 UUID、owner、状态、输入/输出预留或实际用量、finish_reason 与脱敏诊断；result 仅保存已校验的结构，不保存原始模型响应或密钥。
+
+调用前锁 tasks 行并验证 owner、租约及首次执行截止时间，持久化预留后才发送请求。响应成功时在同一事务结算 usage 并保存已验证结果；无效/失败调用也计入累计用量。缺少完整 usage 或失联导致结果不确定时保留预留并标记估算；不会因 Worker 重启重置。
+
+仅该工作流允许 running → queued，保留 started_at，清空 owner/lease，追加恢复事件；重新领取使用同一截止时间。queued 检查仅对此版本允许 started_at 非空，监控也处理恢复排队期间的超时。历史工作流仍以 WORKER_LOST 终止。所有阶段操作及最终完成都校验当前所有权；旧 Worker 即使返回结果也不能落库。
+
+应用每次修改 JSONB 均整体赋值。全部阶段完成后再次严格校验，artifacts/citations、成功状态和完成事件仍在同一事务发布。迁移降级会丢弃 review_state；如果存在带 started_at 的 queued 任务，旧生命周期 CHECK 会拒绝降级并回滚，应先按正常流程处理任务。

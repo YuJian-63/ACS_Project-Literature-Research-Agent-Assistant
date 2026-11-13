@@ -27,7 +27,7 @@ API 和 Worker 必须使用同一个数据库及 STORAGE_ROOT。Mock Worker 仅�
 
 浏览器访问 `http://127.0.0.1:8000/docs` 使用自动生成的交互式接口文档，`/openapi.json` 为机器可读契约。先检查 `/health` 和 `/ready`，再上传 PDF、提交任务并轮询结果。停止 API 和 Worker 不会删除数据库和论文文件。
 
-Linux/macOS 将复制命令替换为 `cp .env.example .env`。其他命令相同。迁移成功后的 revision 是 `20261112_0002`；数据库包含原七张表、新增三张来源/导入/共享访问许可表，以及 Alembic 自己的版本表。`alembic check` 正常输出 `No new upgrade operations detected.`。
+Linux/macOS 将复制命令替换为 `cp .env.example .env`。其他命令相同。迁移成功后的 revision 是 `20261114_0003`；数据库包含原七张表、新增三张来源/导入/共享访问许可表，以及 Alembic 自己的版本表。`alembic check` 正常输出 `No new upgrade operations detected.`。
 
 依赖版本由 `uv.lock` 固定，当前使用可访问的清华公共 PyPI 镜像，项目不依赖个人机器的全局镜像设置。本次环境访问官方 PyPI 出现 TLS 失败；需要换源时修改 `pyproject.toml` 的 index 并重新生成锁文件，不手工替换锁文件中的包地址。
 
@@ -236,17 +236,45 @@ Mock 与真实 Runner 分别领取对应队列。当前没有可用远端模型�
 
 综述先为每篇有片段的论文预留一个最短片段，再按问题相关度轮流追加证据，受总字符数和 32 个片段上限约束。最小覆盖无法满足时以 `BUDGET_EXCEEDED` 失败，不调用模型或写部分产物。所有论文均无片段时，不调用模型，返回明确的证据不足和逐篇证据状态表，Token/模型/工具计数均为 0。部分论文无证据时，其比较内容为 null，不编造结论。
 
-正常综述使用单次模型调用，步骤预算至少 1。新建真实综述由服务端冻结 `run_config.max_output_tokens=4096`；实际请求上限为该值与「任务总 Token 预算减去预估输入」的较小值。预估输入已耗尽总预算时不调用模型，返回 `BUDGET_EXCEEDED`；调用后仍以供应商报告的实际输入/输出用量检查总预算。旧任务缺少该字段时保持 2048，包括已存在的 review-v2；摘要、问答及 Mock 不变。字段不接受客户端指定；持久化值必须为精确整数，review 仅支持 2048/4096，单篇仅支持 2048，异常值执行前失败。增加上限可能增加费用，不保证 JSON 一定完整；截断仍严格失败，不自动续写、修补 JSON 或重试。表格恰好覆盖所有选定论文；每个非空研究内容单元格必须引用本行论文的有效原文，服务端统一生成 C 编号后与正文、引用、usage 和成功状态原子写入。引用来源一致只证明可追溯，不等于语义正确性已获得人工验收。
+历史 `langgraph-review-v1` 综述使用单次模型调用，步骤预算至少 1。该历史工作流后期提交的综述由服务端冻结 `run_config.max_output_tokens=4096`；实际请求上限为该值与「任务总 Token 预算减去预估输入」的较小值。预估输入已耗尽总预算时不调用模型，返回 `BUDGET_EXCEEDED`；调用后仍以供应商报告的实际输入/输出用量检查总预算。旧任务缺少该字段时保持 2048，包括已存在的 review-v2；摘要、问答及 Mock 不变。字段不接受客户端指定；持久化值必须为精确整数，review 仅支持 2048/4096，单篇仅支持 2048，异常值执行前失败。增加上限可能增加费用，不保证 JSON 一定完整；截断仍严格失败，不自动续写、修补 JSON 或重试。表格恰好覆盖所有选定论文；每个非空研究内容单元格必须引用本行论文的有效原文，服务端统一生成 C 编号后与正文、引用、usage 和成功状态原子写入。引用来源一致只证明可追溯，不等于语义正确性已获得人工验收。
 
 历史任务 `6111bd43-31fb-449b-ab42-f0605a35ae27` 已实际到达官方模型，但返回 `INVALID_AGENT_RESULT`，details 为 `invalid_json` / `length`。只读核对确认其总预算 16000、预估输入 10780，Worker 当时仍把输出限制为 2048。随后实施新建真实综述冻结 4096 输出上限的调整，并指导用户在保留正确密钥的原终端分别重启 API 与真实 Runner；重启不会改写旧任务或幂等重放的配置。新建验收沿用两篇 ready 论文、总预算 16000、步骤 10、执行超时 180 秒。
 
 2026-11-13 用户反馈新任务 `3cd9c072-c9f5-4b03-9d91-af2abd358570` 执行成功，并逐项确认真实运行信息、综述正文与比较表、两篇论文引用及 PDF 物理页码、刷新恢复全部正常。本次双论文真实综述端到端人工验收通过；证据为用户反馈，代理未独立重跑或只读核对该任务的冻结配置、实际 Token 用量及完整产物，不声称实际输出超过 2048 或证明普遍可靠性。该结果不改变严格引用校验，不解决真实 arXiv 后续超时。详细记录见 `../docs/superpowers/plans/2026-11-13-real-review-acceptance.md`；设计与离线验证见 `../docs/superpowers/specs/2026-11-13-review-output-budget.md`。
 
+### 8.1 自动预算与分阶段综述（2026-11-14）
+
+新建真实 review 使用 `langgraph-review-v2 / evidence-review-v3`，适用于 2—20 篇 ready 论文。前端移除预算输入；后端忽略客户端 review 预算，按论文数量、证据长度、问题及提示词开销冻结 `run_config.review_policy`。单篇摘要、问答、Mock 和历史综述沿用原行为。
+
+每篇论文最多采样四个分布于全文的片段，默认每篇共 4000 字符；证据用于研究目标、方法、评估、局限四列。随后分别生成共同点、差异、局限三个短章节，比较表与引用由服务端组装。信息不足时返回 null 或证据不足说明，不推断未采样的实验结果。采样不等于完整阅读全文。
+
+服务器自动尝试更紧凑的内容和证据配置，检查单次上下文、累计 Token、调用数和总时限。默认每次输出最多 4096 Token；任务硬上限仍为 100 次调用、100000 累计 Token、1800 秒。输入 Token 按每个 UTF-8 字节最多一个 Token 加消息开销预留，并非供应商精确分词器，模型上下文和输出限制须由部署者正确配置。即使论文数量在 2—20 篇内，完整证据或较长问题也可能超过累计上限；最低证据额度仍不足时不继续压缩成失去意义的片段。无法容纳时创建返回 `422 REVIEW_CAPACITY_EXCEEDED`，不请求模型。
+
+每个分析/章节最多尝试两次；全任务额外重试最多两次（超过 12 篇时一次），失败只重试当前单元并要求更短输出。JSON、证据 ID、跨论文引用、字符长度和最终逐字引文仍严格校验。重试依然可能失败；所有阶段成功且最终校验通过后才原子发布结果。
+
+`tasks.review_state` 保存证据快照、验证后的阶段结果和调用预留，不保存原始模型输出或密钥。每次请求前先持久化预计用量；无 usage 或结果不确定时保留估算，API 的 `stats.usage_estimated` 标识此情况。失败/无效响应也累计费用估算。Worker 租约到期后在原截止时间内从已保存阶段恢复；旧 Worker 无权补写，不确定请求可能再执行一次，但保留原预留并受全局上限约束。
+
+部署前停止 API 和真实 Runner，保留正确的 `.env` 配置，在 backend 执行：
+
+```powershell
+uv run --locked alembic upgrade head
+uv run --locked alembic current
+uv run --locked alembic check
+```
+
+确认 `20261114_0003 (head)` 后分别重启 `uv run --locked uvicorn app.main:create_app --factory --host 127.0.0.1 --port 8000` 和 `uv run --locked python -m app.runner_worker`。Parser/Import Worker 如在运行也应重启以加载统一版本。升级保留历史任务。降级0003会删除阶段快照；若存在已恢复且带 started_at 的 queued 任务，旧生命周期约束会阻止降级，须先正常处理任务，不能直接清除记录绕过。
+
+可选部署参数见 `.env.example`：`REVIEW_CONTEXT_TOKENS`、`REVIEW_OUTPUT_TOKENS`、`REVIEW_TASK_TOKENS`、`REVIEW_TIMEOUT_SECONDS`、`REVIEW_CALL_TIMEOUT_SECONDS`、`REVIEW_EVIDENCE_CHARS`。不需要用户为每个任务设置这些值。
+
+开发验证：`PYTHONPATH=backend/src` 下使用 backend 虚拟环境运行 `python -m unittest discover -s backend/tests -q`；原生数据库测试仅在显式提供 `STAGED_REVIEW_TEST_URL` 且目标为本机 55433 / review_tests 时启用，不能指向业务库。真实六篇论文验证需创建新任务，观察逐篇/分章进度、完整六行比较表、引用及刷新恢复。
+
+2026-11-14 用户完成上述迁移并确认服务检查正常，新建六篇论文综述任务 `eb3b4c9e-39db-4e19-bd88-5e64faeb9941` 成功。用户人工确认正文完整、六行比较表、正文/表格引用抽查及刷新后的结果和自动分配显示全部正常。本次真实六篇验收通过；代理未独立读取该任务配置、实际用量或重试次数，完整记录见 `../docs/superpowers/plans/2026-11-14-staged-review.md`。
+
 ## 9. arXiv 搜索与导入（MVP-3）
 
 ### 开启步骤
 
-1. 启动 Docker Desktop，等引擎就绪。先按第 1 节启动 PostgreSQL；已有数据库先备份，再运行 `uv run --locked alembic upgrade head` 和 `uv run --locked alembic check`，确认 revision 为 `20261112_0002`。不要执行 schema.sql 或删除数据卷。
+1. 启动 Docker Desktop，等引擎就绪。先按第 1 节启动 PostgreSQL；已有数据库先备份，再运行 `uv run --locked alembic upgrade head` 和 `uv run --locked alembic check`，确认 revision 为 `20261114_0003`。不要执行 schema.sql 或删除数据卷。
 2. 只在本地 `backend/.env` 设置 `ARXIV_ENABLED=true`，并将 `ARXIV_CONTACT_EMAIL` 填为你自己的有效联系邮箱；不要把邮箱/配置文件提交 Git。首次配置才复制 `.env.example`，不要覆盖现有配置。无需填写任何模型密钥。
 3. 重启 API，让它读取新配置。在独立终端启动导入 Worker，另一个终端保持 Parser Worker 运行；所有进程共用 DATABASE_URL 和 STORAGE_ROOT：
 

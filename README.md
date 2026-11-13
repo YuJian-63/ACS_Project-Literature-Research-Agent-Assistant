@@ -15,7 +15,7 @@ HKUST CSIT6000V Advanced AI Computing and Systems Project: Literature Research A
 
 MVP-3 增量已提供 arXiv 关键词搜索、指定版本 PDF 导入、持久化导入记录和独立 Import Worker；默认关闭联网功能。2026-11-13 用户完成隔离原生 PostgreSQL 17.6 的八组专项验收，并确认真实 arXiv 搜索、单版本下载、解析、浏览器展示及 Mock 任务闭环通过。开启步骤见后端文档第 9 节；不需要模型密钥即可搜索、下载和解析。详细证据和验收边界见 [MVP-3 实施记录](docs/superpowers/plans/2026-11-12-mvp-3-arxiv-search-import.md)。
 
-真实模型联调已完成 DeepSeek 单篇摘要、单篇问答及一次双论文综述的用户人工验收，覆盖正文、来源引用、PDF 物理页码与刷新恢复。新建真实综述使用服务端冻结的 4096 Token 输出上限，仍受剩余总预算约束；历史任务与单篇任务保持 2048。范围和历史失败见 [单篇验收记录](docs/superpowers/plans/2026-11-13-model-thinking-mode.md) 与 [双论文综述验收记录](docs/superpowers/plans/2026-11-13-real-review-acceptance.md)。这些单次验收不代表普遍生成可靠性；正式测试/CI 仍待建设，真实 arXiv 后续出现的超时也未被本次综述验收解决。
+真实模型联调已完成 DeepSeek 单篇摘要、单篇问答及一次双论文综述的用户人工验收，覆盖正文、来源引用、PDF 物理页码与刷新恢复。2026-11-14 新建真实综述改为服务端自动预算：逐篇分析，再分别生成三段综述，服务端组装比较表和引用；用户无需填写预算。已通过离线模型、隔离 PostgreSQL 和浏览器验证，用户已完成新流程的真实六篇论文人工验收，任务 `eb3b4c9e-39db-4e19-bd88-5e64faeb9941`；确认正文完整、六行比较表、引用抽查和刷新恢复正常。历史任务保留原工作流与输出上限，见 [分阶段综述实施记录](docs/superpowers/plans/2026-11-14-staged-review.md)。已有人工验收不代表普遍生成可靠性，arXiv 超时也不由此次调整解决。
 
 ## 本地运行
 

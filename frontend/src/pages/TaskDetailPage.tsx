@@ -23,7 +23,7 @@ function TaskInputs({ task }: { task: Task }) {
     <h3>{t("选定论文")} <span>{t("{0} 篇", [task.paper_ids.length])}</span></h3>
     {resource.error && <ErrorNotice error={resource.error} title={t("论文信息查询失败")} retry={resource.reload} />}
     {resource.loading ? <Skeleton active title={false} paragraph={{ rows: 2 }} /> : <ul className="source-papers">{resource.data?.map((paper) => <li key={paper.id}><a href={paperFileUrl(paper.id)} target="_blank" rel="noopener noreferrer">{paper.title}</a><span>{t("查看 PDF")}</span></li>)}</ul>}
-    <p className="section-footnote">{t("预算：{0} 步 · {1} Token · {2} 秒执行超时", [task.budget.max_steps, task.budget.max_tokens.toLocaleString(getLocale()), task.budget.timeout_seconds])}</p>
+    <p className="section-footnote">{t(task.budget_mode === 'automatic' ? "系统自动分配：最多 {0} 次调用 · {1} Token · {2} 秒" : "预算：{0} 步 · {1} Token · {2} 秒执行超时", [task.budget.max_steps, task.budget.max_tokens.toLocaleString(getLocale()), task.budget.timeout_seconds])}</p>
   </section>;
 }
 
@@ -43,7 +43,7 @@ function TaskDetail({ taskId }: { taskId: string }) {
         <section className="content-panel result-panel">
           {task.status === 'succeeded' ? <>
             {state.artifactError ? <ErrorNotice error={state.artifactError} title={t("结果查询失败，任务仍为已完成")} retry={state.refresh} /> : state.artifacts === undefined ? <Skeleton active paragraph={{ rows: 5 }} /> : state.artifacts.length ? <Suspense fallback={<Spin><div className="loading-placeholder" /></Spin>}>{state.artifacts.map((artifact) => <ArtifactView key={artifact.id} artifact={artifact} />)}</Suspense> : <Alert type="warning" showIcon title={t("尚未取得任务产物，请重试查询。")} action={<Button onClick={state.refresh}>{t("重试查询")}</Button>} />}
-          </> : <><div className="panel-heading"><h2>{t("研究结果")}</h2></div><div className="waiting-result"><Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={task.status === 'queued' ? t("任务正在等待执行") : task.status === 'running' ? t("任务执行中，结果尚未生成") : t("此任务没有生成研究结果")} /><p>{task.status === 'queued' ? t("请确认对应的后端 Worker 已启动。排队期间可以离开页面，稍后按任务 ID 恢复查询。") : task.status === 'running' ? t("页面会在每次查询完成后等待 2 秒再刷新，执行记录持续保存在后端。") : t("请查看失败原因，调整输入或预算后重新创建任务。")}</p></div></>}
+          </> : <><div className="panel-heading"><h2>{t("研究结果")}</h2></div><div className="waiting-result"><Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={task.status === 'queued' ? t("任务正在等待执行") : task.status === 'running' ? t("任务执行中，结果尚未生成") : t("此任务没有生成研究结果")} /><p>{task.status === 'queued' ? t("请确认对应的后端 Worker 已启动。排队期间可以离开页面，稍后按任务 ID 恢复查询。") : task.status === 'running' ? t("页面会在每次查询完成后等待 2 秒再刷新，执行记录持续保存在后端。") : t(task.budget_mode === 'automatic' ? "请查看失败原因，调整研究问题或论文选择后重新创建任务。" : "请查看失败原因，调整输入或预算后重新创建任务。")}</p></div></>}
         </section>
         <TaskInputs task={task} />
       </div><aside className="detail-aside">
@@ -51,7 +51,7 @@ function TaskDetail({ taskId }: { taskId: string }) {
           {state.eventError && <ErrorNotice error={state.eventError} title={t("执行记录查询失败")} retry={state.refresh} />}
           {state.events.length ? <Timeline items={state.events.map((event) => ({ key: event.seq, color: event.event_type === 'error' ? 'red' : event.status === 'succeeded' ? 'green' : 'blue', content: <div className="trace-event"><span>{dateTime(event.created_at)} · #{event.seq}</span><p>{eventText(event)}</p></div> }))} /> : <p className="muted">{t("尚未取得执行记录。")}</p>}
         </section>
-        <section className="content-panel stats-panel"><h2>{t("实际运行统计")}</h2><dl><div><dt>{t("排队耗时")}</dt><dd>{duration(task.stats.queue_ms)}</dd></div><div><dt>{t("执行耗时")}</dt><dd>{duration(task.stats.execution_ms)}</dd></div><div><dt>{t("总耗时")}</dt><dd>{duration(task.stats.end_to_end_ms)}</dd></div><div><dt>{t("输入 / 输出 Token")}</dt><dd>{task.stats.input_tokens ?? '—'} / {task.stats.output_tokens ?? '—'}</dd></div><div><dt>{t("模型 / 工具调用")}</dt><dd>{task.stats.model_calls ?? '—'} / {task.stats.tool_calls ?? '—'}</dd></div></dl><p className="section-footnote">{t("“—”表示没有报告或未发生测量，不等同于 0。")}</p><div className="version-note">{t("工作流：")}{task.versions.workflow_version}<br />{t("模型：")}{task.versions.model_id || (task.is_mock ? t("未调用模型") : t("未报告"))}</div></section>
+        <section className="content-panel stats-panel"><h2>{t("实际运行统计")}</h2>{task.stats.usage_estimated && <p className="section-footnote">{t("部分调用未报告用量，统计包含保守预留估算。")}</p>}<dl><div><dt>{t("排队耗时")}</dt><dd>{duration(task.stats.queue_ms)}</dd></div><div><dt>{t("执行耗时")}</dt><dd>{duration(task.stats.execution_ms)}</dd></div><div><dt>{t("总耗时")}</dt><dd>{duration(task.stats.end_to_end_ms)}</dd></div><div><dt>{t("输入 / 输出 Token")}</dt><dd>{task.stats.input_tokens ?? '—'} / {task.stats.output_tokens ?? '—'}</dd></div><div><dt>{t("模型 / 工具调用")}</dt><dd>{task.stats.model_calls ?? '—'} / {task.stats.tool_calls ?? '—'}</dd></div></dl><p className="section-footnote">{t("“—”表示没有报告或未发生测量，不等同于 0。")}</p><div className="version-note">{t("工作流：")}{task.versions.workflow_version}<br />{t("模型：")}{task.versions.model_id || (task.is_mock ? t("未调用模型") : t("未报告"))}</div></section>
       </aside></div>
     </>}
   </>;

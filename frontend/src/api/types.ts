@@ -80,7 +80,7 @@ export interface TaskCreate {
   question: string | null;
   paper_ids: string[];
   workflow_type: 'baseline';
-  budget: Budget;
+  budget?: Budget;
 }
 
 export interface TaskAccepted {
@@ -103,6 +103,7 @@ export interface TaskSummary extends TaskAccepted {
 }
 
 export interface Task extends TaskSummary {
+  budget_mode?: 'manual' | 'automatic';
   budget: Budget;
   versions: {
     model_id: string | null;
@@ -111,6 +112,7 @@ export interface Task extends TaskSummary {
     dataset_version: string | null;
   };
   stats: {
+    usage_estimated?: boolean;
     queue_ms: number | null;
     execution_ms: number | null;
     end_to_end_ms: number | null;

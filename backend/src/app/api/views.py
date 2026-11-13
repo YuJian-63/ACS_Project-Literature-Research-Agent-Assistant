@@ -60,6 +60,7 @@ def task_view(task: Task, paper_ids: list) -> dict:
         total_tokens = task.input_tokens + task.output_tokens
     return {
         **summary_view(task, paper_ids),
+        "budget_mode": "automatic" if task.workflow_version == "langgraph-review-v2" else "manual",
         "budget": {name: getattr(task, name) for name in (
             "max_steps", "max_tokens", "timeout_seconds"
         )},
@@ -67,6 +68,7 @@ def task_view(task: Task, paper_ids: list) -> dict:
             "model_id", "workflow_version", "prompt_version", "dataset_version"
         )},
         "stats": {
+            "usage_estimated": bool((task.review_state or {}).get("usage_estimated", False)),
             "queue_ms": elapsed_ms(task.created_at, task.started_at),
             "execution_ms": elapsed_ms(task.started_at, task.finished_at),
             "end_to_end_ms": elapsed_ms(task.created_at, task.finished_at),

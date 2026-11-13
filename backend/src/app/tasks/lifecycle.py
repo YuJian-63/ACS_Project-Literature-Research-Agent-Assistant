@@ -3,7 +3,7 @@ from datetime import datetime, timedelta
 from threading import Event, Thread
 from uuid import UUID
 
-from sqlalchemy import func, or_, select, text
+from sqlalchemy import and_, func, or_, select, text
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.db.models import Artifact, Citation, Task, TaskEvent
@@ -19,12 +19,12 @@ def database_time(session: Session) -> datetime:
     return session.scalar(select(func.clock_timestamp()))
 
 
-def append_event(session: Session, task: Task, now: datetime, message: str, event_type: str) -> None:
+def append_event(session: Session, task: Task, now: datetime, message: str, event_type: str, payload: dict | None = None) -> None:
     task.last_event_seq += 1
     task.updated_at = now
     session.add(TaskEvent(
         task_id=task.id, seq=task.last_event_seq, event_type=event_type,
-        status=task.status, stage=task.stage, message=message, payload={}, created_at=now,
+        status=task.status, stage=task.stage, message=message, payload=payload or {}, created_at=now,
     ))
 
 
@@ -47,10 +47,15 @@ def claim_task(sessions: sessionmaker[Session], owner: UUID, runner_type: str = 
         if task is None:
             return None
         now = database_time(session)
+        staged_review = task.workflow_version == "langgraph-review-v2"
+        if staged_review and task.started_at is not None and task.started_at + timedelta(seconds=task.timeout_seconds) <= now:
+            mark_failed(session, task, now, "TASK_TIMEOUT", "任务超过执行时间预算")
+            return None
         task.status = "running"
         task.stage = "mock_preparing" if runner_type == "mock" else "retrieving"
         task.worker_id = owner
-        task.started_at = now
+        if not staged_review or task.started_at is None:
+            task.started_at = now
         task.lease_expires_at = now + timedelta(seconds=LEASE_SECONDS)
         message = "模拟任务开始执行，尚未分析论文" if runner_type == "mock" else "真实研究任务开始，正在读取已解析证据"
         append_event(session, task, now, message, "status")
@@ -168,7 +173,7 @@ def complete_real(
         now = database_time(session)
         if not owns_task(task, owner, now) or task.runner_type != "langgraph":
             return False
-        if task.stage not in {"generating", "writing"}:
+        if task.stage not in {"generating", "writing", "validating"}:
             return False
         if input_tokens is not None and output_tokens is not None and input_tokens + output_tokens > task.max_tokens:
             mark_failed(session, task, now, "BUDGET_EXCEEDED", "模型用量超过任务 Token 预算")
@@ -209,10 +214,9 @@ def reap_expired(sessions: sessionmaker[Session]) -> int:
     with sessions.begin() as session:
         tasks = list(session.scalars(
             select(Task).where(
-                Task.status == "running",
                 or_(
-                    Task.lease_expires_at <= func.clock_timestamp(),
-                    Task.started_at + Task.timeout_seconds * text("interval '1 second'") <= func.clock_timestamp(),
+                    and_(Task.status == "running", Task.lease_expires_at <= func.clock_timestamp()),
+                    and_(Task.status.in_(["running", "queued"]), Task.started_at + Task.timeout_seconds * text("interval '1 second'") <= func.clock_timestamp()),
                 ),
             ).order_by(Task.id).limit(100).with_for_update(skip_locked=True)
         ))
@@ -223,7 +227,14 @@ def reap_expired(sessions: sessionmaker[Session]) -> int:
                 mark_failed(session, task, now, "TASK_TIMEOUT", "任务超过执行时间预算")
                 count += 1
             elif task.lease_expires_at <= now:
-                mark_failed(session, task, now, "WORKER_LOST", "Worker 租约已过期")
+                if task.workflow_version == "langgraph-review-v2":
+                    task.status = "queued"
+                    task.stage = "queued"
+                    task.worker_id = None
+                    task.lease_expires_at = None
+                    append_event(session, task, now, "综述执行中断，将从已保存的阶段恢复", "warning")
+                else:
+                    mark_failed(session, task, now, "WORKER_LOST", "Worker 租约已过期")
                 count += 1
         return count
 

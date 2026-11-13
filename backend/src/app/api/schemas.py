@@ -130,6 +130,7 @@ class Versions(BaseModel):
 
 
 class TaskStats(BaseModel):
+    usage_estimated: bool = False
     queue_ms: int | None
     execution_ms: int | None
     end_to_end_ms: int | None
@@ -141,6 +142,7 @@ class TaskStats(BaseModel):
 
 
 class TaskResponse(TaskSummary):
+    budget_mode: Literal["manual", "automatic"] = "manual"
     budget: Budget
     versions: Versions
     stats: TaskStats

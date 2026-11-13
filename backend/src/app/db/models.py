@@ -112,6 +112,7 @@ class Task(UUIDPrimaryKey, CreatedAt, UpdatedAt, Base):
     model_id: Mapped[str | None] = mapped_column(Text)
     dataset_version: Mapped[str | None] = mapped_column(Text)
     run_config: Mapped[dict[str, Any]] = mapped_column(JSONB, server_default=text("'{}'::jsonb"))
+    review_state: Mapped[dict[str, Any]] = mapped_column(JSONB, server_default=text("'{}'::jsonb"))
     max_steps: Mapped[int] = mapped_column(Integer, server_default=text("10"))
     max_tokens: Mapped[int] = mapped_column(Integer, server_default=text("8000"))
     timeout_seconds: Mapped[int] = mapped_column(Integer, server_default=text("120"))
@@ -141,6 +142,7 @@ class Task(UUIDPrimaryKey, CreatedAt, UpdatedAt, Base):
         CheckConstraint("length(btrim(model_id)) > 0"),
         CheckConstraint("length(btrim(dataset_version)) > 0"),
         CheckConstraint("jsonb_typeof(run_config) = 'object'"),
+        CheckConstraint("jsonb_typeof(review_state) = 'object'", name="ck_tasks_review_state_object"),
         CheckConstraint("max_steps BETWEEN 1 AND 100"),
         CheckConstraint("max_tokens BETWEEN 1 AND 100000"),
         CheckConstraint("timeout_seconds BETWEEN 1 AND 1800"),
@@ -168,7 +170,7 @@ class Task(UUIDPrimaryKey, CreatedAt, UpdatedAt, Base):
             name="tasks_timestamps",
         ),
         CheckConstraint(
-            "(status = 'queued' AND stage = 'queued' AND started_at IS NULL AND finished_at IS NULL "
+            "(status = 'queued' AND stage = 'queued' AND (started_at IS NULL OR workflow_version = 'langgraph-review-v2') AND finished_at IS NULL "
             "AND worker_id IS NULL AND lease_expires_at IS NULL) "
             "OR (status = 'running' AND started_at IS NOT NULL AND finished_at IS NULL "
             "AND worker_id IS NOT NULL AND lease_expires_at IS NOT NULL AND lease_expires_at > started_at) "

@@ -7,15 +7,20 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.config import Settings
-from app.db.models import Paper, Task, TaskEvent, TaskPaper
+from app.db.models import Paper, PaperChunk, Task, TaskEvent, TaskPaper
+from app.research.retrieval import EvidenceChunk
+from app.research.review_policy import WORKFLOW_VERSION, PROMPT_VERSION, build_review_plan
 from app.errors import APIError
 from app.api.schemas import TaskCreate
 from app.api.views import accepted_view
 
 
-def request_hash(request: TaskCreate) -> str:
+def request_hash(request: TaskCreate, *, automatic_review: bool = False) -> str:
+    data = request.model_dump(mode="json")
+    if automatic_review:
+        data.pop("budget", None)
     canonical = json.dumps(
-        request.model_dump(mode="json"), sort_keys=True, separators=(",", ":"), ensure_ascii=False
+        data, sort_keys=True, separators=(",", ":"), ensure_ascii=False
     )
     return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
@@ -41,7 +46,7 @@ def submit_task(
             if key is not None:
                 existing = session.scalar(select(Task).where(Task.idempotency_key == key))
                 if existing is not None:
-                    return replay(existing, digest)
+                    return replay(existing, request_hash(request, automatic_review=existing.workflow_version == WORKFLOW_VERSION))
             if request.workflow_type != "baseline":
                 raise APIError(422, "WORKFLOW_NOT_AVAILABLE", "当前阶段仅开放 baseline 工作流")
             runner_type = settings.task_runner
@@ -60,6 +65,9 @@ def submit_task(
             if any(paper.status not in allowed_statuses for paper in papers):
                 raise APIError(409, "PAPER_NOT_READY", "选定论文尚不可用于执行任务")
             run_config = {"mock_step_delay_seconds": settings.mock_step_delay_seconds}
+            budget = request.budget.model_dump()
+            review_state = {}
+            staged_review = runner_type == "langgraph" and request.task_type == "review"
             if runner_type == "langgraph":
                 run_config = {
                     "model_base_url": settings.llm_base_url,
@@ -67,16 +75,32 @@ def submit_task(
                     "model_timeout_seconds": settings.llm_timeout_seconds,
                     "evidence_context_chars": settings.evidence_context_chars,
                 }
-                if request.task_type == "review":
-                    run_config["max_output_tokens"] = 4096
+                if staged_review:
+                    groups = {str(paper.id): [] for paper in papers}
+                    by_id = {paper.id: paper for paper in papers}
+                    chunks = session.scalars(select(PaperChunk).where(PaperChunk.paper_id.in_(by_id)).order_by(PaperChunk.paper_id, PaperChunk.chunk_index))
+                    for chunk in chunks:
+                        groups[str(chunk.paper_id)].append(EvidenceChunk(
+                            chunk_id=str(chunk.id), paper_id=str(chunk.paper_id), paper_title=by_id[chunk.paper_id].title,
+                            chunk_index=chunk.chunk_index, page_number=chunk.page_number, content=chunk.content,
+                        ))
+                    selected = [{"paper_id": str(paper.id), "paper_title": paper.title} for paper in papers]
+                    try:
+                        plan, evidence = build_review_plan(selected, groups, request.question, settings)
+                    except ValueError:
+                        raise APIError(422, "REVIEW_CAPACITY_EXCEEDED", "当前综述规模超过服务器处理上限，请缩小研究范围或减少论文数量") from None
+                    run_config["review_policy"] = plan
+                    review_state = {"evidence": [chunk.model_dump() for chunk in evidence], "units": {}, "usage_estimated": False}
+                    budget = {name: plan[name] for name in ("max_steps", "max_tokens", "timeout_seconds")}
+                    digest = request_hash(request, automatic_review=True)
             task = Task(
                 id=uuid4(), task_type=request.task_type, question=request.question,
                 workflow_type=request.workflow_type, runner_type=runner_type,
-                workflow_version="mock-v1" if runner_type == "mock" else ("langgraph-review-v1" if request.task_type == "review" else "langgraph-v1"),
-                prompt_version=None if runner_type == "mock" else ("evidence-review-v2" if request.task_type == "review" else "evidence-v4"),
+                workflow_version="mock-v1" if runner_type == "mock" else (WORKFLOW_VERSION if staged_review else "langgraph-v1"),
+                prompt_version=None if runner_type == "mock" else (PROMPT_VERSION if staged_review else "evidence-v4"),
                 model_id=None if runner_type == "mock" else settings.llm_model_id,
-                run_config=run_config,
-                **request.budget.model_dump(), idempotency_key=key, request_hash=digest,
+                run_config=run_config, review_state=review_state,
+                **budget, idempotency_key=key, request_hash=digest,
                 last_event_seq=1,
             )
             session.add(task)
@@ -96,7 +120,7 @@ def submit_task(
             with sessions.begin() as session:
                 existing = session.scalar(select(Task).where(Task.idempotency_key == key))
                 if existing is not None:
-                    return replay(existing, digest)
+                    return replay(existing, request_hash(request, automatic_review=existing.workflow_version == WORKFLOW_VERSION))
         raise
 
 

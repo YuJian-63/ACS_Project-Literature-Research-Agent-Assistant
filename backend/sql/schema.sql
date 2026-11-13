@@ -58,6 +58,7 @@ CREATE TABLE tasks (
     model_id text CHECK (length(btrim(model_id)) > 0),
     dataset_version text CHECK (length(btrim(dataset_version)) > 0),
     run_config jsonb NOT NULL DEFAULT '{}'::jsonb CHECK (jsonb_typeof(run_config) = 'object'),
+    review_state jsonb NOT NULL DEFAULT '{}'::jsonb CONSTRAINT ck_tasks_review_state_object CHECK (jsonb_typeof(review_state) = 'object'),
     max_steps integer NOT NULL DEFAULT 10 CHECK (max_steps BETWEEN 1 AND 100),
     max_tokens integer NOT NULL DEFAULT 8000 CHECK (max_tokens BETWEEN 1 AND 100000),
     timeout_seconds integer NOT NULL DEFAULT 120 CHECK (timeout_seconds BETWEEN 1 AND 1800),
@@ -92,7 +93,7 @@ CREATE TABLE tasks (
         AND (finished_at IS NULL OR finished_at >= coalesce(started_at, created_at))
     ),
     CONSTRAINT tasks_lifecycle CHECK (
-        (status = 'queued' AND stage = 'queued' AND started_at IS NULL AND finished_at IS NULL
+        (status = 'queued' AND stage = 'queued' AND (started_at IS NULL OR workflow_version = 'langgraph-review-v2') AND finished_at IS NULL
             AND worker_id IS NULL AND lease_expires_at IS NULL)
         OR (status = 'running' AND started_at IS NOT NULL AND finished_at IS NULL
             AND worker_id IS NOT NULL AND lease_expires_at IS NOT NULL AND lease_expires_at > started_at)

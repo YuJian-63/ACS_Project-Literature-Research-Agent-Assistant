@@ -4,6 +4,7 @@ import { stageLabels } from '../lib/format';
 import type { ResourceError, TaskEvent } from '../api/types';
 
 const errorMessages: Record<string, string> = {
+  REVIEW_CAPACITY_EXCEEDED: 'This review exceeds the server capacity. Narrow the question or select fewer papers.',
   ARXIV_TIMEOUT: 'The arXiv request timed out. Please try again.',
   ARXIV_RATE_LIMITED: 'arXiv requests are temporarily rate limited. Please wait before retrying.',
   ARXIV_NOT_CONFIGURED: 'arXiv is not configured on the server.',
@@ -61,6 +62,9 @@ export function errorText(error: Pick<ResourceError, 'code' | 'message'>): strin
 }
 
 export function eventText(event: TaskEvent): string {
+  if ((event.stage === 'analyzing' || event.stage === 'synthesizing') && Number.isInteger(event.payload.current) && Number.isInteger(event.payload.total)) {
+    return t(event.stage === 'analyzing' ? '正在分析论文：{0} / {1}' : '正在生成综述章节：{0} / {1}', [event.payload.current, event.payload.total]);
+  }
   if (getLocale() === 'zh-CN') return event.message;
   if (Object.hasOwn(english, event.message)) return t(event.message);
   if (!/[\u3400-\u9fff]/.test(event.message)) return event.message;

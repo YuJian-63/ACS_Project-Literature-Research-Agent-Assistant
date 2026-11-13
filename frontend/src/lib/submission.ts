@@ -4,20 +4,21 @@ import type { Budget, TaskCreate, TaskType } from '../api/types';
 export const defaultBudget: Budget = { max_steps: 10, max_tokens: 8000, timeout_seconds: 120 };
 export const maxFileBytes = 20 * 1024 * 1024;
 
-export function normalizeSubmission(taskType: TaskType, question: string | undefined, paperIds: string[], budget: Budget): TaskCreate {
+export function normalizeSubmission(taskType: TaskType, question: string | undefined, paperIds: string[], budget: Budget = defaultBudget): TaskCreate {
   return {
     task_type: taskType,
     question: question?.trim() || null,
     paper_ids: [...new Set(paperIds.map((id) => id.toLowerCase()))].sort(),
     workflow_type: 'baseline',
-    budget: { ...budget },
+    ...(taskType === 'review' ? {} : { budget: { ...budget } }),
   };
 }
 
 export function submissionSignature(body: TaskCreate): string {
+  const { budget, ...input } = body;
   return JSON.stringify({
-    ...body,
-    budget: { max_steps: body.budget.max_steps, max_tokens: body.budget.max_tokens, timeout_seconds: body.budget.timeout_seconds },
+    ...input,
+    ...(body.task_type !== 'review' && budget ? { budget: { max_steps: budget.max_steps, max_tokens: budget.max_tokens, timeout_seconds: budget.timeout_seconds } } : {}),
   });
 }
 

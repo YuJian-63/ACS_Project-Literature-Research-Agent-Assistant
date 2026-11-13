@@ -59,6 +59,7 @@
 | status | string | queued / running / succeeded / failed |
 | stage | string | 阶段代码，不作为判断终态的依据 |
 | budget | Budget | 执行预算快照 |
+| budget_mode | string | automatic 为新分阶段真实综述，其他为 manual |
 | versions | object | model_id、workflow_version、prompt_version、dataset_version；未知值为 null |
 | stats | TaskStats | 实际统计，未知值为 null |
 | last_event_seq | integer | 最新持久化事件序号，最小为 0 |
@@ -72,9 +73,9 @@ queued → running → succeeded
    └────────────→ failed
 ```
 
-终态不可回退，重试创建新任务。queued → failed 仅用于调度前失败。Worker 领取后使用数据库租约，失联、超时、预算耗尽和 Agent 异常都必须变为明确的 failed。
+终态不可回退，终态重试创建新任务。新分阶段综述在租约失效时允许 running → queued，在原截止时间内恢复；历史任务失联仍失败。queued → failed 也用于恢复等待期间耗尽执行时限。Worker 使用数据库租约并拒绝失去所有权的写入；超时、预算耗尽和不可恢复异常变为明确的 failed。
 
-阶段示例：queued、mock_preparing、mock_generating、mock_completed、parsing、searching、retrieving、writing、checking、completed、failed。客户端容忍新增阶段；只有 status 决定是否停止轮询。
+阶段示例：analyzing、synthesizing、validating、queued、mock_preparing、mock_generating、mock_completed、parsing、searching、retrieving、writing、checking、completed、failed。客户端容忍新增阶段；只有 status 决定是否停止轮询。
 
 **Budget：**
 
@@ -84,7 +85,7 @@ queued → running → succeeded
 | max_tokens | 8000 | 1—100000 |
 | timeout_seconds | 120 | 1—1800 |
 
-budget 可省略或只提供部分字段；缺项填默认值，部署配置可收紧上限。max_tokens 是任务累计输入与输出 token 预算，模型单次上下文限制另外检查；超时从开始执行计算，不含排队。真实 Runner 在步骤/调用边界检查预算，超出即失败；Mock 不伪造模型用量。
+budget 可省略或只提供部分字段；缺项填默认值，部署配置可收紧上限。max_tokens 是任务累计输入与输出 token 预算，模型单次上下文限制另外检查；超时从首次开始执行计算，初始排队不计入，阶段恢复后的排队计入。真实 Runner 在步骤/调用边界检查预算，超出即失败；Mock 不伪造模型用量。
 
 **TaskStats：**
 
@@ -93,6 +94,7 @@ budget 可省略或只提供部分字段；缺项填默认值，部署配置可�
 - end_to_end_ms = finished_at − created_at，未结束为 null。
 - input_tokens、output_tokens、model_calls、tool_calls 为非负整数或 null。
 - total_tokens 仅在输入、输出均已知时返回二者之和，否则为 null。
+- usage_estimated 为 boolean；新分阶段综述如包含尚未确认或缺少完整 usage 的调用，则为 true，Token 统计含保留的预留值；其他任务默认为 false。
 
 时间差按毫秒取整。Mock 的模型/工具统计及 model_id 均为 null；其实际排队/执行耗时仍可计算。不得把上述耗时当成模型侧 TTFT、TPOT 或 GPU 指标。
 
@@ -196,15 +198,24 @@ paper_ids 视为集合，转 UUID 标准字符串后排序。不存在论文返�
 
 runner_type、is_mock、model_id、status、stage、thread_id 及存储配置均不接受客户端写入。后端冻结 Runner、工作流版本和模型等执行配置，后续配置变更不能改变已提交任务。
 
-新建真实 review 由服务端冻结内部 `run_config.max_output_tokens=4096`，该字段不是客户端请求参数，不增加公开任务/产物字段。模型单次输出上限为冻结值与剩余预估总 Token 预算的较小值；预估输入已耗尽总预算时不调用模型。旧任务缺少字段时保持 2048，含既有 review-v2；summary/qa 保持 2048，Mock 不变。持久化值仅允许精确整数（review 为 2048/4096，单篇为 2048），非法配置在调用前失败。实际用量仍受原总预算约束，时间预算、单次调用、严格引用与原子写入不变；4096 不保证完整输出，不自动重试/续写或修复 JSON。重建任务是新提交；旧任务和原幂等键的重放不升级输出上限。
+历史 langgraph-review-v1 真实 review 后期提交时由服务端冻结内部 `run_config.max_output_tokens=4096`，该字段不是客户端请求参数，不增加公开任务/产物字段。模型单次输出上限为冻结值与剩余预估总 Token 预算的较小值；预估输入已耗尽总预算时不调用模型。旧任务缺少字段时保持 2048，含既有 review-v2；summary/qa 保持 2048，Mock 不变。持久化值仅允许精确整数（review 为 2048/4096，单篇为 2048），非法配置在调用前失败。实际用量仍受原总预算约束，时间预算、单次调用、严格引用与原子写入不变；4096 不保证完整输出，不自动重试/续写或修复 JSON。重建任务是新提交；旧任务和原幂等键的重放不升级输出上限。
 
 新建真实 summary/qa 任务的 versions.prompt_version 为 `evidence-v4`。后端从已选存储片段生成最长 1000 字符的连续证据摘录，保留内部排版与 Unicode，不跨片段或物理页码，并分配任务内 evidence_id。内部模型结果按 paragraphs 返回每段正文与 evidence_ids，后端解析 ID、取原样引文与来源身份、按首次使用顺序分配引用编号，再执行原有严格来源、逐字引文及大小校验。跨段同一证据共享编号；未知 ID、同段重复 ID、模型自写引用标记或额外引文/来源字段会失败，不进行模糊匹配或静默替换。paragraphs/evidence_ids 不是对外 API 字段，产物仍返回 content_markdown 与 citations。
 
-新建真实 review 的 versions.prompt_version 为 `evidence-review-v2`，workflow_version 仍为 `langgraph-review-v1`。输入沿用原样证据摘录并标明所属 paper_id，evidence_id 在任务内唯一。内部模型返回 paragraphs 和 comparison_table；段落包含 content_markdown/evidence_ids，表格单元格包含 value/evidence_ids，不接收模型自报引文、页码或引用编号。后端先按段落、再按选定论文和声明列顺序解析 ID，跨正文与表格共享首次使用编号，允许仅在表格使用的引用。非 null 研究单元格必须引用本行论文；null 必须使用空 evidence_ids。未知 ID、同段/同单元格重复证据、跨论文单元格引用、模型自写引用标记或额外字段均会失败。后端生成原协议草稿后仍执行既有严格综述校验，外部 content_markdown/citations/comparison_table 结构不变。
+历史 langgraph-review-v1 review 的 versions.prompt_version 后期为 `evidence-review-v2`，workflow_version 仍为 `langgraph-review-v1`。输入沿用原样证据摘录并标明所属 paper_id，evidence_id 在任务内唯一。内部模型返回 paragraphs 和 comparison_table；段落包含 content_markdown/evidence_ids，表格单元格包含 value/evidence_ids，不接收模型自报引文、页码或引用编号。后端先按段落、再按选定论文和声明列顺序解析 ID，跨正文与表格共享首次使用编号，允许仅在表格使用的引用。非 null 研究单元格必须引用本行论文；null 必须使用空 evidence_ids。未知 ID、同段/同单元格重复证据、跨论文单元格引用、模型自写引用标记或额外字段均会失败。后端生成原协议草稿后仍执行既有严格综述校验，外部 content_markdown/citations/comparison_table 结构不变。
 
-Runner 按已保存版本构造提示词、估算输入预算并选择解析器；历史 `evidence-v1`/`evidence-v2`/`evidence-v3` 和 `evidence-review-v1` 任务仍使用原提示词和严格校验，未使用引用或非逐字引文仍导致失败；缺少提示版本的旧 review 回退至 v1。版本由服务端决定，不接受客户端指定；幂等重放返回原任务，不切换版本。不增加模型调用、自动重试或失败时发布产物的行为。
+Runner 按已保存版本构造提示词、估算输入预算并选择解析器；历史 `evidence-v1`/`evidence-v2`/`evidence-v3` 和 `evidence-review-v1` 任务仍使用原提示词和严格校验，未使用引用或非逐字引文仍导致失败；缺少提示版本的旧 review 回退至 v1。版本由服务端决定，不接受客户端指定；幂等重放返回原任务，不切换版本。这些历史版本不增加模型调用或自动重试；失败时不发布产物。
 
 服务端可选 `LLM_THINKING_MODE=provider_default|disabled|enabled`，随真实任务冻结为 run_config.model_thinking_mode；不接受客户端指定。provider_default 不向模型发送 thinking 字段，另外两项发送对应 thinking.type，仅适用于支持该扩展的服务。旧任务缺少字段时使用 provider_default；不改变现有 Token/时间预算或引用校验。
+
+新建真实综述使用 `langgraph-review-v2 / evidence-review-v3`：客户端可省略 budget；即使提供合法 budget 也由服务端自动规划覆盖，响应 `budget_mode=automatic` 和 budget 为冻结后的实际分配。非法 budget 仍由请求 schema 拒绝。按论文数量、问题、采样证据及提示词长度，在 100 次调用、100000 累计 Token、1800 秒硬上限内选择配置；不能容纳返回 `422 REVIEW_CAPACITY_EXCEEDED`，不会请求模型。论文数量允许 2—20 不代表任意二十篇必定能容纳。
+
+工作流逐篇生成四列分析，再生成三个短章节，最后由后端组装比较表和引文。综合请求仅包含当前章节相关的已验证分析与其原始证据摘录；不一次生成整个产物。每篇最多四个原样片段，按冻结配置每篇额度 1000—4000 字符；支持不足的内容为 null。输入按 UTF-8 字节加消息开销预留；分析文本同时受字符和 JSON 序列化字节上限约束。单次上下文/输出限制由服务器配置，不能从前端修改。
+
+单元最多两次尝试；全任务额外重试不超过两次（13—20 篇最多一次），覆盖无效 JSON、长度截断、证据校验失败和模型请求失败，只重试当前单元。所有尝试均累计 usage 或保守预留；成功结果与实际 usage 在同一事务保存。失联恢复复用已验证单元；原截止时间、失败/不确定调用预留不清零。仅全部校验通过后原子发布公开 Artifact，产物 schema 不变，仍保留逐字引文、论文归属、页码和引用完整性校验。
+
+analyzing / synthesizing 的 stage 事件 payload 为 `{unit, current, total, paper_id?}`，用于中英文进度；validating 表示最终校验。未知阶段不影响按 status 判终态。历史任务/幂等键重放维持原版本和原预算哈希；新自动预算任务的预算差异不构成不同提交。summary、qa 和 Mock 执行行为不变。
+
 
 真实结果校验失败仍为 `INVALID_AGENT_RESULT`；新失败的 error.details 可包含 validation_reason（固定安全分类，如 invalid_json/schema_mismatch/quote_mismatch/unknown_evidence/unused_citation）与 model_finish_reason（白名单结束原因、unknown 或 null）。错误消息说明对应类别；不返回原始响应、引文、密钥或底层校验异常文本。历史失败 details={} 保持有效，不能追溯补齐。诊断不改变校验规则、自动重试策略或失败不发布产物的约定。
 
@@ -228,7 +239,7 @@ Location 响应头为 `/api/v1/tasks/{task_id}`。202 表示任务、论文关�
 
 - 可省略 Idempotency-Key；提供时为 1—128 个 ASCII 可见字符，不含空白。一次提交使用新键，网络重试复用。
 - 单用户 MVP 使用全局唯一键；未来多用户按用户/工作区限定。首版不自动过期或复用键。
-- request_hash 对规范化后的 task_type、question、排序的 paper_ids、workflow_type、补齐默认值的 budget 计算 SHA-256；JSON 使用 UTF-8、递归按键排序、无多余空格、不转义非 ASCII 字符。
+- request_hash 对规范化后的 task_type、question、排序的 paper_ids、workflow_type、补齐默认值的 budget 计算 SHA-256；新 langgraph-review-v2 真实综述忽略并从哈希中移除 budget；JSON 使用 UTF-8、递归按键排序、无多余空格、不转义非 ASCII 字符。
 - 同键同哈希返回原任务，仍为 202，Idempotency-Replayed 响应头为 true；新任务为 false。
 - 同键不同哈希返回 `409 IDEMPOTENCY_CONFLICT`；并发由数据库唯一约束及冲突后重查保证只创建一项。
 - 请求规范化后先查幂等键；同请求重放不重新检查论文当前状态，首次提交仍完整校验。
@@ -344,7 +355,7 @@ summary/qa 的 comparison_table 为 null；真实 review 使用下述对象。Mo
 - 非 null 的研究内容至少有一条同论文引用；null 的引用列表必须为空。新 review 的模型内部 evidence_ids 由服务端解析和统一编号，历史 v1 的内部引用序号须经服务端校验后转换为 C 编号；均不能直接信任模型自报的 citation_keys。
 - 数据库仅校验 JSON 外层结构，完整规则由结果写入服务校验，不能直接信任模型输出的 JSON。
 
-真实 review 的总上下文最多 32 个存储片段，并受冻结的 evidence_context_chars 限制；v2 可将单个存储片段划分为多条不跨页的原样摘录，32 限制针对存储片段而非摘录条数。为每篇有片段论文至少预留一个最短片段，不足时任务以 BUDGET_EXCEEDED 失败且不调用模型。所有选定论文均无片段时，服务端返回证据不足正文与 evidence_status（证据状态）单列比较表，每行值为“未检索到可用解析证据”，无引用；该系统状态不是研究结论，允许非 null 且无引用。此路径 input_tokens、output_tokens、total_tokens、model_calls、tool_calls 均为 0。新 review 使用 langgraph-review-v1/evidence-review-v2，旧任务保留 v1；表格按任务冻结的选定顺序排列，部分无证据论文的研究内容 cell 必须为 null。
+历史 langgraph-review-v1 review 的总上下文最多 32 个存储片段，并受冻结的 evidence_context_chars 限制；v2 可将单个存储片段划分为多条不跨页的原样摘录，32 限制针对存储片段而非摘录条数。为每篇有片段论文至少预留一个最短片段，不足时任务以 BUDGET_EXCEEDED 失败且不调用模型。所有选定论文均无片段时，服务端返回证据不足正文与 evidence_status（证据状态）单列比较表，每行值为“未检索到可用解析证据”，无引用；该系统状态不是研究结论，允许非 null 且无引用。此路径 input_tokens、output_tokens、total_tokens、model_calls、tool_calls 均为 0。历史 review 使用 langgraph-review-v1/evidence-review-v2，旧任务保留 v1；表格按任务冻结的选定顺序排列，部分无证据论文的研究内容 cell 必须为 null。
 
 ### 6.2 Citation
 
@@ -405,6 +416,7 @@ Task.error/Paper.error 直接使用内层 `{code,message,details}`，正常为 n
 | 413 | FILE_TOO_LARGE | 文件超过 20 MiB |
 | 415 | UNSUPPORTED_MEDIA_TYPE | 上传请求不是 multipart |
 | 422 | INVALID_REQUEST | 缺字段、非法 UUID/枚举、数量、重复 ID、预算、未知字段等 |
+| 422 | REVIEW_CAPACITY_EXCEEDED | 综述在服务器上下文、累计 Token 或时间上限内无法规划，减少论文或缩短问题 |
 | 422 | INVALID_PDF / INVALID_FILENAME | 文件内容或名称不合法 |
 | 422 | WORKFLOW_NOT_AVAILABLE | 扩展工作流未开放 |
 | 422 | TASK_TYPE_NOT_AVAILABLE | 真实 Runner 当前不支持该任务类型 |

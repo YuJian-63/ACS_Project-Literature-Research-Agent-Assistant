@@ -18,6 +18,9 @@ from app.tasks.lifecycle import (
 )
 from app.research.model_client import ChatModel, ModelTimeoutError, OpenAICompatibleChatModel
 from app.research.graph import build_research_graph
+from app.research.review_policy import WORKFLOW_VERSION
+from app.research.review_runner import ReviewResultError, run_staged_review
+from app.research.review_store import ReviewStore, ReviewOwnershipLost, ReviewLimitError
 from app.research.validation import (
     evidence_insufficient_review, invalid_result_diagnostic, validate_paragraph_result,
     validate_result, validate_review_result, validate_selected_evidence_result,
@@ -46,6 +49,7 @@ class ResearchJob:
     model_thinking_mode: str = "provider_default"
     prompt_version: str | None = None
     max_output_tokens: int = 2048
+    review_plan: dict | None = None
 
 
 class TaskInputError(RuntimeError):
@@ -94,7 +98,12 @@ def load_research_job(sessions: sessionmaker[Session], task_id: UUID) -> Researc
         if type(max_output_tokens) is not int or max_output_tokens not in allowed_output_caps:
             raise TaskInputError("INVALID_AGENT_RESULT", "任务输出预算配置不可用")
         context_chars = int(run_config.get("evidence_context_chars", 24000))
-        if task.task_type == "review":
+        staged_review = task.workflow_version == WORKFLOW_VERSION
+        if staged_review:
+            if not run_config.get("review_policy") or "evidence" not in task.review_state:
+                raise TaskInputError("INVALID_AGENT_RESULT", "综述执行计划不可用")
+            evidence = [EvidenceChunk.model_validate(chunk) for chunk in task.review_state["evidence"]]
+        elif task.task_type == "review":
             groups = {paper["paper_id"]: [] for paper in selected_papers}
             for chunk in evidence_source:
                 groups[chunk.paper_id].append(chunk)
@@ -112,6 +121,7 @@ def load_research_job(sessions: sessionmaker[Session], task_id: UUID) -> Researc
             model_thinking_mode=run_config.get("model_thinking_mode", "provider_default"),
             prompt_version=getattr(task, "prompt_version", None) or ("evidence-review-v1" if task.task_type == "review" else "evidence-v1"),
             max_output_tokens=max_output_tokens,
+            review_plan=run_config.get("review_policy") if staged_review else None,
         )
 
 
@@ -167,6 +177,17 @@ class RunnerWorker:
         thread.start()
         try:
             job = load_research_job(self.sessions, task_id)
+            if getattr(job, "review_plan", None) is not None:
+                store = ReviewStore(self.sessions, task_id, self.owner)
+                model = self.model_factory(job, self.settings)
+                try:
+                    result = run_staged_review(job, model, store, stopped=lambda: self.stopped.is_set() or ownership_lost.is_set())
+                finally:
+                    model.close()
+                store.progress("validating", "正在校验综述与引用")
+                usage = store.read().get("usage", {"input_tokens": 0, "output_tokens": 0, "model_calls": 0})
+                complete_real(self.sessions, task_id, self.owner, result, **usage)
+                return
             prompt_version = getattr(job, "prompt_version", None) or ("evidence-review-v1" if job.task_type == "review" else "evidence-v1")
             estimated = estimate_input_tokens(
                 job.evidence, job.task_type, job.question, job.selected_papers,
@@ -235,6 +256,12 @@ class RunnerWorker:
                 input_tokens=input_tokens, output_tokens=output_tokens,
                 model_calls=output.get("model_calls", 1),
             )
+        except ReviewOwnershipLost:
+            return
+        except ReviewResultError as error:
+            fail_owned(self.sessions, task_id, self.owner, "INVALID_AGENT_RESULT", str(error), details=error.details)
+        except ReviewLimitError:
+            fail_owned(self.sessions, task_id, self.owner, "BUDGET_EXCEEDED", "综述已达到服务器自动分配的处理上限")
         except EvidenceBudgetError:
             fail_owned(self.sessions, task_id, self.owner, "BUDGET_EXCEEDED", "上下文预算不足以覆盖所有选定论文")
         except TaskInputError as error:
