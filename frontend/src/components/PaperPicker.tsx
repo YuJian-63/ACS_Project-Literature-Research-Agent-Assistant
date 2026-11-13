@@ -1,3 +1,4 @@
+import { t, useLocale } from '../i18n';
 import { useCallback, useState } from 'react';
 import { App, Input, Tag } from 'antd';
 import { api } from '../api/client';
@@ -7,6 +8,7 @@ import { ErrorNotice, PaginationBar } from './Common';
 import { canSelectPaper, hasPendingPapers, PaperTable, selectedPaperRows } from './PaperTable';
 
 export function PaperPicker({ value, onChange, disabled }: { value: Paper[]; onChange: (papers: Paper[]) => void; disabled: boolean }) {
+  useLocale();
   const { message } = App.useApp();
   const [query, setQuery] = useState('');
   const [page, setPage] = useState(1);
@@ -14,17 +16,17 @@ export function PaperPicker({ value, onChange, disabled }: { value: Paper[]; onC
   const resource = useResource(load, 2000, hasPendingPapers);
   const keys = value.map((paper) => paper.id);
   return <div className="paper-picker">
-    <div className="picker-toolbar"><Input.Search placeholder="搜索已上传论文" aria-label="搜索待选论文" maxLength={200} allowClear disabled={disabled} onSearch={(text) => { setQuery(text); setPage(1); }} /><span>已选 {value.length} / 20 篇</span></div>
-    {value.length > 0 && <div className="selected-papers" aria-label="已选论文">{value.map((paper) => <Tag key={paper.id} closable={!disabled} onClose={() => onChange(value.filter((item) => item.id !== paper.id))}>{paper.title}</Tag>)}</div>}
+    <div className="picker-toolbar"><Input.Search placeholder={t("搜索已上传论文")} aria-label={t("搜索待选论文")} maxLength={200} allowClear disabled={disabled} onSearch={(text) => { setQuery(text); setPage(1); }} /><span>{t("已选 {0} / 20 篇", [value.length])}</span></div>
+    {value.length > 0 && <div className="selected-papers" aria-label={t("已选论文")}>{value.map((paper) => <Tag key={paper.id} closable={!disabled} onClose={() => onChange(value.filter((item) => item.id !== paper.id))}>{paper.title}</Tag>)}</div>}
     {resource.error && <ErrorNotice error={resource.error} retry={resource.reload} />}
-    <PaperTable papers={resource.data?.items || []} loading={resource.loading} scrollHeight={400} emptyMessage={query ? '没有匹配的论文' : '请先在论文库上传 PDF'} selection={{
+    <PaperTable papers={resource.data?.items || []} loading={resource.loading} scrollHeight={400} emptyMessage={query ? t("没有匹配的论文") : t("请先在论文库上传 PDF")} selection={{
       selectedRowKeys: keys,
       preserveSelectedRowKeys: true,
       onChange: (chosen) => {
-        if (chosen.length > 20) { void message.warning('最多可选择 20 篇论文。'); return; }
+        if (chosen.length > 20) { void message.warning(t("最多可选择 20 篇论文。")); return; }
         onChange(selectedPaperRows(chosen, value, resource.data?.items || []));
       },
-      getCheckboxProps: (paper) => ({ disabled: disabled || !canSelectPaper(paper) || (value.length >= 20 && !keys.includes(paper.id)), 'aria-label': `选择论文 ${paper.title}` }),
+      getCheckboxProps: (paper) => ({ disabled: disabled || !canSelectPaper(paper) || (value.length >= 20 && !keys.includes(paper.id)), 'aria-label': t("选择论文 {0}", [paper.title]) }),
     }} />
     {resource.data && <PaginationBar total={resource.data.total} page={page} onChange={setPage} />}
   </div>;
