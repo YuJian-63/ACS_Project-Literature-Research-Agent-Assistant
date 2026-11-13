@@ -3,8 +3,8 @@ from typing import TypedDict
 
 from langgraph.graph import END, START, StateGraph
 
-from app.model_client import ChatModel
-from app.retrieval import EvidenceChunk, build_messages
+from app.research.model_client import ChatModel
+from app.research.retrieval import EvidenceChunk, build_messages
 
 
 class ResearchState(TypedDict, total=False):

@@ -17,7 +17,7 @@ from urllib.parse import urlsplit
 
 import httpx
 
-from app.arxiv import (
+from app.sources.arxiv import (
     API_URL, ERROR_PHASES, MAX_METADATA_BYTES, MAX_PDF_BYTES, ArxivError, DownloadReceipt,
     ProviderReply, invalid_response, normalize_arxiv_id, validate_pdf_url,
 )
@@ -144,9 +144,9 @@ def perform_request(
 def launch_fetch_process() -> subprocess.Popen:
     environment = {key: os.environ[key] for key in ("PATH", "SYSTEMROOT", "WINDIR", "TEMP", "TMP") if key in os.environ}
     environment.update({"PYTHONDONTWRITEBYTECODE": "1", "PYTHONIOENCODING": "utf-8"})
-    environment["PYTHONPATH"] = str(Path(__file__).resolve().parents[1])
+    environment["PYTHONPATH"] = str(Path(__file__).resolve().parents[2])
     return subprocess.Popen(
-        [sys.executable, "-B", "-m", "app.arxiv_transport", "--fetch"],
+        [sys.executable, "-B", "-m", "app.sources.arxiv_transport", "--fetch"],
         stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
         env=environment, creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
     )

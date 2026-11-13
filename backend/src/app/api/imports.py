@@ -8,11 +8,11 @@ from fastapi import APIRouter, Query, Request, Response
 from pydantic import Field, field_validator
 from sqlalchemy import func, select
 
-from app.arxiv import ERROR_PHASES, ArxivError, build_search_query, normalize_arxiv_id
+from app.sources.arxiv import ERROR_PHASES, ArxivError, build_search_query, normalize_arxiv_id
 from app.db.models import PaperImport
 from app.errors import APIError
-from app.paper_imports import get_import, import_view, retry_import, submit_import
-from app.schemas import Error, ErrorResponse, Page, PaperSourceResponse, PaperStatus, StrictModel
+from app.sources.imports import get_import, import_view, retry_import, submit_import
+from app.api.schemas import Error, ErrorResponse, Page, PaperSourceResponse, PaperStatus, StrictModel
 
 logger = logging.getLogger(__name__)
 router = APIRouter(responses={status: {"model": ErrorResponse} for status in [404, 409, 422, 429, 502, 503, 504]})

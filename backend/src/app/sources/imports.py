@@ -10,10 +10,10 @@ from sqlalchemy import func, or_, select
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import Session, sessionmaker
 
-from app.arxiv import ArxivError, ArxivPaper, DownloadReceipt, MAX_PDF_BYTES, normalize_arxiv_id
+from app.sources.arxiv import ArxivError, ArxivPaper, DownloadReceipt, MAX_PDF_BYTES, normalize_arxiv_id
 from app.db.models import Paper, PaperImport, PaperSource
 from app.errors import APIError
-from app.storage import controlled_path
+from app.papers.storage import controlled_path
 
 logger = logging.getLogger(__name__)
 LEASE_SECONDS = 30

@@ -60,6 +60,30 @@ Linux/macOS 将复制命令替换为 `cp .env.example .env`。其他命令相同
 
 ## 3. 代码入口
 
+后端按职责分包。`app/` 根目录仅保留应用工厂、共享配置/错误，以及兼容既有命令的四个 Worker 启动入口；业务实现放入对应子包。
+
+```text
+src/app/
+├── main.py                   # 应用工厂、中间件与资源生命周期
+├── config.py / errors.py     # 共享配置与统一业务错误
+├── api/                     # HTTP 层
+│   ├── router.py            # health / papers / tasks 路由组合
+│   ├── health.py            # 存活与数据库迁移就绪检查
+│   ├── papers.py            # 上传、列表、详情与本地 PDF
+│   ├── tasks.py             # 任务提交、状态、事件与产物
+│   ├── imports.py           # 来源搜索、导入历史和重试
+│   ├── pagination.py        # 通用分页参数
+│   └── schemas.py / views.py
+├── db/                      # SQLAlchemy 模型与数据库连接
+├── papers/                  # storage、pdf_parser、解析 lifecycle、evidence
+├── research/                # model_client、graph、retrieval、validation
+├── sources/                 # arxiv、arxiv_transport、access、imports
+├── tasks/                   # service：提交/查询；lifecycle：领取/完成/恢复
+├── workers/                 # mock、parser、research、imports 进程实现
+└── worker.py / parser_worker.py / runner_worker.py / import_worker.py
+                             # 仅转发 main，保留原有启动命令
+```
+
 | 文件 | 职责 |
 | --- | --- |
 | src/app/config.py | 读取并校验 Settings，连接地址使用 SecretStr |
@@ -67,17 +91,24 @@ Linux/macOS 将复制命令替换为 `cp .env.example .env`。其他命令相同
 | src/app/db/models.py | Paper、PaperChunk、Task、TaskPaper、TaskEvent、Artifact、Citation |
 | src/app/db/session.py | 显式创建 Engine 和 Session 工厂 |
 | src/app/main.py | 应用工厂、生命周期、请求 ID、统一错误及本地 CORS |
-| src/app/api.py、schemas.py、views.py | HTTP 路由、严格请求/响应模型、资源展示 |
-| src/app/storage.py | PDF 校验、受控存储、写入补偿和提交结果核对 |
-| src/app/pdf_parser.py | 纯文本提取、物理页码分块、内容 hash 与解析资源边界 |
-| src/app/parser_worker.py | 独立解析子进程、租约心跳、超时终止和恢复 |
-| src/app/parse_lifecycle.py | uploaded 领取、所有权、原子写 chunks/ready 与租约回收 |
-| src/app/evidence.py | Agent 内部只读、有界分页的已就绪论文片段读取 |
-| src/app/tasks.py | 请求规范化、SHA-256 幂等哈希、任务及来源原子创建 |
-| src/app/lifecycle.py、worker.py | 领取、独立心跳、事件、原子完成、恢复和 Mock Worker 命令入口 |
+| src/app/api/ | 按 health/papers/tasks/imports 拆分路由；schemas 和 views 定义公开模型与资源展示 |
+| src/app/papers/storage.py | PDF 校验、受控存储、写入补偿和提交结果核对 |
+| src/app/papers/pdf_parser.py | 纯文本提取、物理页码分块、内容 hash 与解析资源边界 |
+| src/app/papers/lifecycle.py | uploaded 领取、所有权、原子写 chunks/ready 与租约回收 |
+| src/app/papers/evidence.py | Agent 内部只读、有界分页的已就绪论文片段读取 |
+| src/app/research/ | 模型客户端、单次生成工作流、证据检索、引用/比较表校验 |
+| src/app/sources/ | arXiv 客户端及受监督子进程、共享许可/搜索缓存、持久化导入 |
+| src/app/tasks/service.py | 请求规范化、SHA-256 幂等哈希、任务及来源原子创建 |
+| src/app/tasks/lifecycle.py | 领取、心跳、事件、原子完成与失联恢复 |
+| src/app/workers/ | 四类 Worker 的进程循环、心跳、超时和资源释放 |
+| src/app/*_worker.py、worker.py | 原有命令启动入口；内部代码直接导入 workers 中的实现 |
 | alembic/env.py | 在线连接与无需凭据的离线迁移 |
 | alembic/versions/20261110_0001_initial_schema.py | 冻结的初始结构及逆向迁移 |
 | sql/schema.sql | 设计对照，不与 Alembic 在同一数据库重复执行 |
+
+API 组织 HTTP 参数和响应；tasks/papers/sources 管理对应数据与生命周期；research 处理模型输入和校验；workers 编排独立进程。此次整理保留既有函数和依赖关系，不新增仓储抽象或改变事务边界。历史实施记录中的旧文件路径保留为当时记录；当前代码路径以本节为准。
+
+API 仍使用 `uvicorn app.main:create_app --factory`。四个 `python -m app.worker` / `app.parser_worker` / `app.runner_worker` / `app.import_worker` 命令保持不变。若自编脚本直接导入内部类或函数，请改为 `app.workers.research.RunnerWorker`、`app.tasks.service.submit_task` 等新路径；共享 `app.config.Settings`、数据库导入路径及 `.env`/存储根目录不变。重启现有进程时仍使用原终端，以保留会话环境变量；本次整理不需要数据库迁移。
 
 模块导入不读取配置、不连接数据库、不自动建表。调用方显式创建 Engine；连接使用 READ COMMITTED 和 UTC，启用连接存活检查。短事务使用 Session 的 begin 上下文，调用方在服务退出时释放 Engine：
 
@@ -168,7 +199,7 @@ cd backend
 uv run --locked python -m app.parser_worker
 ```
 
-Parser Worker 与 API/Mock Worker 必须使用相同的数据库和 `STORAGE_ROOT`。未启动时上传文件仍可用于既有 Mock 任务，但论文保持 `uploaded`；真实证据读取仅在应用内部 `app.evidence.read_evidence(...)` 开放，不新增公开原文片段 API。Parser Worker 默认可并行启动多个实例并使用论文行锁领取不同论文，但 PGlite 不代表已完成 PostgreSQL 多连接竞争验收。
+Parser Worker 与 API/Mock Worker 必须使用相同的数据库和 `STORAGE_ROOT`。未启动时上传文件仍可用于既有 Mock 任务，但论文保持 `uploaded`；真实证据读取仅在应用内部 `app.papers.evidence.read_evidence(...)` 开放，不新增公开原文片段 API。Parser Worker 默认可并行启动多个实例并使用论文行锁领取不同论文，但 PGlite 不代表已完成 PostgreSQL 多连接竞争验收。
 
 MVP-1A 使用 pypdf 提取文本，不运行 OCR。默认拒绝超过 500 页、8 MiB 提取文本、10000 个片段、单页 16 MiB 解码内容流的文档；连续片段最大 2000 字符。超限不做部分成功；worker 子进程有 120 秒 wall-clock 超时。内容流限制在 pypdf 解码后检查，**不等同于操作系统 RAM 上限**；服务于不可信公网 PDF 前，应在操作系统/容器层加入内存、CPU、磁盘和并发限制。加密、损坏、空扫描件解析失败后不会保留 chunk，需重新上传创建新论文 ID 重试。
 

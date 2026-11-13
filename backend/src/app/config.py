@@ -37,7 +37,7 @@ class Settings(BaseSettings):
     def validate_arxiv_contact(cls, value: str | None) -> str | None:
         if value is None or value == "":
             return None
-        from app.arxiv_transport import SupervisedArxivTransport
+        from app.sources.arxiv_transport import SupervisedArxivTransport
 
         SupervisedArxivTransport(value, lambda: None)
         return value

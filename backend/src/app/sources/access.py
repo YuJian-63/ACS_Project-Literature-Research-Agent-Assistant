@@ -12,7 +12,7 @@ from uuid import UUID, uuid4
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session, sessionmaker
 
-from app.arxiv import ArxivError, ArxivPage, build_search_query
+from app.sources.arxiv import ArxivError, ArxivPage, build_search_query
 from app.db.models import SourceRequestGate
 
 

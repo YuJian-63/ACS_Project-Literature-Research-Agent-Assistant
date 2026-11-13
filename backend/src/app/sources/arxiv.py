@@ -251,14 +251,14 @@ def check_status(reply: ProviderReply) -> None:
     if reply.status_code == 200:
         return
     if reply.status_code == 429:
-        from app.arxiv_transport import retry_after_seconds
+        from app.sources.arxiv_transport import retry_after_seconds
 
         raise ArxivError("ARXIV_RATE_LIMITED", "arXiv 请求过于频繁，请稍后再试", retryable=True,
                          retry_after=retry_after_seconds(reply.headers.get("retry-after")), phase="provider_status")
     if reply.status_code == 404:
         raise ArxivError("ARXIV_NOT_FOUND", "未找到指定版本的论文", phase="provider_status")
     if reply.status_code == 503 or reply.status_code >= 500:
-        from app.arxiv_transport import retry_after_seconds
+        from app.sources.arxiv_transport import retry_after_seconds
 
         raise ArxivError("ARXIV_UNAVAILABLE", "arXiv 服务暂不可用", retryable=True,
                          retry_after=retry_after_seconds(reply.headers.get("retry-after")) if reply.status_code == 503 else None,

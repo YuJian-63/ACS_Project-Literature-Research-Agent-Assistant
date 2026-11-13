@@ -12,7 +12,7 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from app.db.models import Paper
 from app.errors import APIError
-from app.views import paper_view
+from app.api.views import paper_view
 
 MAX_FILE_BYTES = 20 * 1024 * 1024
 logger = logging.getLogger(__name__)

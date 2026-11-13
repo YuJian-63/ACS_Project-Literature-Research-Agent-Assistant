@@ -4,8 +4,8 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
 
-from app.retrieval import EvidenceChunk, build_citation_passages
-from app.model_client import normalize_finish_reason
+from app.research.retrieval import EvidenceChunk, build_citation_passages
+from app.research.model_client import normalize_finish_reason
 
 
 def invalid_result_diagnostic(error: Exception, *, finish_reason: object = None) -> tuple[str, dict]:

@@ -9,6 +9,8 @@ HKUST CSIT6000V Advanced AI Computing and Systems Project: Literature Research A
 - [后端安装、API 与 Worker 启动](backend/README.md)
 - [前端安装、运行与验收](frontend/README.md)
 
+后端代码已按 `api`、`papers`、`research`、`sources`、`tasks`、`workers` 分包，当前目录与职责见 [后端文档第 3 节](backend/README.md#3-代码入口)。原有 API 与 Worker 启动命令保持不变。
+
 当前已提供接口规范、数据库设计、SQLAlchemy 模型、Alembic 初始迁移、FastAPI API、独立 PDF Parser Worker 和 Mock 任务 Worker，以及 React 前端论文库、PDF 上传/解析状态、新建任务、任务列表与结果工作台。解析出的原文片段供后续 Agent 内部读取；模拟任务仍不代表论文分析或研究结论。
 
 MVP-3 增量已提供 arXiv 关键词搜索、指定版本 PDF 导入、持久化导入记录和独立 Import Worker；默认关闭联网功能。2026-11-13 用户完成隔离原生 PostgreSQL 17.6 的八组专项验收，并确认真实 arXiv 搜索、单版本下载、解析、浏览器展示及 Mock 任务闭环通过。开启步骤见后端文档第 9 节；不需要模型密钥即可搜索、下载和解析。详细证据和验收边界见 [MVP-3 实施记录](docs/superpowers/plans/2026-11-12-mvp-3-arxiv-search-import.md)。

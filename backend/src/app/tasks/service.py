@@ -9,8 +9,8 @@ from sqlalchemy.orm import Session, sessionmaker
 from app.config import Settings
 from app.db.models import Paper, Task, TaskEvent, TaskPaper
 from app.errors import APIError
-from app.schemas import TaskCreate
-from app.views import accepted_view
+from app.api.schemas import TaskCreate
+from app.api.views import accepted_view
 
 
 def request_hash(request: TaskCreate) -> str:

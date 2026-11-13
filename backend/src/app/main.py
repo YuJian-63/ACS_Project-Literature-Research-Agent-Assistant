@@ -13,12 +13,12 @@ from starlette.exceptions import HTTPException
 from starlette.middleware.cors import CORSMiddleware
 from starlette.responses import JSONResponse
 
-from app.api import router
+from app.api.router import router
 from app.config import Settings
 from app.db.session import create_database_engine, create_session_factory
 from app.errors import APIError
-from app.lifecycle import TaskMonitor
-from app.storage import MAX_FILE_BYTES
+from app.tasks.lifecycle import TaskMonitor
+from app.papers.storage import MAX_FILE_BYTES
 
 logger = logging.getLogger(__name__)
 
@@ -82,10 +82,10 @@ class ErrorMiddleware:
 
 
 def create_app(settings: Settings | None = None, engine: Engine | None = None, *, arxiv_client=None) -> FastAPI:
-    from app.arxiv import ArxivClient, ArxivError
-    from app.arxiv_transport import SupervisedArxivTransport
-    from app.paper_import_api import router as import_router
-    from app.source_access import SearchCache, source_permit
+    from app.sources.arxiv import ArxivClient, ArxivError
+    from app.sources.arxiv_transport import SupervisedArxivTransport
+    from app.api.imports import router as import_router
+    from app.sources.access import SearchCache, source_permit
     settings = settings or Settings()
 
     @asynccontextmanager

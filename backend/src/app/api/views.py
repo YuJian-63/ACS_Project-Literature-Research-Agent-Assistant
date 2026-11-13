@@ -18,7 +18,7 @@ def paper_view(paper: Paper) -> dict:
         "id", "title", "original_filename", "content_type", "size_bytes", "sha256",
         "status", "page_count", "parser_version", "created_at", "updated_at",
     )
-    from app.arxiv import ArxivPaper
+    from app.sources.arxiv import ArxivPaper
 
     source = paper.source
     provenance = ArxivPaper(

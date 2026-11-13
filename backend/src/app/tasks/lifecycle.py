@@ -7,7 +7,7 @@ from sqlalchemy import func, or_, select, text
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.db.models import Artifact, Citation, Task, TaskEvent
-from app.result_validation import ValidatedResult
+from app.research.validation import ValidatedResult
 
 logger = logging.getLogger(__name__)
 LEASE_SECONDS = 60

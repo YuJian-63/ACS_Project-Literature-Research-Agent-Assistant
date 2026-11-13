@@ -5,8 +5,8 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.db.models import Paper, PaperChunk
-from app.lifecycle import LEASE_SECONDS, database_time
-from app.pdf_parser import ParseResult
+from app.tasks.lifecycle import LEASE_SECONDS, database_time
+from app.papers.pdf_parser import ParseResult
 
 
 def owns_parse(paper: Paper | None, owner: UUID, now: datetime) -> bool:
