@@ -41,6 +41,24 @@ class ReviewStoreTests(unittest.TestCase):
         with self.assertRaises(ReviewLimitError):
             self.store.reserve("paper:1", 100, 200, "analyzing", "Again", {})
 
+    def test_search_checkpoint_is_immutable_and_fences_stale_owner(self):
+        self.task.run_config = {"search_policy": {"retry_reserve": 1}}
+        self.store.save_search("query", {"queries": ["Rust results"]})
+        self.store.save_search("query", {"queries": ["different"]})
+        self.assertEqual(self.store.read()["search"]["query"]["queries"], ["Rust results"])
+        self.task.worker_id = uuid4()
+        with self.assertRaises(ReviewOwnershipLost):
+            self.store.save_search("selection", {"evidence": []})
+
+    def test_expansion_is_reserved_once_and_never_erases_unknown_usage(self):
+        self.task.run_config = {"search_policy": {"retry_reserve": 1}}
+        identity = self.store.reserve("search:expand", 300, 512, "retrieving", "Expanding", {})
+        self.store.settle("search:expand", identity, None, {"reason": "timeout"})
+        self.store.save_search("query", {"degraded": "timeout"})
+        with self.assertRaises(ReviewLimitError):
+            self.store.reserve("search:expand", 300, 512, "retrieving", "Expanding", {})
+        self.assertEqual((self.task.input_tokens, self.task.output_tokens, self.task.model_calls), (300, 512, 1))
+
     def test_stale_owner_cannot_reserve_settle_or_checkpoint(self):
         attempt = self.store.reserve("paper:1", 100, 200, "analyzing", "Analyzing", {})
         self.task.worker_id = uuid4()

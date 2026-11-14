@@ -103,6 +103,14 @@ export interface TaskSummary extends TaskAccepted {
 }
 
 export interface Task extends TaskSummary {
+  retrieval?: {
+    status: string;
+    expansion_degraded: boolean;
+    selected_chunks: number;
+    lexical_matches: number;
+    missing_aspects: string[];
+    papers?: { paper_id: string; paper_title: string; columns: string[] }[];
+  } | null;
   budget_mode?: 'manual' | 'automatic';
   budget: Budget;
   versions: {

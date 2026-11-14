@@ -49,7 +49,9 @@ class ReviewStore:
             attempts = units.get(key, {}).get("attempts", [])
             all_attempts = [attempt for unit in units.values() for attempt in unit.get("attempts", [])]
             retries = sum(max(0, len(unit.get("attempts", [])) - 1) for unit in units.values())
-            if len(attempts) >= 2 or (attempts and retries >= task.run_config["review_policy"]["retry_reserve"]):
+            policy = task.run_config.get("search_policy") or task.run_config["review_policy"]
+            limit = 1 if key == "search:expand" else 2
+            if len(attempts) >= limit or (attempts and retries >= policy["retry_reserve"]):
                 raise ReviewLimitError("Review retry allowance exhausted")
             used = sum(attempt["input_tokens"] + attempt["output_tokens"] for attempt in all_attempts)
             if len(all_attempts) >= task.max_steps or used + input_tokens + output_tokens > task.max_tokens:
@@ -116,3 +118,16 @@ class ReviewStore:
             task, now = self._task(session)
             task.stage = stage
             append_event(session, task, now, message, "stage")
+
+    def save_search(self, key: str, value: dict, *, message: str | None = None, payload: dict | None = None, warning: bool = False) -> None:
+        with self.sessions.begin() as session:
+            task, now = self._task(session)
+            state = deepcopy(task.review_state)
+            saved = state.setdefault("search", {})
+            if key in saved:
+                return
+            saved[key] = value
+            self._write(task, state)
+            if message is not None:
+                task.stage = "retrieving"
+                append_event(session, task, now, message, "warning" if warning else "stage", payload or {})

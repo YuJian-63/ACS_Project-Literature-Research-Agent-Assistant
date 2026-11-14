@@ -100,7 +100,7 @@ class ReviewPostgresTests(unittest.TestCase):
         with self.sessions() as session:
             task = session.get(Task, identity)
             key = task.idempotency_key
-            self.assertEqual(task.workflow_version, "langgraph-review-v2")
+            self.assertEqual(task.workflow_version, "langgraph-search-v1")
             self.assertGreater(task.max_steps, 6)
             self.assertGreater(task.max_tokens, 8000)
         request.budget.max_tokens = 100000

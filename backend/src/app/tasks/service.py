@@ -10,8 +10,8 @@ from app.config import Settings
 from app.db.models import Paper, PaperChunk, Task, TaskEvent, TaskPaper
 from app.db.ownership import check_task_capacity, lock_active_user
 from app.research.retrieval import EvidenceChunk
-from app.research.review_policy import WORKFLOW_VERSION, PROMPT_VERSION, build_review_plan
-from app.research.task_policy import automatic_budget, build_task_plan
+from app.research.task_policy import automatic_budget
+from app.research.search_policy import WORKFLOW_VERSION, build_search_plan, source_snapshot
 from app.errors import APIError
 from app.api.schemas import TaskCreate
 from app.api.views import accepted_view
@@ -80,43 +80,35 @@ def submit_task(
                     "model_timeout_seconds": settings.llm_timeout_seconds,
                     "evidence_context_chars": settings.evidence_context_chars,
                 }
+                by_id = {paper.id: paper for paper in papers}
+                chunks = list(session.scalars(select(PaperChunk).where(PaperChunk.paper_id.in_(by_id)).order_by(PaperChunk.paper_id, PaperChunk.chunk_index)))
+                source = [EvidenceChunk(chunk_id=str(chunk.id), paper_id=str(chunk.paper_id),
+                    paper_title=by_id[chunk.paper_id].title, chunk_index=chunk.chunk_index,
+                    page_number=chunk.page_number, content=chunk.content) for chunk in chunks]
+                selected = [{"paper_id": str(paper.id), "paper_title": paper.title,
+                    "sha256": paper.sha256, "parser_version": paper.parser_version} for paper in papers]
+                try:
+                    snapshot = source_snapshot(selected, source, max_bytes=getattr(settings, "retrieval_snapshot_bytes", 8 * 1024 * 1024))
+                    search, plan, evidence = build_search_plan(request.task_type, request.question, selected, source, settings)
+                except ValueError:
+                    code = "REVIEW_CAPACITY_EXCEEDED" if staged_review else "RESEARCH_CAPACITY_EXCEEDED"
+                    raise APIError(422, code, "当前研究输入超过服务器处理上限，请缩小问题范围或减少论文数量") from None
+                run_config["search_policy"] = search
                 if staged_review:
-                    groups = {str(paper.id): [] for paper in papers}
-                    by_id = {paper.id: paper for paper in papers}
-                    chunks = session.scalars(select(PaperChunk).where(PaperChunk.paper_id.in_(by_id)).order_by(PaperChunk.paper_id, PaperChunk.chunk_index))
-                    for chunk in chunks:
-                        groups[str(chunk.paper_id)].append(EvidenceChunk(
-                            chunk_id=str(chunk.id), paper_id=str(chunk.paper_id), paper_title=by_id[chunk.paper_id].title,
-                            chunk_index=chunk.chunk_index, page_number=chunk.page_number, content=chunk.content,
-                        ))
-                    selected = [{"paper_id": str(paper.id), "paper_title": paper.title} for paper in papers]
-                    try:
-                        plan, evidence = build_review_plan(selected, groups, request.question, settings)
-                    except ValueError:
-                        raise APIError(422, "REVIEW_CAPACITY_EXCEEDED", "当前综述规模超过服务器处理上限，请缩小研究范围或减少论文数量") from None
                     run_config["review_policy"] = plan
-                    review_state = {"evidence": [chunk.model_dump() for chunk in evidence], "units": {}, "usage_estimated": False}
-                    budget = {name: plan[name] for name in ("max_steps", "max_tokens", "timeout_seconds")}
                 else:
-                    chunks = session.scalars(select(PaperChunk).where(PaperChunk.paper_id == papers[0].id).order_by(PaperChunk.chunk_index))
-                    source = [EvidenceChunk(chunk_id=str(chunk.id), paper_id=str(chunk.paper_id),
-                        paper_title=papers[0].title, chunk_index=chunk.chunk_index,
-                        page_number=chunk.page_number, content=chunk.content) for chunk in chunks]
-                    try:
-                        plan, evidence = build_task_plan(request.task_type, request.question, source, settings)
-                    except ValueError:
-                        raise APIError(422, "RESEARCH_CAPACITY_EXCEEDED", "当前研究输入超过服务器处理上限，请缩小问题范围") from None
                     run_config.update(research_policy=plan, max_output_tokens=plan["max_output_tokens"],
                         model_timeout_seconds=plan["model_timeout_seconds"], evidence_context_chars=plan["evidence_context_chars"])
-                    review_state = {"evidence": [chunk.model_dump() for chunk in evidence]}
-                    budget = {name: plan[name] for name in ("max_steps", "max_tokens", "timeout_seconds")}
+                review_state = {"source_snapshot": snapshot, "evidence": [chunk.model_dump() for chunk in evidence],
+                    "units": {}, "usage_estimated": False}
+                budget = {name: search[name] for name in ("max_steps", "max_tokens", "timeout_seconds")}
             run_config["budget_mode"] = "automatic"
             digest = request_hash(request, automatic=True)
             task = Task(
                 id=uuid4(), user_id=user_id, task_type=request.task_type, question=request.question,
                 workflow_type=request.workflow_type, runner_type=runner_type,
-                workflow_version="mock-v1" if runner_type == "mock" else (WORKFLOW_VERSION if staged_review else "langgraph-v1"),
-                prompt_version=None if runner_type == "mock" else (PROMPT_VERSION if staged_review else "evidence-v4"),
+                workflow_version="mock-v1" if runner_type == "mock" else WORKFLOW_VERSION,
+                prompt_version=None if runner_type == "mock" else ("evidence-review-search-v1" if staged_review else "evidence-search-v1"),
                 model_id=None if runner_type == "mock" else settings.llm_model_id,
                 run_config=run_config, review_state=review_state,
                 **budget, idempotency_key=key, request_hash=digest,
