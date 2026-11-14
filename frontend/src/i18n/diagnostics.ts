@@ -4,6 +4,7 @@ import { stageLabels } from '../lib/format';
 import type { ResourceError, TaskEvent } from '../api/types';
 
 const errorMessages: Record<string, string> = {
+  RESEARCH_CAPACITY_EXCEEDED: 'This research input exceeds the server capacity. Narrow the question and try again.',
   IMPORT_CAPACITY_EXCEEDED: 'Your active import limit has been reached. Wait for an existing import to finish.',
   TASK_CAPACITY_EXCEEDED: 'Your active task limit has been reached. Wait for an existing task to finish.',
   DAILY_TASK_LIMIT: 'Your daily task limit has been reached. Please try again tomorrow.',

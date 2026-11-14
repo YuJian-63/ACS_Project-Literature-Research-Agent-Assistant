@@ -20,7 +20,7 @@ from sqlalchemy.orm import sessionmaker
 from app.api.schemas import TaskCreate
 from app.auth.security import csrf_token, token_hash
 from app.config import Settings
-from app.db.models import AuthSession, Base, Paper, PaperImport, PaperSource, Task, TaskPaper, User
+from app.db.models import AuthSession, Base, Paper, PaperChunk, PaperImport, PaperSource, Task, TaskPaper, User
 from app.main import create_app
 from app.reset_data import planned_files, reset
 from app.sources.arxiv import ArxivPaper, ArxivPage, DownloadReceipt
@@ -126,6 +126,83 @@ class OwnershipPostgresTests(unittest.TestCase):
 
     def task(self, paper, index=0, key="same-key"):
         return self.clients[index].post("/api/v1/tasks", json={"task_type": "summary", "question": "Summarize", "paper_ids": [paper]}, headers={"Idempotency-Key": key})
+
+    def test_single_paper_tasks_freeze_server_budget_and_replay_ignores_client_budget(self):
+        from app.api.views import task_view
+        from app.tasks.lifecycle import claim_task
+        from app.workers.research import load_research_job
+        self.settings.task_runner = "langgraph"
+        self.settings.llm_base_url = "https://fixture.invalid"
+        self.settings.llm_model_id = "fixture"
+        from pydantic import SecretStr
+        self.settings.llm_api_key = SecretStr("fixture-key")
+        self.settings.user_active_tasks = 10
+        paper_id = UUID(self.upload())
+        with self.sessions.begin() as session:
+            paper = session.get(Paper, paper_id)
+            paper.status = "ready"
+            paper.page_count = 1
+            paper.parser_version = "fixture"
+            session.add(PaperChunk(paper_id=paper_id, chunk_index=0, page_number=1,
+                content="method and results " * 500, content_sha256="b" * 64, parser_version="fixture"))
+        for task_type in ("summary", "qa"):
+            request = TaskCreate(task_type=task_type, question="method", paper_ids=[paper_id],
+                budget={"max_steps": 1, "max_tokens": 1, "timeout_seconds": 1})
+            accepted, replayed = submit_task(self.sessions, self.settings, request, task_type, user_id=self.users[0])
+            self.assertFalse(replayed)
+            with self.sessions() as session:
+                task = session.get(Task, accepted["id"])
+                self.assertEqual(task_view(task, [paper_id])["budget_mode"], "automatic")
+                self.assertGreater(task.max_tokens, 1)
+                self.assertGreater(task.timeout_seconds, 1)
+                frozen_evidence = task.review_state["evidence"]
+                frozen_budget = task.max_tokens
+                self.assertGreater(task.run_config["max_output_tokens"], 2048)
+            request.budget.max_tokens = 100000
+            self.settings.research_output_tokens = 1024
+            repeated, replayed = submit_task(self.sessions, self.settings, request, task_type, user_id=self.users[0])
+            self.assertTrue(replayed)
+            self.assertEqual(repeated["id"], accepted["id"])
+            with self.sessions() as session:
+                self.assertEqual(session.get(Task, accepted["id"]).max_tokens, frozen_budget)
+            self.settings.research_output_tokens = 8192
+            with self.sessions.begin() as session:
+                session.add(PaperChunk(paper_id=paper_id, chunk_index=1 if task_type == "summary" else 2,
+                    page_number=1, content="New method evidence after submission.", content_sha256="c" * 64, parser_version="fixture"))
+            owner = uuid4()
+            claim_task(self.sessions, owner, "langgraph")
+            job = load_research_job(self.sessions, accepted["id"])
+            self.assertEqual([chunk.model_dump() for chunk in job.evidence], frozen_evidence)
+            from unittest.mock import Mock
+            from app.research.model_client import ModelCompletion
+            from app.workers.research import RunnerWorker
+            model = Mock()
+            model.complete.return_value = ModelCompletion('{"paragraphs":[{"content_markdown":"Supported method.","evidence_ids":["E1"]}]}', 100, 50, "stop")
+            worker = RunnerWorker(self.sessions, self.settings, model_factory=lambda *args: model)
+            worker.owner = owner
+            worker.execute(accepted["id"])
+            with self.sessions() as session:
+                task = session.get(Task, accepted["id"])
+                self.assertEqual(task.status, "succeeded", task.error_message)
+            self.assertEqual(model.complete.call_args.kwargs["max_tokens"], job.max_output_tokens)
+
+    def test_mock_budget_is_automatic_and_legacy_replay_still_checks_manual_budget(self):
+        from app.api.views import task_view
+        from app.errors import APIError
+        from app.tasks.service import request_hash
+        request = TaskCreate(task_type="summary", paper_ids=[self.upload()],
+            budget={"max_steps": 1, "max_tokens": 1, "timeout_seconds": 1})
+        accepted, _ = submit_task(self.sessions, self.settings, request, "auto-mock", user_id=self.users[0])
+        with self.sessions.begin() as session:
+            task = session.get(Task, accepted["id"])
+            self.assertEqual(task_view(task, request.paper_ids)["budget_mode"], "automatic")
+            self.assertEqual(task.max_steps, 2)
+            task.run_config = {"mock_step_delay_seconds": 0}
+            task.request_hash = request_hash(request)
+        request.budget.max_tokens = 2
+        with self.assertRaises(APIError) as caught:
+            submit_task(self.sessions, self.settings, request, "auto-mock", user_id=self.users[0])
+        self.assertEqual(caught.exception.error["code"], "IDEMPOTENCY_CONFLICT")
 
     def test_reference_sql_matches_current_metadata(self):
         from alembic.autogenerate import compare_metadata

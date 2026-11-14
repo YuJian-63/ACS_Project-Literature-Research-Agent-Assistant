@@ -1,4 +1,5 @@
 export const english: Record<string, string> = {
+  '系统会根据任务类型、论文证据和问题规模自动分配执行资源。无需设置预算。': 'The system allocates execution resources automatically based on the task, paper evidence and question. No budget settings are needed.',
   '创建账号': 'Create account',
   '登录': 'Log in',
   '验证邮箱': 'Verify email',

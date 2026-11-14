@@ -59,7 +59,7 @@
 | status | string | queued / running / succeeded / failed |
 | stage | string | 阶段代码，不作为判断终态的依据 |
 | budget | Budget | 执行预算快照 |
-| budget_mode | string | automatic 为新分阶段真实综述，其他为 manual |
+| budget_mode | string | automatic 为新建任务的后端自动分配，manual 仅用于历史手动预算任务 |
 | versions | object | model_id、workflow_version、prompt_version、dataset_version；未知值为 null |
 | stats | TaskStats | 实际统计，未知值为 null |
 | last_event_seq | integer | 最新持久化事件序号，最小为 0 |
@@ -79,13 +79,13 @@ queued → running → succeeded
 
 **Budget：**
 
-| 字段 | 默认值 | 硬上限范围 |
+| 字段 | 兼容请求的默认值 | 可接受范围 |
 | --- | --- | --- |
 | max_steps | 10 | 1—100 |
 | max_tokens | 8000 | 1—100000 |
 | timeout_seconds | 120 | 1—1800 |
 
-budget 可省略或只提供部分字段；缺项填默认值，部署配置可收紧上限。max_tokens 是任务累计输入与输出 token 预算，模型单次上下文限制另外检查；超时从首次开始执行计算，初始排队不计入，阶段恢复后的排队计入。真实 Runner 在步骤/调用边界检查预算，超出即失败；Mock 不伪造模型用量。
+新建 summary/qa/review（含 Mock）统一由后端计算预算，前端不发送 budget。该字段仅为旧客户端及历史幂等重放保留，可省略或只提供部分字段，schema 仍校验范围，但合法值不控制新任务执行。响应 budget 为实际冻结值，不采用表中的兼容默认值。max_tokens 是任务累计输入与输出 Token 上限，另检查单次上下文；超时从首次执行开始，初始排队不计入。Mock 不产生模型用量。
 
 **TaskStats：**
 
@@ -181,8 +181,7 @@ Content-Type 为 application/json；可选 Idempotency-Key 请求头，语义见
   "task_type": "qa",
   "question": "这篇论文的核心方法和局限是什么？",
   "paper_ids": ["11111111-1111-4111-8111-111111111111"],
-  "workflow_type": "baseline",
-  "budget": {"max_steps": 10, "max_tokens": 8000, "timeout_seconds": 120}
+  "workflow_type": "baseline"
 }
 ```
 
@@ -192,13 +191,15 @@ Content-Type 为 application/json；可选 Idempotency-Key 请求头，语义见
 | question | 条件必填 | 去首尾空白；qa/review 为 1—8000 字符；summary 可省略或为 null，空白归一为 null，非空时同样为 1—8000 字符；超长返回 422 INVALID_REQUEST |
 | paper_ids | 是 | summary/qa 恰好 1 篇；review 为 2—20 篇；UUID 不得重复 |
 | workflow_type | 否 | 默认 baseline，MVP-0 不开放 extended |
-| budget | 否 | 见 Budget，缺失字段填默认值 |
+| budget | 否 | 兼容旧客户端；新任务统一忽略合法值，由后端动态分配。非法值仍返回 422 |
 
 paper_ids 视为集合，转 UUID 标准字符串后排序。不存在论文返回 404，details.missing_paper_ids 列出缺失 ID。Mock 允许 uploaded/ready，processing/failed 返回 409 PAPER_NOT_READY；真实 Runner 只允许 ready。真实模式需配置 `LLM_BASE_URL`、`LLM_MODEL_ID` 和 `LLM_API_KEY`；缺少任一项时返回 `503 RUNNER_NOT_CONFIGURED`，不创建任务且不降级为 Mock。真实模式支持 summary、qa 及 review；review 要求全部 2—20 篇论文 ready。
 
 runner_type、is_mock、model_id、status、stage、thread_id 及存储配置均不接受客户端写入。后端冻结 Runner、工作流版本和模型等执行配置，后续配置变更不能改变已提交任务。
 
-历史 langgraph-review-v1 真实 review 后期提交时由服务端冻结内部 `run_config.max_output_tokens=4096`，该字段不是客户端请求参数，不增加公开任务/产物字段。模型单次输出上限为冻结值与剩余预估总 Token 预算的较小值；预估输入已耗尽总预算时不调用模型。旧任务缺少字段时保持 2048，含既有 review-v2；summary/qa 保持 2048，Mock 不变。持久化值仅允许精确整数（review 为 2048/4096，单篇为 2048），非法配置在调用前失败。实际用量仍受原总预算约束，时间预算、单次调用、严格引用与原子写入不变；4096 不保证完整输出，不自动重试/续写或修复 JSON。重建任务是新提交；旧任务和原幂等键的重放不升级输出上限。
+历史 langgraph-review-v1 真实 review 后期提交时由服务端冻结内部 `run_config.max_output_tokens=4096`，该字段不是客户端请求参数，不增加公开任务/产物字段。模型单次输出上限为冻结值与剩余预估总 Token 预算的较小值；预估输入已耗尽总预算时不调用模型。旧任务缺少字段时保持 2048，含既有 review-v2；历史 summary/qa 保持 2048，Mock 不变。持久化值仅允许精确整数（review 为 2048/4096，历史单篇为 2048），非法配置在调用前失败。实际用量仍受原总预算约束，时间预算、单次调用、严格引用与原子写入不变；4096 不保证完整输出，不自动重试/续写或修复 JSON。重建任务是新提交；旧任务和原幂等键的重放不升级输出上限。
+
+新建真实 summary/qa 使用自动策略 `single-auto-v1`，工作流仍为 `langgraph-v1`，提示版本仍为 `evidence-v4`。创建时按证据规模、问题长度及完整提示 UTF-8 字节数加 512 开销估算输入，冻结选定证据和资源。动态输出以 256 Token 为单位，受 RESEARCH_OUTPUT_TOKENS（默认 8192）限制；上下文受 RESEARCH_CONTEXT_TOKENS（32768）限制，总量含额外 512 余量且受 RESEARCH_TASK_TOKENS（100000）限制。不能容纳时缩减证据，仍不足返回 `422 RESEARCH_CAPACITY_EXCEEDED`，不创建任务或调用模型。单次调用期限随输入/输出估算增长，最大 RESEARCH_CALL_TIMEOUT_SECONDS（180 秒，允许 5—300）；任务总期限另加 30 秒余量，最多一次模型调用。空匹配证据直接返回证据不足，不调用模型。旧任务保留原输入、2048 输出上限和旧超时；重放不升级策略。Mock 新任务自动使用两步、1 Token 占位上限（实际模型用量为零）和至少 30 秒执行期限。自动预算不保证 JSON 永不截断，不增加自动重试、续写或放松引用校验。
 
 新建真实 summary/qa 任务的 versions.prompt_version 为 `evidence-v4`。后端从已选存储片段生成最长 1000 字符的连续证据摘录，保留内部排版与 Unicode，不跨片段或物理页码，并分配任务内 evidence_id。内部模型结果按 paragraphs 返回每段正文与 evidence_ids，后端解析 ID、取原样引文与来源身份、按首次使用顺序分配引用编号，再执行原有严格来源、逐字引文及大小校验。跨段同一证据共享编号；未知 ID、同段重复 ID、模型自写引用标记或额外引文/来源字段会失败，不进行模糊匹配或静默替换。paragraphs/evidence_ids 不是对外 API 字段，产物仍返回 content_markdown 与 citations。
 
@@ -239,7 +240,7 @@ Location 响应头为 `/api/v1/tasks/{task_id}`。202 表示任务、论文关�
 
 - 可省略 Idempotency-Key；提供时为 1—128 个 ASCII 可见字符，不含空白。一次提交使用新键，网络重试复用。
 - `20261114_0004` 起幂等键按当前用户唯一：`(user_id,idempotency_key)`；不同用户的同键独立，业务请求不接收 user_id。不自动过期或复用键。
-- request_hash 对规范化后的 task_type、question、排序的 paper_ids、workflow_type、补齐默认值的 budget 计算 SHA-256；新 langgraph-review-v2 真实综述忽略并从哈希中移除 budget；JSON 使用 UTF-8、递归按键排序、无多余空格、不转义非 ASCII 字符。
+- request_hash 对规范化后的 task_type、question、排序的 paper_ids、workflow_type 计算 SHA-256；所有新任务移除 budget。历史手动任务按原规则包含补齐默认值的 budget。重放先读取任务的冻结预算模式，再使用对应哈希规则，既不重算资源也不消耗新任务配额；JSON 使用 UTF-8、递归按键排序、无多余空格、不转义非 ASCII 字符。
 - 同键同哈希返回原任务，仍为 202，Idempotency-Replayed 响应头为 true；新任务为 false。
 - 同键不同哈希返回 `409 IDEMPOTENCY_CONFLICT`；并发由数据库唯一约束及冲突后重查保证只创建一项。
 - 请求规范化后先在当前用户范围查幂等键；同请求重放不重新检查论文当前状态，首次提交仍完整校验全部论文归属和状态。

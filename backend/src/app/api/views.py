@@ -1,6 +1,7 @@
 from datetime import datetime
 
 from app.db.models import Paper, Task
+from app.research.task_policy import automatic_budget
 
 
 def resource_error(resource: Paper | Task) -> dict | None:
@@ -60,7 +61,7 @@ def task_view(task: Task, paper_ids: list) -> dict:
         total_tokens = task.input_tokens + task.output_tokens
     return {
         **summary_view(task, paper_ids),
-        "budget_mode": "automatic" if task.workflow_version == "langgraph-review-v2" else "manual",
+        "budget_mode": "automatic" if automatic_budget(task) else "manual",
         "budget": {name: getattr(task, name) for name in (
             "max_steps", "max_tokens", "timeout_seconds"
         )},

@@ -245,7 +245,7 @@ Mock 与真实 Runner 分别领取对应队列。当前没有可用远端模型�
 
 ### 8.1 自动预算与分阶段综述（2026-11-14）
 
-新建真实 review 使用 `langgraph-review-v2 / evidence-review-v3`，适用于 2—20 篇 ready 论文。前端移除预算输入；后端忽略客户端 review 预算，按论文数量、证据长度、问题及提示词开销冻结 `run_config.review_policy`。单篇摘要、问答、Mock 和历史综述沿用原行为。
+新建真实 review 使用 `langgraph-review-v2 / evidence-review-v3`，适用于 2—20 篇 ready 论文。前端移除预算输入；后端忽略客户端 review 预算，按论文数量、证据长度、问题及提示词开销冻结 `run_config.review_policy`。摘要、问答与 Mock 的新任务自动预算见第 11 节，历史任务保留原冻结配置。
 
 每篇论文最多采样四个分布于全文的片段，默认每篇共 4000 字符；证据用于研究目标、方法、评估、局限四列。随后分别生成共同点、差异、局限三个短章节，比较表与引用由服务端组装。信息不足时返回 null 或证据不足说明，不推断未采样的实验结果。采样不等于完整阅读全文。
 
@@ -406,3 +406,18 @@ uv run --locked python tests/test_ownership.py --postgres
 - 已修复并验证：成功 reset 会清空 source_request_gates，导致 arXiv 持续限流。reset_data 现已在清表事务中补种 arxiv，0004 迁移也以 ON CONFLICT DO NOTHING 恢复 seed；实际配置库已补种，正向重置回归证明许可可领取/释放，原生 16 项测试通过。
 - 已补齐：schema.sql 已附加由 Alembic 生成的 0004 SQL；test_reference_sql_matches_current_metadata 在回滚的隔离 reference_schema 执行参考 DDL，比较 ORM 类型/默认值并检查 gate seed，已纳入原生所有权 16 项通过结果。
 - 已修复并验证：retry_import 的用户配额锁与 complete_import 的用户外键引用锁可能形成死锁。原生回归 test_import_completion_does_not_deadlock_with_retry_quota_lock 已复现失败；配额锁改为 FOR NO KEY UPDATE，在序列化同用户配额的同时兼容外键 FOR KEY SHARE。相同并发回归及全部 16 项所有权测试通过。
+
+## 11. 摘要、问答自动预算（2026-11-14）
+
+新建 summary/qa/review 与 Mock 均由后端自动分配执行资源；前端省略 budget，旧客户端的合法 budget 仅作兼容输入，不控制新任务。摘要/问答在创建时冻结选定证据及 single-auto-v1 计划，按完整提示、问题长度及证据规模计算输入预留、动态输出和执行期限。改变服务器配置不影响已提交任务，历史手动预算任务按原请求哈希重放。
+
+| 变量 | 默认值 | 用途 |
+| --- | --- | --- |
+| RESEARCH_CONTEXT_TOKENS | 32768 | 单篇任务输入预留与输出上限之和 |
+| RESEARCH_OUTPUT_TOKENS | 8192 | 单篇模型输出硬上限，动态值可更小 |
+| RESEARCH_TASK_TOKENS | 100000 | 单篇任务累计 Token 硬上限，含余量 |
+| RESEARCH_CALL_TIMEOUT_SECONDS | 180 | 单次调用最大秒数，动态值可更短，总任务另加 30 秒 |
+
+这些变量有默认值，已有 .env 无需补填；部署者应按实际模型上下文/输出能力调整。新单篇任务不使用 LLM_TIMEOUT_SECONDS 作为调用上限，旧任务继续使用冻结值。证据过大时缩减采样，仍无法容纳返回 422 RESEARCH_CAPACITY_EXCEEDED；没有匹配证据时不调用模型。自动预算不等于完整阅读全文，也不保证生成不会截断；证据校验及失败处理保持严格，不自动续写或重试单篇调用。综述继续使用 REVIEW_* 配置。
+
+本次调整无需数据库迁移，重启 API 与真实 Runner 后创建新任务即可。隔离 PostgreSQL 回归入口为 uv run --locked python -B tests/test_ownership.py --postgres；策略测试为 uv run --locked python -B -m unittest discover -s tests -p test_task_policy.py -v。

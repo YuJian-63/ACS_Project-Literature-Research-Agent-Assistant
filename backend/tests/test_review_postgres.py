@@ -213,6 +213,7 @@ class ReviewPostgresTests(unittest.TestCase):
         with self.sessions.begin() as session:
             task = session.get(Task, identity)
             task.workflow_version = "langgraph-review-v1"
+            task.run_config = {name: value for name, value in task.run_config.items() if name != "budget_mode"}
             task.request_hash = request_hash(request)
             key = task.idempotency_key
         self.settings.real_runner_configured = False

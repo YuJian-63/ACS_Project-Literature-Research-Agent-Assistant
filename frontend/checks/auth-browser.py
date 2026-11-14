@@ -143,6 +143,16 @@ def main():
         expect(page.get_by_role('button', name=USER['username'], exact=True)).to_be_visible()
         get_paper_rows = page.locator('.ant-table-tbody tr[data-row-key]')
         expect(get_paper_rows).to_have_count(1)
+        for task_type, label, count in (("summary", "Paper summary", 1), ("qa", "Paper Q&A", 1), ("review", "Literature review", 2)):
+            page.goto(BASE + '/tasks/new?' + '&'.join('paper_id=' + paper['id'] for paper in PAPERS[:count]))
+            page.get_by_text(label, exact=True).click()
+            expect(page.get_by_role('heading', name='Automatic execution', exact=True)).to_be_visible()
+            expect(page.get_by_role('spinbutton')).to_have_count(0)
+            page.locator('textarea').first.fill('Compare methods')
+            page.get_by_role('button', name='Create research task').click()
+            expect(page.get_by_role('alert')).to_be_visible()
+            submitted = [call[1] for call in calls if call[0] == '/api/v1/tasks'][-1]
+            assert submitted['task_type'] == task_type and 'budget' not in submitted
         page.goto(BASE + '/tasks/new')
         page.locator('textarea').first.fill('A private unsaved draft')
         state['hold_logout'] = True
@@ -222,6 +232,7 @@ def main():
         page.get_by_label('Password', exact=True).fill(PASSWORD)
         page.get_by_role('button', name='Log in', exact=True).click()
         expect(page.get_by_role('button', name=USER['username'], exact=True)).to_be_visible()
+        task_call_offset = len(calls)
         state['user_papers'] = 2
         task_inputs = '/tasks/new?' + '&'.join('paper_id=' + paper['id'] for paper in PAPERS[:2])
         page.goto(BASE + task_inputs)
@@ -231,14 +242,14 @@ def main():
         expect(page.locator('.submission-error')).to_be_visible()
         create.click()
         page.wait_for_timeout(100)
-        old_keys = [call[2]['idempotency-key'] for call in calls if call[0].endswith('/tasks')]
+        old_keys = [call[2]['idempotency-key'] for call in calls[task_call_offset:] if call[0].endswith('/tasks')]
         assert len(old_keys) == 2 and old_keys[0] == old_keys[1]
         page.evaluate("new BroadcastChannel('literature-auth').postMessage(crypto.randomUUID())")
         expect(page.locator('textarea').first).to_have_value('')
         page.locator('textarea').first.fill('Compare these papers')
         create.click()
         expect(page.locator('.submission-error')).to_be_visible()
-        new_keys = [call[2]['idempotency-key'] for call in calls if call[0].endswith('/tasks')]
+        new_keys = [call[2]['idempotency-key'] for call in calls[task_call_offset:] if call[0].endswith('/tasks')]
         assert len(new_keys) == 3 and new_keys[2] != old_keys[0]
         page.goto(BASE + '/tasks/' + TASK['id'])
         expect(page.locator('.task-overview .status-running')).to_be_visible()

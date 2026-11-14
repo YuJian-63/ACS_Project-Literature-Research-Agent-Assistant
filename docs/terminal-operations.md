@@ -86,7 +86,7 @@ Set-Location .\backend
 uv run --locked python -m app.runner_worker
 ~~~
 
-需要 TASK_RUNNER=langgraph 以及完整模型配置。新任务的进度应从排队进入执行，最终完成或显示具体错误。此进程会调用已配置的模型服务，可能产生费用。多篇论文综述使用服务端自动预算，无需在每个终端手工配置任务预算。
+需要 TASK_RUNNER=langgraph 以及完整模型配置。新任务的进度应从排队进入执行，最终完成或显示具体错误。此进程会调用已配置的模型服务，可能产生费用。摘要、问答和多篇论文综述均使用服务端自动预算，无需在页面或每个终端手工配置任务预算。RESEARCH_* 服务器上限有默认值，已有 .env 无需新增即可运行；修改后重启 API 与 Runner，仅影响新任务。
 
 ### 终端 4：arXiv 导入 Worker
 
@@ -195,6 +195,10 @@ npm.cmd ci
 
 ~~~dotenv
 TASK_RUNNER=langgraph
+RESEARCH_CONTEXT_TOKENS=32768
+RESEARCH_OUTPUT_TOKENS=8192
+RESEARCH_TASK_TOKENS=100000
+RESEARCH_CALL_TIMEOUT_SECONDS=180
 LLM_BASE_URL=https://api.deepseek.com
 LLM_MODEL_ID=deepseek-flash
 LLM_API_KEY=填写你自己的模型服务密钥

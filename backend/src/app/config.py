@@ -29,6 +29,10 @@ class Settings(BaseSettings):
     llm_thinking_mode: Literal["provider_default", "disabled", "enabled"] = "provider_default"
     llm_timeout_seconds: float = Field(default=60, ge=1, le=300, allow_inf_nan=False)
     evidence_context_chars: int = Field(default=24000, ge=1000, le=100000)
+    research_context_tokens: int = Field(default=32768, ge=4096, le=1000000)
+    research_output_tokens: int = Field(default=8192, ge=1024, le=32768)
+    research_task_tokens: int = Field(default=100000, ge=1000, le=100000)
+    research_call_timeout_seconds: float = Field(default=180, ge=5, le=300, allow_inf_nan=False)
     review_context_tokens: int = Field(default=32768, ge=4096, le=1000000)
     review_output_tokens: int = Field(default=4096, ge=1024, le=32768)
     review_task_tokens: int = Field(default=100000, ge=1000, le=100000)

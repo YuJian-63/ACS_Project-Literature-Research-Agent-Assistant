@@ -19,6 +19,7 @@ from app.tasks.lifecycle import (
 from app.research.model_client import ChatModel, ModelTimeoutError, OpenAICompatibleChatModel
 from app.research.graph import build_research_graph
 from app.research.review_policy import WORKFLOW_VERSION
+from app.research.task_policy import POLICY_VERSION as SINGLE_POLICY_VERSION
 from app.research.review_runner import ReviewResultError, run_staged_review
 from app.research.review_store import ReviewStore, ReviewOwnershipLost, ReviewLimitError
 from app.research.validation import (
@@ -95,7 +96,14 @@ def load_research_job(sessions: sessionmaker[Session], task_id: UUID) -> Researc
             raise TaskInputError("INVALID_AGENT_RESULT", "任务模型配置不可用")
         max_output_tokens = run_config.get("max_output_tokens", 2048)
         allowed_output_caps = {2048, 4096} if task.task_type == "review" else {2048}
-        if type(max_output_tokens) is not int or max_output_tokens not in allowed_output_caps:
+        single_plan = run_config.get("research_policy")
+        automatic_single = task.task_type in {"summary", "qa"} and isinstance(single_plan, dict) and single_plan.get("version") == SINGLE_POLICY_VERSION
+        if task.task_type in {"summary", "qa"} and run_config.get("budget_mode") == "automatic" and not automatic_single:
+            raise TaskInputError("INVALID_AGENT_RESULT", "研究执行计划不可用")
+        if type(max_output_tokens) is not int:
+            raise TaskInputError("INVALID_AGENT_RESULT", "任务输出预算配置不可用")
+        valid_output = (1024 <= max_output_tokens <= 32768 and max_output_tokens == single_plan.get("max_output_tokens")) if automatic_single else max_output_tokens in allowed_output_caps
+        if not valid_output:
             raise TaskInputError("INVALID_AGENT_RESULT", "任务输出预算配置不可用")
         context_chars = int(run_config.get("evidence_context_chars", 24000))
         staged_review = task.workflow_version == WORKFLOW_VERSION
@@ -103,6 +111,12 @@ def load_research_job(sessions: sessionmaker[Session], task_id: UUID) -> Researc
             if not run_config.get("review_policy") or "evidence" not in task.review_state:
                 raise TaskInputError("INVALID_AGENT_RESULT", "综述执行计划不可用")
             evidence = [EvidenceChunk.model_validate(chunk) for chunk in task.review_state["evidence"]]
+        elif automatic_single:
+            if "evidence" not in task.review_state:
+                raise TaskInputError("INVALID_AGENT_RESULT", "研究执行计划不可用")
+            evidence = [EvidenceChunk.model_validate(chunk) for chunk in task.review_state["evidence"]]
+            if any(chunk.paper_id not in {paper["paper_id"] for paper in selected_papers} for chunk in evidence):
+                raise TaskInputError("INVALID_AGENT_RESULT", "研究证据不属于选定论文")
         elif task.task_type == "review":
             groups = {paper["paper_id"]: [] for paper in selected_papers}
             for chunk in evidence_source:

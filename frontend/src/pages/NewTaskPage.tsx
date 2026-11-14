@@ -1,19 +1,18 @@
 import { t, useLocale } from '../i18n';
 import { useEffect, useRef, useState } from 'react';
-import { Alert, Button, Collapse, Form, Input, InputNumber, Radio, Spin } from 'antd';
+import { Alert, Button, Form, Input, Radio, Spin } from 'antd';
 import { ArrowLeftOutlined, ArrowRightOutlined } from '@ant-design/icons';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { api, asApiError, isCanceled, type ApiError } from '../api/client';
-import type { Budget, Paper, TaskType } from '../api/types';
+import type { Paper, TaskType } from '../api/types';
 import { ErrorNotice, PageHeader } from '../components/Common';
 import { canSelectPaper } from '../components/PaperTable';
 import { PaperPicker } from '../components/PaperPicker';
-import { defaultBudget, normalizeSubmission, selectionError, submissionSignature } from '../lib/submission';
+import { normalizeSubmission, selectionError, submissionSignature } from '../lib/submission';
 
 interface TaskForm {
   task_type: TaskType;
   question?: string;
-  budget: Budget;
 }
 
 export default function NewTaskPage() {
@@ -68,7 +67,6 @@ export default function NewTaskPage() {
         form.setFieldsValue({
           task_type: source?.task_type || (selected.length > 1 ? 'review' : 'summary'),
           question: source?.question || '',
-          budget: source?.budget || { ...defaultBudget },
         });
       } catch (error) {
         if (!pending.signal.aborted && !isCanceled(error)) setInitialError(asApiError(error));
@@ -110,7 +108,7 @@ export default function NewTaskPage() {
     if (inFlight.current) return;
     setAttempted(true);
     if (countError || unavailable) return;
-    const body = normalizeSubmission(values.task_type, values.question, papers.map((paper) => paper.id), values.budget);
+    const body = normalizeSubmission(values.task_type, values.question, papers.map((paper) => paper.id));
     const signature = submissionSignature(body);
     if (lastAttempt.current?.signature !== signature) lastAttempt.current = { signature, key: crypto.randomUUID() };
     const pending = new AbortController();
@@ -134,7 +132,7 @@ export default function NewTaskPage() {
   return <>
     <Link to="/papers" className="back-link"><ArrowLeftOutlined />{t("返回论文库")}</Link>
     <PageHeader title={parameters.has('from_task') ? t("重新创建任务") : t("新建研究")} description={t("选择资料，明确问题，把执行过程与结果留在同一处。")} />
-    {initialError ? <><ErrorNotice error={initialError} title={t("无法加载任务输入")} retry={() => setInitialRevision((value) => value + 1)} /><Link to="/tasks/new">{t("清空来源，创建新任务")}</Link></> : <Spin spinning={initialLoading} description={t("加载论文与任务输入")}><Form<TaskForm> form={form} layout="vertical" onFinish={(values) => { void submit(values); }} onFinishFailed={() => setAttempted(true)} disabled={submitting || initialLoading} initialValues={{ task_type: 'summary', question: '', budget: defaultBudget }}>
+    {initialError ? <><ErrorNotice error={initialError} title={t("无法加载任务输入")} retry={() => setInitialRevision((value) => value + 1)} /><Link to="/tasks/new">{t("清空来源，创建新任务")}</Link></> : <Spin spinning={initialLoading} description={t("加载论文与任务输入")}><Form<TaskForm> form={form} layout="vertical" onFinish={(values) => { void submit(values); }} onFinishFailed={() => setAttempted(true)} disabled={submitting || initialLoading} initialValues={{ task_type: 'summary', question: '' }}>
       <div className="creation-layout"><div className="creation-main">
         <section className="content-panel form-section"><h2>{t("你想研究什么？")}</h2>
           <Form.Item name="task_type" label={t("任务类型")} rules={[{ required: true }]}><Radio.Group className="task-type-options" optionType="button" buttonStyle="solid" options={[{ value: 'summary', label: t("论文摘要") }, { value: 'qa', label: t("论文问答") }, { value: 'review', label: t("跨论文综述") }]} /></Form.Item>
@@ -151,7 +149,7 @@ export default function NewTaskPage() {
         </section>
       </div><aside className="creation-aside">
         <section className="content-panel execution-card"><h2>{t("执行方式")}</h2><span className="workflow-name">Baseline <span>{t("基础工作流")}</span></span><p>{t("由服务器配置选择模拟或真实研究执行。真实任务要求论文解析就绪；综述将生成带来源引用的跨论文比较表。")}</p><div className="execution-note">{t("扩展工作流尚未开放；任务详情标明是否为模拟运行")}</div></section>
-        {taskType === 'review' ? <section className="content-panel"><h2>{t("自动安排执行")}</h2><p>{t("系统会根据论文数量和证据规模分阶段分析，并自动分配执行资源。无需设置预算。")}</p></section> : <Collapse className="budget-panel" items={[{ key: 'budget', label: t("执行预算"), forceRender: true, children: <><Form.Item name={['budget', 'max_steps']} label={t("最大步骤数")} rules={[{ required: true, type: 'integer', min: 1, max: 100 }]}><InputNumber min={1} max={100} precision={0} /></Form.Item><Form.Item name={['budget', 'max_tokens']} label={t("累计 Token 上限")} rules={[{ required: true, type: 'integer', min: 1, max: 100000 }]}><InputNumber min={1} max={100000} precision={0} /></Form.Item><Form.Item name={['budget', 'timeout_seconds']} label={t("执行超时（秒）")} rules={[{ required: true, type: 'integer', min: 1, max: 1800 }]}><InputNumber min={1} max={1800} precision={0} /></Form.Item><p className="section-footnote">{t("排队时间不计入超时。真实综述共享总 Token 和上下文预算；模拟流程至少需要两步，不产生模型用量。")}</p></> }]} />}
+        <section className="content-panel"><h2>{t("自动安排执行")}</h2><p>{t("系统会根据任务类型、论文证据和问题规模自动分配执行资源。无需设置预算。")}</p></section>
         <div className="submission-summary"><strong>{t("{0} 篇论文已选", [papers.length])}</strong><span>{t("提交后进入任务详情，可查看状态与执行事件。")}</span><Button type="primary" htmlType="submit" size="large" block loading={submitting} disabled={initialLoading} icon={<ArrowRightOutlined />} iconPlacement="end">{submitting ? t("正在提交") : t("创建研究任务")}</Button><p>{t("相同输入的失败请求可直接重试，不会重复创建任务。")}</p></div>
       </aside></div>
       {submitError && <div className="submission-error"><ErrorNotice error={submitError} title={t("提交未完成")} /><p>{t("保持输入不变，点击“创建研究任务”将复用原幂等键；修改输入则视为新任务。")}</p></div>}
