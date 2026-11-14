@@ -12,6 +12,8 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from app.sources.arxiv import ArxivError, ArxivPaper, DownloadReceipt, MAX_PDF_BYTES, normalize_arxiv_id
 from app.db.models import Paper, PaperImport, PaperSource
+from app.config import Settings
+from app.db.ownership import check_import_capacity, lock_active_user
 from app.errors import APIError
 from app.papers.storage import controlled_path
 
@@ -154,11 +156,11 @@ def complete_import(
         now = session.scalar(select(func.clock_timestamp()))
         if not owns_import(item, job, now):
             raise ArxivError("IMPORT_TIMEOUT", "导入执行时限已到", retryable=True)
-        session.add(Paper(id=job.import_id, title=metadata.title[:255], original_filename=job.external_id.replace("/", "_") + ".pdf",
+        session.add(Paper(id=job.import_id, user_id=item.user_id, title=metadata.title[:255], original_filename=job.external_id.replace("/", "_") + ".pdf",
                           storage_key=f"uploads/{job.import_id}.pdf", size_bytes=size, sha256=receipt.sha256,
                           status="uploaded", created_at=now, updated_at=now))
         session.flush()
-        session.add(PaperSource(paper_id=job.import_id, provider=job.provider, external_id=job.external_id,
+        session.add(PaperSource(paper_id=job.import_id, user_id=item.user_id, provider=job.provider, external_id=job.external_id,
                                 source_metadata=metadata.model_dump(mode="json", exclude={"provider", "external_id"}), created_at=now))
         item.status = "succeeded"
         item.paper_id = job.import_id
@@ -209,42 +211,45 @@ def import_view(session: Session, item: PaperImport) -> dict:
     }
 
 
-def get_import(sessions: sessionmaker[Session], import_id: UUID) -> dict:
+def get_import(sessions: sessionmaker[Session], import_id: UUID, *, user_id: UUID) -> dict:
     with sessions() as session:
-        item = session.get(PaperImport, import_id)
+        item = session.scalar(select(PaperImport).where(PaperImport.id == import_id, PaperImport.user_id == user_id))
         if item is None:
             raise APIError(404, "PAPER_IMPORT_NOT_FOUND", "导入记录不存在")
         return import_view(session, item)
 
 
-def submit_import(sessions: sessionmaker[Session], provider: str, external_id: str) -> dict:
+def submit_import(sessions: sessionmaker[Session], provider: str, external_id: str, *, user_id: UUID, settings: Settings) -> dict:
     if provider != "arxiv":
         raise ValueError("Unsupported provider")
     external_id = normalize_arxiv_id(external_id)
     try:
         with sessions.begin() as session:
-            existing = session.scalar(select(PaperImport).where(PaperImport.provider == provider, PaperImport.external_id == external_id))
+            lock_active_user(session, user_id)
+            existing = session.scalar(select(PaperImport).where(PaperImport.user_id == user_id, PaperImport.provider == provider, PaperImport.external_id == external_id))
             if existing is not None:
                 return import_view(session, existing)
+            check_import_capacity(session, user_id, settings.user_active_imports)
             now = session.scalar(select(func.clock_timestamp()))
-            item = PaperImport(id=uuid4(), provider=provider, external_id=external_id, created_at=now, updated_at=now)
+            item = PaperImport(id=uuid4(), user_id=user_id, provider=provider, external_id=external_id, created_at=now, updated_at=now)
             session.add(item)
             session.flush()
             result = import_view(session, item)
         return result
     except IntegrityError:
         with sessions() as session:
-            existing = session.scalar(select(PaperImport).where(PaperImport.provider == provider, PaperImport.external_id == external_id))
+            existing = session.scalar(select(PaperImport).where(PaperImport.user_id == user_id, PaperImport.provider == provider, PaperImport.external_id == external_id))
             if existing is None:
                 raise
             return import_view(session, existing)
 
 
-def retry_import(sessions: sessionmaker[Session], import_id: UUID, expected_attempt: int) -> dict:
+def retry_import(sessions: sessionmaker[Session], import_id: UUID, expected_attempt: int, *, user_id: UUID, settings: Settings) -> dict:
     if type(expected_attempt) is not int or expected_attempt < 1:
         raise ValueError("Invalid expected attempt")
     with sessions.begin() as session:
-        item = session.scalar(select(PaperImport).where(PaperImport.id == import_id).with_for_update())
+        lock_active_user(session, user_id)
+        item = session.scalar(select(PaperImport).where(PaperImport.id == import_id, PaperImport.user_id == user_id).with_for_update())
         if item is None:
             raise APIError(404, "PAPER_IMPORT_NOT_FOUND", "导入记录不存在")
         if item.attempt == expected_attempt + 1:
@@ -253,6 +258,7 @@ def retry_import(sessions: sessionmaker[Session], import_id: UUID, expected_atte
             raise APIError(409, "IMPORT_RETRY_CONFLICT", "导入状态或尝试版本已变化，请刷新")
         if not item.error_details or item.error_details.get("retryable") is not True:
             raise APIError(409, "IMPORT_NOT_RETRYABLE", "此次失败不支持重新下载")
+        check_import_capacity(session, user_id, settings.user_active_imports)
         item.attempt += 1
         item.status = "queued"
         item.started_at = item.finished_at = item.worker_id = item.lease_expires_at = None

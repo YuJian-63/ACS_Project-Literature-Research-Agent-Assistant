@@ -14,6 +14,8 @@ from starlette.middleware.cors import CORSMiddleware
 from starlette.responses import JSONResponse
 
 from app.api.router import router
+from app.auth.api import router as auth_router
+from app.auth.dependencies import AuthResponseMiddleware
 from app.config import Settings
 from app.db.session import create_database_engine, create_session_factory
 from app.errors import APIError
@@ -147,13 +149,16 @@ def create_app(settings: Settings | None = None, engine: Engine | None = None, *
             "code": "SERVICE_NOT_READY", "message": "数据库暂不可用", "details": {}
         }}, status_code=503)
 
+    application.include_router(auth_router)
     application.include_router(router)
     application.include_router(import_router)
     application.add_middleware(ErrorMiddleware)
     application.add_middleware(
         CORSMiddleware, allow_origins=settings.cors_origins, allow_methods=["GET", "POST"],
-        allow_headers=["Content-Type", "Idempotency-Key"],
+        allow_credentials=True,
+        allow_headers=["Content-Type", "Idempotency-Key", "X-CSRF-Token"],
         expose_headers=["X-Request-ID", "Location", "Idempotency-Replayed", "Retry-After"],
     )
+    application.add_middleware(AuthResponseMiddleware)
     application.add_middleware(RequestMiddleware)
     return application

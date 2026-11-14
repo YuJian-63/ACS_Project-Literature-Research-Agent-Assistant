@@ -4,6 +4,9 @@ import { stageLabels } from '../lib/format';
 import type { ResourceError, TaskEvent } from '../api/types';
 
 const errorMessages: Record<string, string> = {
+  IMPORT_CAPACITY_EXCEEDED: 'Your active import limit has been reached. Wait for an existing import to finish.',
+  TASK_CAPACITY_EXCEEDED: 'Your active task limit has been reached. Wait for an existing task to finish.',
+  DAILY_TASK_LIMIT: 'Your daily task limit has been reached. Please try again tomorrow.',
   REVIEW_CAPACITY_EXCEEDED: 'This review exceeds the server capacity. Narrow the question or select fewer papers.',
   ARXIV_TIMEOUT: 'The arXiv request timed out. Please try again.',
   ARXIV_RATE_LIMITED: 'arXiv requests are temporarily rate limited. Please wait before retrying.',

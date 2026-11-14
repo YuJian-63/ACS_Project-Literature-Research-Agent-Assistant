@@ -52,7 +52,7 @@ def remove_file(path: Path | None) -> None:
 
 
 def save_paper(
-    sessions: sessionmaker[Session], root: Path, source: BinaryIO, filename: str | None
+    sessions: sessionmaker[Session], root: Path, source: BinaryIO, filename: str | None, *, user_id: UUID
 ) -> dict:
     filename, title = validate_filename(filename)
     paper_id = uuid4()
@@ -90,7 +90,7 @@ def save_paper(
         raise APIError(500, "STORAGE_WRITE_FAILED", "文件写入失败") from None
 
     paper = Paper(
-        id=paper_id, title=title, original_filename=filename, storage_key=storage_key,
+        id=paper_id, user_id=user_id, title=title, original_filename=filename, storage_key=storage_key,
         size_bytes=size, sha256=digest.hexdigest(),
     )
     with sessions() as session:
@@ -117,7 +117,7 @@ def save_paper(
                 with sessions() as lookup:
                     existing = lookup.get(Paper, paper_id)
                     if (
-                        existing is not None and existing.storage_key == storage_key
+                        existing is not None and existing.user_id == user_id and existing.storage_key == storage_key
                         and existing.sha256 == digest.hexdigest()
                     ):
                         return paper_view(existing)

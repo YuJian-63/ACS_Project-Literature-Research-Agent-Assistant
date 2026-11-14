@@ -1,6 +1,6 @@
 # 前端研究工作台
 
-React + TypeScript + Vite 单页应用，使用 Ant Design、Axios、React Router 和 React Markdown，对接 `../docs/api-contract.md`。当前为本地单用户 MVP-2：论文库、PDF 上传/解析状态、新建任务、任务列表和详情；后端默认 Mock，也可通过服务端配置启用真实摘要、问答及跨论文综述 Runner。
+React + TypeScript + Vite 单页应用，使用 Ant Design、Axios、React Router 和 React Markdown，对接 `../docs/api-contract.md`。工作台通过已验证邮箱的用户名/密码账号访问，包含个人论文库、PDF 上传/解析状态、新建任务、任务列表和详情；后端默认 Mock，也可通过服务端配置启用真实摘要、问答及跨论文综述 Runner。
 
 ## 1. 本地启动
 
@@ -23,16 +23,18 @@ npm.cmd run dev
 | 变量 | 用途 |
 | --- | --- |
 | API_PROXY_TARGET | Vite 开发/预览代理目标；默认 `http://127.0.0.1:8000`，只在开发服务器中使用 |
-| VITE_API_BASE_URL | 浏览器使用的 API 基地址；默认留空以使用同源代理。跨源时填写后端 origin，如 `http://127.0.0.1:8000`，不要附加 `/api/v1` |
+| VITE_API_BASE_URL | 浏览器使用的 API 基地址；账号版本保持留空，使用同源 `/api` 代理和会话 Cookie |
 
-修改配置后重启 Vite。跨源直连还需在后端 `CORS_ORIGINS` 中允许前端 origin；同源代理不需要额外 CORS 配置。所有 `VITE_` 变量都会进入浏览器构建，禁止放入密码、模型密钥或其他秘密。
+修改配置后重启 Vite。账号版本支持同源代理，后端账号配置需允许前端的精确 Origin；前后端统一使用 localhost 或统一使用 127.0.0.1。所有 `VITE_` 变量都会进入浏览器构建，禁止放入密码、模型密钥或其他秘密。
 
 ## 3. 使用流程
+
+首次使用先创建账号并填写邮箱，使用邮件链接和注册原密码验证邮箱，再以用户名和密码登录。账号菜单可以修改密码或退出；忘记密码时从登录页申请重置邮件。邮件由后端发送，前端不接触 QQ SMTP 凭据。
 
 1. 在论文库上传单个 PDF，最大 **20 MiB**。客户端检查文件名、大小与 PDF 文件头；后端仍独立校验。Parser Worker 运行时可提取文本；未运行时保留“已上传”。扫描件不支持 OCR。
 2. 论文状态会在每轮结束后等待 2 秒查询。解析成功后显示页数/解析器版本；失败时可展开查看错误并重新上传。重新上传创建独立记录，不覆盖原论文。
 3. 可搜索、按状态筛选并跨页选择论文。摘要和问答选择一篇，综述选择 2—20 篇；问答和综述必须填写研究问题。是否使用真实 Runner 由后端配置决定；真实任务要求论文解析就绪。
-4. 新建任务仅开放 Baseline，支持配置步骤、Token 与执行超时预算。预算默认折叠，仍会进行校验；Mock 至少需要两步。
+4. 新建任务仅开放 Baseline；摘要和问答支持折叠的步骤、Token 与执行超时预算，跨论文综述由后端自动安排执行资源，提交时不携带 budget。Mock 至少需要两步。
 5. 任务详情每轮请求结束后等待 2 秒继续查询，避免请求重叠；按事件序号增量读取，终态补齐最后事件后停止轮询。查询故障保留上次任务状态，可手动重试。
 6. 任务 ID 保留在 URL 中，刷新或重新打开详情可从后端恢复结果。终态任务可“重新创建任务”，预填原输入，确认提交后创建新任务，不修改原记录。
 
@@ -52,7 +54,7 @@ npm.cmd run dev
 - 真实综述在「综述正文 / 论文比较 / 执行记录」中分别展示阅读内容、比较矩阵和执行信息。点击正文引用或表格中的带引用内容，会联动右侧证据面板；手机使用来源抽屉和逐篇比较。论文和证据面板可打开本地 PDF 对应页。未报告项显示“未报告”，无引用时显示明确的空状态。
 - 未报告的 Token/调用统计显示“—”，不把 `null` 当成 0。
 - Markdown 禁止原始 HTML 和内嵌图片，链接仅允许 HTTP(S) 或安全的同源相对地址；外链新窗口带 `noopener noreferrer`。有实际引用时支持原 PDF 页码跳转。
-- 当前仅适用于受信任的本机单用户环境，无登录和权限管理；公开部署前必须完善后端访问控制、TLS、上传限制与配额。
+- 私有工作台等待服务端会话确认，业务接口、PDF 与任务的实际权限由后端强制校验；前端不传可信 user_id。生产使用 HTTPS、同源代理和服务端 HttpOnly/Secure 会话 Cookie。
 
 ## 5. 构建与部署
 
@@ -62,7 +64,7 @@ npm.cmd run build
 npm.cmd run preview
 ```
 
-构建输出为 `dist/`，预览默认在 `http://127.0.0.1:4173`，仅用于本机检查。正式部署需要静态文件服务器为 `/papers`、`/tasks/*` 等前端路由回退到 `index.html`，并优先将 `/api` 反向代理到后端，不能将 API 请求回退到 HTML。Vite 代理不会随 `dist/` 发布。跨源部署须在构建时设置 `VITE_API_BASE_URL` 并配置后端 CORS；修改该值需要重新构建。
+构建输出为 `dist/`，预览默认在 `http://127.0.0.1:4173`，仅用于本机检查。正式部署需要静态文件服务器为 `/login`、`/verify-email`、`/reset-password`、`/account/password`、`/papers`、`/tasks/*` 等前端路由回退到 `index.html`，并优先将同源 `/api` 反向代理到后端，不能将 API 请求回退到 HTML。Vite 代理不会随 `dist/` 发布；生产会话需要 HTTPS 与匹配的后端 Origin/Cookie 配置。
 
 ## 6. 验收说明
 
@@ -114,6 +116,18 @@ MVP-1A 增量校验覆盖 pypdf 解析核心、可终止子进程、页码与分
 切换语言不改变研究输入、提交幂等键或生成正文；新增进度和预算说明支持中英文。创建请求失败且结果不确定时仍保留原幂等键。
 
 npm.cmd run verify:review 验证预算省略、提交指纹和双语进度；npm.cmd run build 执行类型检查及构建。checks/review-browser.py 使用 Playwright 拦截 API，覆盖六篇论文创建、进度、刷新、估算用量与 390px 布局，不请求真实模型。可通过 webapp-testing 的 with_server.py 启动专用 Vite 端口后执行。
+
+## 账号、验证与恢复
+
+账号入口为 /login、/register、/verify-email、/forgot-password、/reset-password；/account/password 和研究工作台均等待 /api/v1/auth/me 确认会话后显示。会话响应统一为 {user:{id,username,email},csrf_token}；账号菜单展示真实用户名，提供修改密码和退出。浏览器使用 HttpOnly 会话 Cookie，Axios 设置 withCredentials；已认证的 POST 请求附加当前会话的 X-CSRF-Token。公开账号请求使用 JSON，Origin 由浏览器自动生成。前后端必须同源（开发时通过 Vite /api 代理），不要混用 localhost 与 127.0.0.1。
+
+用户名为 3–32 个 ASCII 字母、数字或下划线，密码为 15–128 个 Unicode 字符；密码不去除空格。注册包含邮箱和确认密码。邮件链接形如 /verify-email#token=... 或 /reset-password#token=...：令牌仅暂存在内存，应用启动时立即清除地址栏，不写入存储、查询参数或第三方请求。刷新后需重新打开邮件链接。验证还必须输入注册时的原密码，打开链接不会自动激活；重置后需重新登录。重新发送验证邮件和密码恢复采用统一受理文案，不保证 SMTP 已送达。QQ 邮箱仅作为后端发信服务，用户邮箱不限 QQ。
+
+退出、业务接口 401 和跨标签页账号事件会取消会话代次内的请求，并按代次重挂载私有工作台，清除论文选择、草稿、上传、轮询、来源面板和提交幂等键。界面语言独立保留。跨标签页只广播随机变更事件，不存储账号资料、密码、邮件令牌或 CSRF。业务输入不包含 user_id。
+
+隔离验收：在 frontend 目录启动 npm.cmd run dev -- --host 127.0.0.1 --port 5193 --strictPort；在仓库根运行 runtime/browser-venv/Scripts/python.exe frontend/checks/auth-browser.py。也可用 AUTH_PREVIEW_URL 指定专用本地预览端口。脚本拦截全部 /api/v1 请求，覆盖匿名私有路由、注册校验、验证原密码、fragment 清理、错误登录不跳转、Cookie/CSRF、退出/改密、跨标签页账号切换、旧数据清理及恢复流程；不连接后端、不发送邮件、不调用模型。
+
+既有 workspace-browser.py、review-browser.py 使用匿名夹具；启用账号后，运行这些旧脚本需在独立浏览器上下文额外模拟 /api/v1/auth/me 为已登录响应。账号隔离检查由 auth-browser.py 执行。
 
 ## 工作台设计与回归
 

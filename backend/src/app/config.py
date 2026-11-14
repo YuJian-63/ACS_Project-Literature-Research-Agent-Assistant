@@ -35,6 +35,23 @@ class Settings(BaseSettings):
     review_timeout_seconds: int = Field(default=1800, ge=60, le=1800)
     review_call_timeout_seconds: float = Field(default=90, ge=5, le=300, allow_inf_nan=False)
     review_evidence_chars: int = Field(default=4000, ge=1000, le=4000)
+    frontend_public_url: str = "http://127.0.0.1:5173"
+    auth_cookie_secure: bool = False
+    auth_session_ttl_seconds: int = Field(default=604800, ge=60, le=604800)
+    auth_verify_ttl_seconds: int = Field(default=86400, ge=60, le=86400)
+    auth_reset_ttl_seconds: int = Field(default=1800, ge=60, le=3600)
+    auth_rate_key: SecretStr | None = None
+    auth_csrf_key: SecretStr | None = None
+    smtp_host: str = "smtp.qq.com"
+    smtp_port: int = Field(default=465, ge=1, le=65535)
+    smtp_username: str | None = None
+    smtp_auth_code: SecretStr | None = None
+    smtp_from: str | None = None
+    smtp_timeout_seconds: float = Field(default=15, ge=1, le=60)
+    mail_outbox_key: SecretStr | None = None
+    user_active_tasks: int = Field(default=2, ge=1, le=100)
+    user_active_imports: int = Field(default=2, ge=1, le=100)
+    user_daily_tasks: int = Field(default=20, ge=1, le=10000)
     arxiv_enabled: bool = False
     arxiv_contact_email: str | None = None
 
@@ -47,6 +64,22 @@ class Settings(BaseSettings):
 
         SupervisedArxivTransport(value, lambda: None)
         return value
+
+    @property
+    def auth_configured(self) -> bool:
+        return bool(self.auth_rate_key and self.auth_rate_key.get_secret_value() and self.auth_csrf_key and self.auth_csrf_key.get_secret_value())
+
+    @property
+    def smtp_configured(self) -> bool:
+        return bool(self.auth_configured and self.smtp_username and self.smtp_auth_code and self.smtp_auth_code.get_secret_value() and self.smtp_from and self.mail_outbox_key and self.mail_outbox_key.get_secret_value())
+
+    @field_validator("frontend_public_url")
+    @classmethod
+    def validate_frontend_url(cls, value: str) -> str:
+        parsed = urlsplit(value)
+        if parsed.scheme not in {"http", "https"} or not parsed.netloc or parsed.username or parsed.password or parsed.query or parsed.fragment or parsed.path not in {"", "/"}:
+            raise ValueError("FRONTEND_PUBLIC_URL must be an HTTP(S) origin without credentials")
+        return value.rstrip("/")
 
     @property
     def arxiv_configured(self) -> bool:

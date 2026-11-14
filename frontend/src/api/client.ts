@@ -1,8 +1,9 @@
 import axios, { type AxiosRequestConfig } from 'axios';
+import { sessionSnapshot, unauthorized } from '../auth/session';
 import type { Artifact, EventPage, Page, Paper, PaperImport, PaperStatus, SearchPaper, Task, TaskAccepted, TaskCreate, TaskStatus, TaskSummary, TaskType } from './types';
 
 const baseURL = (import.meta.env.VITE_API_BASE_URL || '').replace(/\/$/, '');
-const client = axios.create({ baseURL, timeout: 30000 });
+const client = axios.create({ baseURL, timeout: 30000, withCredentials: true });
 
 export class ApiError extends Error {
   readonly code: string;
@@ -46,12 +47,37 @@ export function asApiError(error: unknown): ApiError {
   return new ApiError('请求未完成，请重试。', 'CLIENT_ERROR');
 }
 
-async function request<T>(configuration: AxiosRequestConfig): Promise<T> {
+export async function request<T>(configuration: AxiosRequestConfig, publicAuth = false): Promise<T> {
+  const session = sessionSnapshot();
+  const controller = new AbortController();
+  const abort = () => controller.abort();
+  const signal = configuration.signal;
+  session.signal.addEventListener('abort', abort, { once: true });
+  signal?.addEventListener?.('abort', abort, { once: true });
+  if (session.signal.aborted || signal?.aborted || (!publicAuth && !session.csrfToken)) controller.abort();
+  const method = (configuration.method || 'GET').toUpperCase();
   try {
-    return (await client.request<T>(configuration)).data;
+    const response = await client.request<T>({
+      ...configuration,
+      signal: controller.signal,
+      headers: {
+        ...configuration.headers,
+        ...(!publicAuth && !['GET', 'HEAD', 'OPTIONS'].includes(method) ? { 'X-CSRF-Token': session.csrfToken } : {}),
+      },
+    });
+    if (controller.signal.aborted || session.generation !== sessionSnapshot().generation) throw new axios.CanceledError();
+    return response.data;
   } catch (error) {
+    if (controller.signal.aborted || session.generation !== sessionSnapshot().generation) throw new axios.CanceledError();
     if (isCanceled(error)) throw error;
+    if (!publicAuth && axios.isAxiosError(error) && error.response?.status === 401) {
+      unauthorized();
+      throw new axios.CanceledError();
+    }
     throw asApiError(error);
+  } finally {
+    session.signal.removeEventListener('abort', abort);
+    signal?.removeEventListener?.('abort', abort);
   }
 }
 

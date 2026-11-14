@@ -252,4 +252,110 @@ CREATE TABLE source_request_gates (
 );
 INSERT INTO source_request_gates (provider) VALUES ('arxiv');
 
+DO $$ BEGIN
+        IF EXISTS (SELECT 1 FROM papers) OR EXISTS (SELECT 1 FROM tasks)
+            OR EXISTS (SELECT 1 FROM paper_imports) OR EXISTS (SELECT 1 FROM paper_sources) THEN
+            RAISE EXCEPTION 'Account migration requires empty business tables. Stop services and use the guarded reset command first.';
+        END IF;
+    END $$;
+
+CREATE TABLE users (
+        id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+        username varchar(32) NOT NULL, username_key varchar(32) NOT NULL UNIQUE,
+        email varchar(320) NOT NULL, email_key varchar(320) NOT NULL UNIQUE,
+        password_hash text NOT NULL, status text NOT NULL DEFAULT 'pending',
+        email_verified_at timestamptz, auth_version integer NOT NULL DEFAULT 1,
+        created_at timestamptz NOT NULL DEFAULT now(), updated_at timestamptz NOT NULL DEFAULT now(),
+        CONSTRAINT users_status CHECK (status IN ('pending','active','disabled')),
+        CONSTRAINT users_auth_version CHECK (auth_version > 0),
+        CONSTRAINT users_verified CHECK (status <> 'active' OR email_verified_at IS NOT NULL)
+    );
+    CREATE TABLE auth_sessions (
+        id uuid PRIMARY KEY DEFAULT gen_random_uuid(), user_id uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        token_hash varchar(64) NOT NULL UNIQUE, auth_version integer NOT NULL,
+        expires_at timestamptz NOT NULL, revoked_at timestamptz, created_at timestamptz NOT NULL DEFAULT now()
+    );
+    CREATE INDEX auth_sessions_user_idx ON auth_sessions(user_id);
+    CREATE INDEX auth_sessions_expiry_idx ON auth_sessions(expires_at);
+    CREATE TABLE auth_email_tokens (
+        id uuid PRIMARY KEY DEFAULT gen_random_uuid(), user_id uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        purpose text NOT NULL, token_hash varchar(64) NOT NULL UNIQUE, expires_at timestamptz NOT NULL,
+        consumed_at timestamptz, revoked_at timestamptz, created_at timestamptz NOT NULL DEFAULT now(),
+        CONSTRAINT auth_email_token_purpose CHECK (purpose IN ('verify_email','reset_password'))
+    );
+    CREATE INDEX auth_email_tokens_user_idx ON auth_email_tokens(user_id,purpose);
+    CREATE INDEX auth_email_tokens_expiry_idx ON auth_email_tokens(expires_at);
+    CREATE TABLE auth_mail_outbox (
+        id uuid PRIMARY KEY DEFAULT gen_random_uuid(), user_id uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        token_id uuid NOT NULL REFERENCES auth_email_tokens(id) ON DELETE CASCADE,
+        payload_ciphertext text, locale varchar(5) NOT NULL DEFAULT 'zh-CN', status text NOT NULL DEFAULT 'queued',
+        attempts integer NOT NULL DEFAULT 0, next_attempt_at timestamptz NOT NULL DEFAULT now(),
+        worker_id uuid, lease_expires_at timestamptz, error_code varchar(64),
+        created_at timestamptz NOT NULL DEFAULT now(), updated_at timestamptz NOT NULL DEFAULT now(),
+        CONSTRAINT auth_mail_status CHECK (status IN ('queued','sending','sent','failed')),
+        CONSTRAINT auth_mail_attempts CHECK (attempts BETWEEN 0 AND 3),
+        CONSTRAINT auth_mail_lease CHECK ((status = 'sending') = (worker_id IS NOT NULL AND lease_expires_at IS NOT NULL))
+    );
+    CREATE INDEX auth_mail_queue_idx ON auth_mail_outbox(next_attempt_at) WHERE status = 'queued';
+    CREATE TABLE auth_rate_buckets (
+        bucket_key text PRIMARY KEY, count integer NOT NULL, expires_at timestamptz NOT NULL,
+        CONSTRAINT auth_rate_count CHECK (count > 0)
+    );
+    CREATE INDEX auth_rate_expiry_idx ON auth_rate_buckets(expires_at);;
+
+INSERT INTO source_request_gates (provider) VALUES ('arxiv') ON CONFLICT (provider) DO NOTHING;
+
+ALTER TABLE papers ADD COLUMN user_id UUID NOT NULL;
+
+ALTER TABLE papers ADD CONSTRAINT papers_user_id_fkey FOREIGN KEY(user_id) REFERENCES users (id) ON DELETE RESTRICT;
+
+ALTER TABLE tasks ADD COLUMN user_id UUID NOT NULL;
+
+ALTER TABLE tasks ADD CONSTRAINT tasks_user_id_fkey FOREIGN KEY(user_id) REFERENCES users (id) ON DELETE RESTRICT;
+
+ALTER TABLE task_papers ADD COLUMN user_id UUID NOT NULL;
+
+ALTER TABLE task_papers ADD CONSTRAINT task_papers_user_id_fkey FOREIGN KEY(user_id) REFERENCES users (id) ON DELETE RESTRICT;
+
+ALTER TABLE paper_sources ADD COLUMN user_id UUID NOT NULL;
+
+ALTER TABLE paper_sources ADD CONSTRAINT paper_sources_user_id_fkey FOREIGN KEY(user_id) REFERENCES users (id) ON DELETE RESTRICT;
+
+ALTER TABLE paper_imports ADD COLUMN user_id UUID NOT NULL;
+
+ALTER TABLE paper_imports ADD CONSTRAINT paper_imports_user_id_fkey FOREIGN KEY(user_id) REFERENCES users (id) ON DELETE RESTRICT;
+
+ALTER TABLE papers ADD CONSTRAINT papers_owner_identity UNIQUE (id, user_id);
+
+CREATE INDEX papers_owner_created_idx ON papers(user_id,created_at DESC);
+
+ALTER TABLE tasks ADD CONSTRAINT tasks_owner_identity UNIQUE (id, user_id);
+
+CREATE INDEX tasks_owner_created_idx ON tasks(user_id,created_at DESC);
+
+ALTER TABLE tasks DROP CONSTRAINT tasks_idempotency_key_key;
+
+ALTER TABLE tasks ADD CONSTRAINT tasks_owner_idempotency UNIQUE (user_id, idempotency_key);
+
+ALTER TABLE task_papers ADD CONSTRAINT task_papers_task_owner FOREIGN KEY(task_id, user_id) REFERENCES tasks (id, user_id) ON DELETE CASCADE;
+
+ALTER TABLE task_papers ADD CONSTRAINT task_papers_paper_owner FOREIGN KEY(paper_id, user_id) REFERENCES papers (id, user_id) ON DELETE RESTRICT;
+
+ALTER TABLE paper_sources DROP CONSTRAINT paper_sources_identity;
+
+ALTER TABLE paper_sources ADD CONSTRAINT paper_sources_identity UNIQUE (user_id, provider, external_id);
+
+ALTER TABLE paper_sources ADD CONSTRAINT paper_sources_paper_owner FOREIGN KEY(paper_id, user_id) REFERENCES papers (id, user_id) ON DELETE RESTRICT;
+
+CREATE INDEX paper_sources_owner_idx ON paper_sources (user_id);
+
+ALTER TABLE paper_imports DROP CONSTRAINT paper_imports_identity;
+
+ALTER TABLE paper_imports ADD CONSTRAINT paper_imports_identity UNIQUE (user_id, provider, external_id);
+
+ALTER TABLE paper_imports ADD CONSTRAINT paper_imports_paper_owner FOREIGN KEY(paper_id, user_id) REFERENCES papers (id, user_id) ON DELETE RESTRICT;
+
+CREATE INDEX paper_imports_owner_idx ON paper_imports (user_id);
+
+
 COMMIT;

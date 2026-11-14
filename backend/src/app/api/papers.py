@@ -3,7 +3,7 @@ from typing import Annotated
 from urllib.parse import quote
 from uuid import UUID
 
-from fastapi import APIRouter, Query, Request
+from fastapi import Depends, APIRouter, Query, Request
 from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 from starlette.background import BackgroundTask
@@ -19,11 +19,16 @@ from app.db.models import Paper
 from app.errors import APIError
 from app.papers.storage import controlled_path, save_paper
 
+from app.auth.dependencies import require_user
+from app.db.models import User
+
+CurrentUser = Annotated[User, Depends(require_user)]
+
 router = APIRouter()
 
 
-def get_paper(session: Session, paper_id: UUID) -> Paper:
-    paper = session.get(Paper, paper_id)
+def get_paper(session: Session, paper_id: UUID, user_id: UUID) -> Paper:
+    paper = session.scalar(select(Paper).where(Paper.id == paper_id, Paper.user_id == user_id))
     if paper is None:
         raise APIError(404, "PAPER_NOT_FOUND", "论文不存在")
     return paper
@@ -38,7 +43,7 @@ def get_paper(session: Session, paper_id: UUID) -> Paper:
         }
     }}}},
 )
-async def upload_paper(request: Request) -> dict:
+async def upload_paper(request: Request, user: CurrentUser) -> dict:
     if request.headers.get("content-type", "").split(";", 1)[0].strip().lower() != "multipart/form-data":
         raise APIError(415, "UNSUPPORTED_MEDIA_TYPE", "上传须使用 multipart/form-data")
     try:
@@ -49,7 +54,7 @@ async def upload_paper(request: Request) -> dict:
             upload = parts[0][1]
             return await run_in_threadpool(
                 save_paper, request.app.state.sessions, request.app.state.settings.storage_root,
-                upload.file, upload.filename,
+                upload.file, upload.filename, user_id=user.id,
             )
     except HTTPException:
         raise APIError(422, "INVALID_REQUEST", "multipart 请求不合法或包含多余字段") from None
@@ -59,10 +64,10 @@ async def upload_paper(request: Request) -> dict:
 
 @router.get("/api/v1/papers", response_model=Page[PaperResponse])
 def list_papers(
-    request: Request, limit: Limit = 20, offset: Offset = 0,
+    request: Request, user: CurrentUser, limit: Limit = 20, offset: Offset = 0,
     status: PaperStatus | None = None, q: Annotated[str | None, Query(min_length=1, max_length=200)] = None,
 ) -> dict:
-    conditions = []
+    conditions = [Paper.user_id == user.id]
     if status is not None:
         conditions.append(Paper.status == status)
     if q is not None:
@@ -79,15 +84,15 @@ def list_papers(
 
 
 @router.get("/api/v1/papers/{paper_id}", response_model=PaperResponse)
-def paper_detail(request: Request, paper_id: UUID) -> dict:
+def paper_detail(request: Request, paper_id: UUID, user: CurrentUser) -> dict:
     with request.app.state.sessions() as session:
-        return paper_view(get_paper(session, paper_id))
+        return paper_view(get_paper(session, paper_id, user.id))
 
 
 @router.get("/api/v1/papers/{paper_id}/file", response_class=StreamingResponse, responses={200: {"content": {"application/pdf": {}}}})
-def paper_file(request: Request, paper_id: UUID) -> StreamingResponse:
+def paper_file(request: Request, paper_id: UUID, user: CurrentUser) -> StreamingResponse:
     with request.app.state.sessions() as session:
-        paper = get_paper(session, paper_id)
+        paper = get_paper(session, paper_id, user.id)
         try:
             path = controlled_path(request.app.state.settings.storage_root, paper_id, paper.storage_key)
             source = path.open("rb")

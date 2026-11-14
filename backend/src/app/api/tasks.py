@@ -1,7 +1,7 @@
 from typing import Annotated, Literal
 from uuid import UUID
 
-from fastapi import APIRouter, Header, Query, Request, Response
+from fastapi import Depends, APIRouter, Header, Query, Request, Response
 from sqlalchemy import func, select
 
 from app.api.pagination import Limit, Offset
@@ -14,17 +14,22 @@ from app.db.models import Artifact, Citation, Paper, Task, TaskEvent
 from app.errors import APIError
 from app.tasks.service import get_task, selected_papers, submit_task
 
+from app.auth.dependencies import require_user
+from app.db.models import User
+
+CurrentUser = Annotated[User, Depends(require_user)]
+
 router = APIRouter()
 
 
 @router.post("/api/v1/tasks", status_code=202, response_model=TaskAccepted)
 def create_task(
-    request: Request, body: TaskCreate, response: Response,
+    request: Request, body: TaskCreate, response: Response, user: CurrentUser,
     idempotency_key: Annotated[str | None, Header()] = None,
 ) -> dict:
     if len(request.headers.getlist("idempotency-key")) > 1:
         raise APIError(422, "INVALID_REQUEST", "Idempotency-Key 不能重复")
-    result, replayed = submit_task(request.app.state.sessions, request.app.state.settings, body, idempotency_key)
+    result, replayed = submit_task(request.app.state.sessions, request.app.state.settings, body, idempotency_key, user_id=user.id)
     response.headers["Location"] = f"/api/v1/tasks/{result['id']}"
     response.headers["Idempotency-Replayed"] = str(replayed).lower()
     return result
@@ -32,11 +37,11 @@ def create_task(
 
 @router.get("/api/v1/tasks", response_model=Page[TaskSummary])
 def list_tasks(
-    request: Request, limit: Limit = 20, offset: Offset = 0,
+    request: Request, user: CurrentUser, limit: Limit = 20, offset: Offset = 0,
     status: TaskStatus | None = None, task_type: TaskType | None = None,
     workflow_type: WorkflowType | None = None, is_mock: Literal["true", "false"] | None = None,
 ) -> dict:
-    conditions = []
+    conditions = [Task.user_id == user.id]
     for column, value in ((Task.status, status), (Task.task_type, task_type), (Task.workflow_type, workflow_type)):
         if value is not None:
             conditions.append(column == value)
@@ -55,19 +60,19 @@ def list_tasks(
 
 
 @router.get("/api/v1/tasks/{task_id}", response_model=TaskResponse)
-def task_detail(request: Request, task_id: UUID) -> dict:
+def task_detail(request: Request, task_id: UUID, user: CurrentUser) -> dict:
     with request.app.state.sessions() as session:
-        task = get_task(session, task_id)
+        task = get_task(session, task_id, user.id)
         return task_view(task, selected_papers(session, [task_id])[task_id])
 
 
 @router.get("/api/v1/tasks/{task_id}/events", response_model=EventPage)
 def task_events(
-    request: Request, task_id: UUID, after_seq: Annotated[int, Query(ge=0)] = 0,
+    request: Request, task_id: UUID, user: CurrentUser, after_seq: Annotated[int, Query(ge=0)] = 0,
     limit: Annotated[int, Query(ge=1, le=500)] = 100,
 ) -> dict:
     with request.app.state.sessions() as session:
-        get_task(session, task_id)
+        get_task(session, task_id, user.id)
         events = list(session.scalars(
             select(TaskEvent).where(TaskEvent.task_id == task_id, TaskEvent.seq > after_seq)
             .order_by(TaskEvent.seq).limit(limit + 1)
@@ -84,9 +89,9 @@ def task_events(
 
 
 @router.get("/api/v1/tasks/{task_id}/artifacts", response_model=ArtifactList)
-def task_artifacts(request: Request, task_id: UUID) -> dict:
+def task_artifacts(request: Request, task_id: UUID, user: CurrentUser) -> dict:
     with request.app.state.sessions() as session:
-        task = get_task(session, task_id)
+        task = get_task(session, task_id, user.id)
         if task.status != "succeeded":
             return {"items": []}
         artifact = session.scalar(select(Artifact).where(Artifact.task_id == task_id))

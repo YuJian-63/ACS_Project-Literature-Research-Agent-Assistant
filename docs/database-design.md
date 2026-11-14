@@ -1,15 +1,15 @@
 # 后端数据库设计
 
-版本：v1 · 更新日期：2026-11-13。需求依据：`docs/Proposal.md`；接口对应 `docs/api-contract.md`；当前参考 DDL：`backend/sql/schema.sql`。第 9 节 MVP-3 增量 ORM、迁移和 head DDL 已落地并通过隔离 PGlite 等价检查；2026-11-13 用户在独立原生 PostgreSQL 17.6 验收库完成 head 迁移、无结构漂移检查和八组并发/恢复/共享许可专项验收。未对现有业务数据库执行迁移；原生专项范围及用户输出记录见 `docs/superpowers/plans/2026-11-12-mvp-3-arxiv-search-import.md`。
+版本：v1 · 更新日期：2026-11-14。账号增量与当前验收边界见第 11 节；以下 MVP-3 原生数据库证据属于账号迁移之前的历史记录。需求依据：`docs/Proposal.md`；接口对应 `docs/api-contract.md`；当前参考 DDL：`backend/sql/schema.sql`。第 9 节 MVP-3 增量 ORM、迁移和 head DDL 已落地并通过隔离 PGlite 等价检查；2026-11-13 用户在独立原生 PostgreSQL 17.6 验收库完成 head 迁移、无结构漂移检查和八组并发/恢复/共享许可专项验收。该历史专项当时未对现有业务数据库执行迁移；本次实际配置库的 0004 升级/无漂移及空数据状态已验证，见第 11 节。原生专项范围及用户输出记录见 `docs/superpowers/plans/2026-11-12-mvp-3-arxiv-search-import.md`。
 
-本文记录数据设计；应用通过 backend/alembic 的版本迁移建库，backend/sql/schema.sql 保留作结构对照。模型和迁移已落地，操作说明见 backend/README.md；未连接现有业务数据库。
+本文记录数据设计；应用通过 backend/alembic 的版本迁移建库，backend/sql/schema.sql 保留作结构对照。模型和迁移已落地，操作说明见 backend/README.md；本次实施已验证实际配置库 head=20261114_0004、无结构漂移，详见第 11 节。
 
 ## 1. 设计决策
 
 - 目标使用 PostgreSQL 17+；应用层使用 SQLAlchemy 2 + psycopg 3，迁移用 Alembic。UUID 由应用或 PostgreSQL 原生 gen_random_uuid() 生成，不依赖额外扩展。
-- 当前是单用户 MVP，不增加用户、工作区和权限表。增加多用户时需补归属、访问控制和幂等键作用域，不能只改页面。
+- `20261114_0004` 引入验证邮箱的账号、会话、邮件及限流五表，并为论文/任务/导入补非空用户归属与用户内唯一键；没有新增租户/工作区表。实际迁移要求旧业务表为空，详见第 11 节。
 - PDF 保存到 STORAGE_ROOT/uploads；正文、比较表、引用与事件保存数据库。首版不额外部署对象存储、Redis 或独立日志数据库。
-- 七张目标表中，MVP-0 使用五张核心表；MVP-1A 开始写入真实解析的 paper_chunks，citations 仍只由后续 Runner 依据证据写入，Mock 不生成伪造片段或引用。
+- 初始七张业务表中，MVP-0 使用五张核心表；MVP-1A 开始写入真实解析的 paper_chunks，citations 仍只由后续 Runner 依据证据写入，Mock 不生成伪造片段或引用。
 - 引用使用关系表，避免在 artifact JSON 中再保存一套引用；比较表是结构可变的展示数据，采用 JSONB。
 - 当前分阶段综述的应用级快照保存在 tasks.review_state；不依赖 LangGraph 内部 checkpointer。如未来引入其内部表，应在独立 schema 使用官方初始化，应用不手工复制内部结构。
 - 暂不固定 embedding 维度或创建向量索引；按组员确定的 embedding 模型再迁移增加 pgvector 数据。
@@ -18,6 +18,13 @@
 
 ```mermaid
 erDiagram
+    USERS ||--o{ PAPERS : owns
+    USERS ||--o{ TASKS : owns
+    USERS ||--o{ PAPER_IMPORTS : requests
+    USERS ||--o{ PAPER_SOURCES : owns
+    USERS ||--o{ AUTH_SESSIONS : authenticates
+    USERS ||--o{ AUTH_EMAIL_TOKENS : verifies
+    AUTH_EMAIL_TOKENS ||--o{ AUTH_MAIL_OUTBOX : delivers
     PAPERS ||--o{ PAPER_CHUNKS : contains
     PAPERS ||--o{ TASK_PAPERS : selected_by
     TASKS ||--o{ TASK_PAPERS : selects
@@ -35,6 +42,8 @@ UUID 为主键；时间使用 timestamptz，应用会话按 UTC 读写，API 转
 状态使用 text + CHECK，便于后续迁移扩展。默认 READ COMMITTED；领取和写回必须使用短事务，不能跨模型调用持锁。schema.sql 在空 schema 执行一次，重复执行应失败，不能用 IF NOT EXISTS 掩盖结构漂移。
 
 ## 2. 表结构
+
+本节保留初始研究业务结构；0004 的 user_id、联合外键与账号表补充见第 11 节，涉及唯一性时以用户范围为准。
 
 ### 2.1 papers：论文及文件
 
@@ -88,7 +97,7 @@ UNIQUE(id, paper_id, page_number) 供引用使用复合外键，同时锁定片�
 | 状态 | status、stage | queued/running/succeeded/failed；阶段允许新增规范代码 |
 | 所有权 | worker_id、lease_expires_at | 仅 running 必填，其他状态为空 |
 | 事件 | last_event_seq bigint | 默认 0，事务内增加 |
-| 幂等 | idempotency_key varchar(128)、request_hash varchar(64) | 键可空但非空时唯一；哈希必填 |
+| 幂等 | idempotency_key varchar(128)、request_hash varchar(64) | 键可空，非空时在当前 user_id 内唯一；哈希必填 |
 | 使用量 | input_tokens、output_tokens、model_calls、tool_calls | bigint，可空，非负；Mock 必须全部为空 |
 | 错误 | error_code、error_message、error_details | 仅 failed 必填，details 必须为对象 |
 | 时间 | created_at、updated_at、started_at、finished_at | 生命周期检查，开始/完成时间可空 |
@@ -144,7 +153,7 @@ task_type 和 is_mock 从 tasks 派生，引用由 citations 查询，不重复�
 
 | 查询 | 索引 |
 | --- | --- |
-| 论文/任务最近列表 | (created_at DESC, id DESC) |
+| 论文/任务最近列表 | 0004 加 (user_id,created_at DESC)，查询先限定用户再按 created_at/id 排序；保留原全局索引供 Worker/历史查询 |
 | 按状态筛选列表 | (status, created_at DESC, id DESC) |
 | 任务领取 | tasks(created_at, id) WHERE status='queued' |
 | 回收 Worker 租约 | tasks(lease_expires_at) WHERE status='running' |
@@ -161,8 +170,8 @@ q 是字面子串匹配；首版小语料接受扫描，不虚构 B-tree 可加�
 
 ### 4.1 创建任务与幂等
 
-1. 按 API 契约规范化请求并计算哈希，存在幂等键则先重查已有任务。
-2. 新任务开启事务；按 UUID 顺序锁定选定 papers，检查数量、状态和来源 hash，避免与解析/来源变更竞争。
+1. 按 API 契约规范化请求并计算哈希，存在幂等键则先按 (user_id,idempotency_key) 重查已有任务；不得复用另一用户的结果。
+2. 新任务开启事务；按 UUID 顺序锁定当前用户选定 papers，检查归属、数量、状态和来源 hash，避免与解析/来源变更竞争。
 3. 插入 tasks、全部 task_papers、seq=1 的 queued 事件，并将 last_event_seq 置 1；一起提交。
 4. 同幂等键并发触发唯一冲突时回滚整个事务，再以新事务重查并比较哈希；不能在已失败的事务里继续查询。
 5. 同键同输入返回已有任务，同键不同输入返回 409；不增加第二组论文关联或事件。
@@ -240,7 +249,7 @@ SELECT claimed.* FROM claimed JOIN recorded ON recorded.task_id = claimed.id;
 | 规则 | 数据库保证 | 服务层必须保证 |
 | --- | --- | --- |
 | 主键、关联存在、当前状态/时间合法 | PK/FK/CHECK | 业务状态转移只能向前 |
-| 幂等键唯一 | UNIQUE，NULL 可重复 | 输入规范化、哈希、冲突后重查 |
+| 用户内幂等键唯一 | UNIQUE(user_id,idempotency_key)，NULL 可重复 | 输入规范化、哈希、冲突后重查 |
 | 论文来源 hash 不被引用后修改 | 复合 FK RESTRICT | 文件内容与 chunk 内容不可变、hash 核验 |
 | 任务论文不重复 | 联合主键 | 数量、排序、就绪状态 |
 | 每任务至多一个产物 | task_id UNIQUE | succeeded 恰好有一个产物、终态原子提交 |
@@ -258,7 +267,7 @@ SELECT claimed.* FROM claimed JOIN recorded ON recorded.task_id = claimed.id;
 3. 分阶段综述使用 tasks.review_state 保存应用级阶段状态；如另行启用 LangGraph checkpointer，应在独立 schema 执行官方初始化，不把此列作为其内部 checkpoint 表。
 4. 确认 embedding 模型后再引入 pgvector，建议单独建立 chunk_embeddings，固定模型标识、版本、维度和 chunk 关联；不同模型向量不能混用。
 5. pgvector 扩展需要相应 PostgreSQL 镜像/安装支持；本次 DDL 不假设普通 PostgreSQL 已安装该扩展。
-6. 多用户、搜索来源、任务取消/恢复、多个 artifact 和对象存储均通过独立迁移引入，同时升级 API 契约。
+6. 搜索来源已由 0002 引入，账号/多用户归属由 0004 引入（见第 11 节）；任务取消/恢复、多个 artifact 和对象存储仍需独立设计与迁移，同时升级 API 契约。
 
 ## 7. 验收与限制
 
@@ -279,7 +288,7 @@ schema.sql 不含凭据、演示业务数据或扩展安装命令；只在新建
 
 ## 9. MVP-3 来源与导入增量设计
 
-MVP-3 对应 revision 20261112_0002，down_revision=20261110_0001（当前 head 为 20261114_0003）；新增三表，不改变原七表历史、Paper 四态、来源 hash 外键或手动重复上传规则。参考 DDL 已更新为 head，初始 revision 保持不变；已升级旧结构保留原有论文，并验证安全降级保护。
+MVP-3 对应 revision 20261112_0002，down_revision=20261110_0001（当前迁移目标 head 为 20261114_0004）；新增三表，不改变原七表历史、Paper 四态、来源 hash 外键或手动重复上传规则。本节记录当时参考 DDL/迁移对齐与旧数据保留、降级保护的证据；0004 的空库升级和 DDL 对齐边界另见第 11 节，不能沿用本节历史结论。初始 revision 保持不变。
 
 ### 9.1 paper_sources：已保存 PDF 的来源
 
@@ -288,7 +297,7 @@ MVP-3 对应 revision 20261112_0002，down_revision=20261110_0001（当前 head 
 | id | uuid PK |
 | paper_id | uuid 非空唯一，FK papers(id) ON DELETE RESTRICT |
 | provider | text 非空，CHECK ='arxiv' |
-| external_id | varchar(80) 非空，带版本规范 ID，与 provider 联合唯一 |
+| external_id | varchar(80) 非空，带版本规范 ID，0004 起与 user_id、provider 联合唯一 |
 | metadata | jsonb 非空对象，服务层验证 title/authors/abstract/doi/categories/published_at/source_updated_at |
 | created_at | timestamptz 非空 |
 
@@ -299,7 +308,7 @@ MVP-3 对应 revision 20261112_0002，down_revision=20261110_0001（当前 head 
 | 字段 | 类型/约束 |
 | --- | --- |
 | id | uuid PK，成功 Paper 使用同一 UUID |
-| provider, external_id | 同上，联合唯一，失败重试保持同一记录 |
+| provider, external_id | 同上，0004 起与 user_id 联合唯一，失败重试保持同一用户记录 |
 | attempt | integer 非空默认 1，>0 |
 | status | text，queued/running/succeeded/failed |
 | paper_id | uuid 可空唯一，FK papers(id) ON DELETE RESTRICT；仅 succeeded 非空且等于 id |
@@ -343,3 +352,52 @@ revision 20261114_0003 基于 20261112_0002，新增 tasks.review_state 及对�
 仅该工作流允许 running → queued，保留 started_at，清空 owner/lease，追加恢复事件；重新领取使用同一截止时间。queued 检查仅对此版本允许 started_at 非空，监控也处理恢复排队期间的超时。历史工作流仍以 WORKER_LOST 终止。所有阶段操作及最终完成都校验当前所有权；旧 Worker 即使返回结果也不能落库。
 
 应用每次修改 JSONB 均整体赋值。全部阶段完成后再次严格校验，artifacts/citations、成功状态和完成事件仍在同一事务发布。迁移降级会丢弃 review_state；如果存在带 started_at 的 queued 任务，旧生命周期 CHECK 会拒绝降级并回滚，应先按正常流程处理任务。
+
+## 11. 账号与资源归属（20261114_0004）
+
+revision `20261114_0004`，down_revision=`20261114_0003`；模型位于 `backend/src/app/db/accounts.py`（由 models 导出），迁移位于 `backend/alembic/versions/20261114_0004_user_accounts.py`。新增以下五表，连同既有七张研究业务表、三张来源/导入/共享 gate 表共 15 张业务表，不含 alembic_version。主应用账号路由/CORS 与业务归属/配额已实现。2026-11-14 本次实施已验证原生所有权 16 项（含参考 DDL/ORM 对照）、账号原生 harness 74 项（无跳过）、原生综述 PostgreSQL 8 项全部通过，实际账号 API 注册/验证/登录/上传/找回/重置/撤销链路通过。默认 discover 共 124 项，68 项通过、56 项环境门控跳过，门控套件已独立原生执行通过。实际配置数据库 head=20261114_0004、无漂移，业务记录/用户/生成文件均为 0，source_request_gates seed 为 1。参考 DDL 已附加由 Alembic 生成的 0004 SQL，隔离 reference_schema 与 ORM 的类型/默认值对照回归已通过。
+
+### 11.1 五张账号表
+
+| 表 | 字段与数据库约束 | 索引/用途 |
+| --- | --- | --- |
+| users | UUID id；username/username_key varchar(32)、email/email_key varchar(320)、password_hash text 均非空；username_key、email_key 分别唯一；status 仅 pending/active/disabled，默认 pending；email_verified_at 可空；auth_version 默认 1 且 >0；created_at/updated_at 非空 | active 必须有 email_verified_at；服务层规范用户名和邮箱，密码用 Argon2id；无明文密码 |
+| auth_sessions | UUID id；user_id 非空 FK users ON DELETE CASCADE；token_hash varchar(64) 非空唯一；auth_version、expires_at、created_at 非空；revoked_at 可空 | user_id、expires_at 索引；原始随机 Cookie token 不入表，认证同时检查用户状态/版本、到期和撤销 |
+| auth_email_tokens | UUID id；user_id 非空 FK users CASCADE；purpose 仅 verify_email/reset_password；token_hash varchar(64) 非空唯一；expires_at、created_at 非空；consumed_at/revoked_at 可空 | (user_id,purpose)、expires_at 索引；用途隔离、一次消费、可撤销，原始 token 只在加密邮件载荷中暂存 |
+| auth_mail_outbox | UUID id；user_id 非空 FK users CASCADE，token_id 非空 FK auth_email_tokens CASCADE；payload_ciphertext text 可空；locale varchar(5) 默认 zh-CN；status 为 queued/sending/sent/failed；attempts 默认 0 且在 0—3；next_attempt_at、created_at、updated_at 非空；worker_id/lease_expires_at/error_code 可空 | next_attempt_at 的 queued 部分索引；CHECK 要求 sending 当且仅当 worker_id 和 lease_expires_at 同时非空。服务层领取/结束同时维护租约字段，sent/failed 清空载荷；实际邮件 locale 使用 zh/en |
+| auth_rate_buckets | bucket_key text 主键；count integer 非空且 >0；expires_at 非空 | expires_at 索引；bucket_key 为限流 scope/目标经 AUTH_RATE_KEY 的 HMAC，不明文保存邮箱/IP/用户名 |
+
+users 的状态/版本和唯一键是数据库底线；用户名 ASCII/保留名、邮箱最长 254 字符与格式、密码 6—128 字符且不 trim 等由服务/API 校验，不能根据 email 列容量推断接口上限。两类 token/session 均从 32 随机字节生成，数据库存 SHA-256；CSRF 是独立 AUTH_CSRF_KEY 对会话的 HMAC，不新增明文 token 列。
+
+### 11.2 研究资源归属与联合外键
+
+| 既有表/资源 | 0004 变化与查询要求 |
+| --- | --- |
+| papers、tasks | 新增非空 user_id FK users ON DELETE RESTRICT；各加 UNIQUE(id,user_id) 和 (user_id,created_at DESC) 索引；列表、详情、下载和任务提交均限定当前用户 |
+| tasks 幂等 | 删除全局 idempotency_key 唯一约束，改 UNIQUE(user_id,idempotency_key)；NULL 仍可重复，冲突后按同一用户重查 |
+| task_papers | 新增非空 user_id FK users RESTRICT；(task_id,user_id) 联合 FK tasks(id,user_id) CASCADE，(paper_id,user_id) 联合 FK papers(id,user_id) RESTRICT；保留原 Paper/SHA-256 快照 FK，数据库拒绝跨用户选论文 |
+| paper_sources、paper_imports | 新增非空 user_id FK users RESTRICT；自然键改为 UNIQUE(user_id,provider,external_id)；加 (paper_id,user_id) 到 papers(id,user_id) 的 RESTRICT 联合 FK 和 user_id 索引。Import 的 paper_id 仍只在成功后非空，其他状态允许空 |
+| paper_chunks、task_events、artifacts、citations | 通过已认证且归属正确的 Paper/Task/Artifact 继承访问控制，保留原来源完整性约束，不盲目给每个展示对象增加客户端 user_id |
+| source_request_gates / 上游成功元数据缓存 | 保留跨用户共享的上游节流/缓存；本地导入历史、PDF、解析状态及用户注释必须按当前用户重新投影 |
+
+API 从会话获取用户，业务输入不接受 user_id；所有资源 ID 查询均与该用户组合，其他用户资源与不存在资源统一 404，未登录 401。数据库 FK 约束保护写入归属，不能代替读接口、私有 PDF、事件、产物和引用的鉴权。用户有业务数据时 RESTRICT 阻止直接删除用户，不可只因账号附属表配置 CASCADE 就假定可以删除全部业务。
+
+### 11.3 账号事务、限流与邮件租约
+
+注册在同一事务创建 pending 用户、用途 token 和 Fernet 加密 outbox，唯一冲突整体回滚并返回通用注册不可用错误。重发/找回先限流，再按用户行锁处理；不存在或状态不符仍通用 202，不插入可投递邮件。重发撤销同用途旧 token 并终止其待发载荷。验证和重置按用户后 token 的固定锁序，消费时校验用途、状态、到期与撤销，验证还须检查注册时原密码。
+
+验证默认 24 小时，重置默认 30 分钟；验证实际到期不晚于用户 created_at + 24 小时，重发不延长注册总窗口。到期 pending 账号在后续冲突注册时可受控删除后重新注册；存在会话或业务外键阻止删除时不会强行回收。不是定时全库清理任务。改密/重置在同一事务更新 password_hash、递增 auth_version、撤销所有会话及未消费邮件 token；退出只撤销当前 session。
+
+限流表使用 PostgreSQL INSERT ON CONFLICT 原子计数，以数据库时钟和失效窗口供多个 API 进程共享；每次限流事务最多删除 100 个过期 bucket。注册每 IP 10 次/小时；登录每 IP 30 次/分钟、每规范用户名 10 次/15 分钟；验证/重置共用 token_ip 30 次/15 分钟；改密每 IP 30 次/15 分钟、每用户 10 次/15 分钟。邮件申请（注册/重发/找回共享）每邮箱 1 次/60 秒且 5 次/小时、每 IP 20 次/小时、全局 100 次/小时；未知邮箱同样计数。超限提交计数后返回 429 与 Retry-After，不以业务事务回滚逃避限流。
+
+邮件进程以短事务 FOR UPDATE SKIP LOCKED 领取 queued 或租约过期 sending，attempts 在发信前递增；投递前再复核用户/token/收件人，发信在事务外进行，写回通过 worker_id + 未过期租约隔离陈旧 Worker。租约为 10 * SMTP_TIMEOUT_SECONDS + 60 秒；至多 3 次尝试，可重试错误等待 30/120 秒且须仍在 token 有效期内。终态清空 payload_ciphertext、worker_id 和租约，仅保留脱敏 error_code；载荷无法解密时撤销相应 token。SMTP 已接收而 Worker 未提交 sent 时可能重复投递，不承诺 exactly-once。
+
+账号限流与业务任务/导入配额不同；USER_ACTIVE_TASKS=2、USER_ACTIVE_IMPORTS=2、USER_DAILY_TASKS=20 已由业务服务接入：先锁当前 active 用户行，再按该用户统计 queued/running 工作及 UTC 当日任务，新增与导入重试在容量内才接受；原任务幂等重放先于容量检查。超限返回 429，任务/导入并发限制 Retry-After=30，日任务限制 Retry-After=3600；本次实施已验证原生所有权测试通过；配额中文消息及对应英文诊断映射已补齐，不改变用户内统计与配额事务。审查发现的重置 gate 丢失已修复并通过许可领取/释放回归；配额用户行采用 FOR NO KEY UPDATE，与外键引用锁兼容，导入完成/重试交叠回归已通过。既有综述 review_state、冻结预算、证据来源约束与 Worker fencing 不因账号迁移而改变。
+
+### 11.4 0004 升级、重置与回退边界
+
+当前实际迁移在开始即检查 papers、tasks、paper_imports、paper_sources 是否存在记录；任一非空则拒绝升级。它不自动给旧论文分配账号，不创建 legacy_locked 用户，不允许 nullable user_id 过渡。设计讨论中的旧数据锁定账号不是该导出迁移的实现，不能按那个方案对现有库直接执行。
+
+新建空库可按 Alembic 链升级至 head。已有数据必须先停止 API 与所有 Worker、核对数据库和 STORAGE_ROOT 备份，再按已获授权的范围使用 `app.reset_data` 受保护重置流程（命令见 backend/README.md 第 10.4 节）。本次实施已按用户授权完成旧记录与生成文件清理，结构和版本保留；后续运行仍须显式确认目标。若需要保留旧业务，先另行制定并审核数据归属迁移，不能绕过空库检查或暂时移除约束。
+
+0004 的 downgrade 明确拒绝执行，不能退回匿名共享访问；回退依赖核验后的升级前备份。第 7/9 节的升级、老数据保留和降级记录属于早期 revision，不能视作账号迁移的验收。本次实施已完成上述原生测试验证。成功重置曾删除 arxiv 共享 gate seed，该问题已复现并修复：reset_data 在清表事务中补种，0004 用 INSERT ON CONFLICT DO NOTHING 幂等恢复 seed，实际配置库已补种；正向回归证明 reset 后许可可领取和释放，原生 16 项套件通过。schema.sql 已附加生成的 0004 SQL；test_reference_sql_matches_current_metadata 在可回滚 reference_schema 执行 DDL，比较 ORM 类型/默认值并核对 seed，已纳入原生所有权 16 项通过结果。retry_import/complete_import 的锁冲突已用原生测试复现，并通过兼容外键的 FOR NO KEY UPDATE 配额锁修复；16 项所有权测试已全部通过。真实 QQ SMTP 配置与投递另行验收，本次未进行。
