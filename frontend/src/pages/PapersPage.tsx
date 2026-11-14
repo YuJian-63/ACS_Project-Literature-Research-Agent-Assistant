@@ -25,7 +25,7 @@ export default function PapersPage() {
   selected.forEach((paper) => parameters.append('paper_id', paper.id));
 
   return <>
-    <PageHeader title={t("论文库")} description={t("让每一次研究，从可信的原始资料开始。")} action={<Link to={`/tasks/new${selected.length ? `?${parameters}` : ''}`}><Button type="primary" icon={<ArrowRightOutlined />} iconPlacement="end">{t("新建任务")}</Button></Link>} />
+    <PageHeader title={t("论文库")} description={t("让每一次研究，从可信的原始资料开始。")} action={<Link to={`/tasks/new${selected.length ? `?${parameters}` : ''}`}><Button type="primary" icon={<ArrowRightOutlined />} iconPlacement="end">{t("新建研究")}</Button></Link>} />
     <PaperUpload onUploaded={() => { setQuery(''); setDraft(''); setStatus(undefined); setPage(1); resource.reload(); }} />
     <section className="content-panel">
       <div className="panel-heading"><div><h2>{t("我的论文")}</h2><p>{t("选择论文后可创建摘要、问答或跨论文综述任务。")}</p></div><Button icon={<ReloadOutlined />} onClick={resource.reload} loading={resource.loading}>{t("刷新")}</Button></div>

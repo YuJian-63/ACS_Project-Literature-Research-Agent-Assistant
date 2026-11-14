@@ -133,7 +133,7 @@ export default function NewTaskPage() {
 
   return <>
     <Link to="/papers" className="back-link"><ArrowLeftOutlined />{t("返回论文库")}</Link>
-    <PageHeader title={parameters.has('from_task') ? t("重新创建任务") : t("新建研究任务")} description={t("选择资料，明确问题，把执行过程与结果留在同一处。")} />
+    <PageHeader title={parameters.has('from_task') ? t("重新创建任务") : t("新建研究")} description={t("选择资料，明确问题，把执行过程与结果留在同一处。")} />
     {initialError ? <><ErrorNotice error={initialError} title={t("无法加载任务输入")} retry={() => setInitialRevision((value) => value + 1)} /><Link to="/tasks/new">{t("清空来源，创建新任务")}</Link></> : <Spin spinning={initialLoading} description={t("加载论文与任务输入")}><Form<TaskForm> form={form} layout="vertical" onFinish={(values) => { void submit(values); }} onFinishFailed={() => setAttempted(true)} disabled={submitting || initialLoading} initialValues={{ task_type: 'summary', question: '', budget: defaultBudget }}>
       <div className="creation-layout"><div className="creation-main">
         <section className="content-panel form-section"><h2>{t("你想研究什么？")}</h2>
