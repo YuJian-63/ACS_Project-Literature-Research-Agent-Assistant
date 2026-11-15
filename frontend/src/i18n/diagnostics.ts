@@ -4,6 +4,10 @@ import { stageLabels } from '../lib/format';
 import type { ResourceError, TaskEvent } from '../api/types';
 
 const errorMessages: Record<string, string> = {
+  RESEARCH_CAPACITY_EXCEEDED: 'This research input exceeds the server capacity. Narrow the question and try again.',
+  IMPORT_CAPACITY_EXCEEDED: 'Your active import limit has been reached. Wait for an existing import to finish.',
+  TASK_CAPACITY_EXCEEDED: 'Your active task limit has been reached. Wait for an existing task to finish.',
+  DAILY_TASK_LIMIT: 'Your daily task limit has been reached. Please try again tomorrow.',
   REVIEW_CAPACITY_EXCEEDED: 'This review exceeds the server capacity. Narrow the question or select fewer papers.',
   ARXIV_TIMEOUT: 'The arXiv request timed out. Please try again.',
   ARXIV_RATE_LIMITED: 'arXiv requests are temporarily rate limited. Please wait before retrying.',
@@ -62,6 +66,10 @@ export function errorText(error: Pick<ResourceError, 'code' | 'message'>): strin
 }
 
 export function eventText(event: TaskEvent): string {
+  if (event.message === '已完成证据检查' && typeof event.payload.evidence_status === 'string') {
+    const labels: Record<string, string> = { answered: '已完成证据检查', partial: '部分问题或比较维度缺少支持证据，请结合引用阅读。', insufficient_selected_evidence: '当前检索片段不足以支持回答，不代表论文全文没有相关信息。' };
+    return t(labels[event.payload.evidence_status] ?? event.message);
+  }
   if ((event.stage === 'analyzing' || event.stage === 'synthesizing') && Number.isInteger(event.payload.current) && Number.isInteger(event.payload.total)) {
     return t(event.stage === 'analyzing' ? '正在分析论文：{0} / {1}' : '正在生成综述章节：{0} / {1}', [event.payload.current, event.payload.total]);
   }

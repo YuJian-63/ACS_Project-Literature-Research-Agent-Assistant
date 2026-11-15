@@ -16,7 +16,7 @@ class ReviewResultError(ValueError):
         self.details = details
 
 
-def run_staged_review(job, model, store, *, stopped=lambda: False):
+def run_staged_review(job, model, store, *, stopped=lambda: False, supplement=None):
     plan = job.review_plan
 
     def unit(key, make_messages, validate, output_cap, stage, progress):
@@ -66,17 +66,31 @@ def run_staged_review(job, model, store, *, stopped=lambda: False):
 
     analyses = []
     for index, paper in enumerate(job.selected_papers, start=1):
-        entries = [entry for entry in plan["registry"] if entry["paper_id"] == paper["paper_id"]]
+        active = plan.get("active_ids", {}).get(paper["paper_id"])
+        entries = [entry for entry in plan["registry"] if entry["paper_id"] == paper["paper_id"] and (active is None or entry["evidence_id"] in active)]
         key = "paper:" + paper["paper_id"]
         if not entries:
             empty = {"cells": {column["key"]: {"value": None, "evidence_ids": []} for column in plan["columns"]}}
             store.skip(key, empty)
             analyses.append(empty)
             continue
-        analyses.append(unit(key,
+        analysis = unit(key,
             lambda compact, feedback: analysis_messages(paper, entries, job.question, plan, compact=compact, feedback=feedback),
             lambda raw: validate_analysis(raw, paper, plan), plan["analysis_output_tokens"], "analyzing",
-            {"current": index, "total": len(job.selected_papers), "paper_id": paper["paper_id"]}))
+            {"current": index, "total": len(job.selected_papers), "paper_id": paper["paper_id"]})
+        if supplement is not None and any(cell["value"] is None for cell in analysis["cells"].values()):
+            job, changed = supplement(job, analysis, paper, store)
+            plan = job.review_plan
+            if changed:
+                active = plan.get("active_ids", {}).get(paper["paper_id"])
+                entries = [entry for entry in plan["registry"] if entry["paper_id"] == paper["paper_id"] and entry["evidence_id"] in active]
+                candidate = unit("paper-supplement:" + paper["paper_id"],
+                    lambda compact, feedback: analysis_messages(paper, entries, job.question, plan, compact=compact, feedback=feedback),
+                    lambda raw: validate_analysis(raw, paper, plan), plan["analysis_output_tokens"], "analyzing",
+                    {"current": index, "total": len(job.selected_papers), "paper_id": paper["paper_id"]})
+                analysis = {"cells": {key: cell if cell["value"] is not None else candidate["cells"][key]
+                    for key, cell in analysis["cells"].items()}}
+        analyses.append(analysis)
     sections = []
     if any(cell["evidence_ids"] for analysis in analyses for cell in analysis["cells"].values()):
         for index, section in enumerate(plan["sections"], start=1):
@@ -91,4 +105,10 @@ def run_staged_review(job, model, store, *, stopped=lambda: False):
                 {"current": index, "total": len(plan["sections"])}))
     else:
         sections = [{"paragraphs": [{"content_markdown": "证据不足 / Insufficient evidence", "evidence_ids": []}]}]
-    return assemble_review(analyses, sections, job.selected_papers, job.evidence, plan)
+    if supplement is not None:
+        missing = [{"paper_id": paper["paper_id"], "columns": [key for key, cell in analysis["cells"].items() if cell["value"] is None]}
+            for paper, analysis in zip(job.selected_papers, analyses, strict=True)]
+        status = "no_parsed_text" if not job.source_evidence else "partial" if any(item["columns"] for item in missing) else "answered"
+        store.save_search("outcome", {"status": status, "papers": missing},
+            message="已完成证据检查", payload={"evidence_status": status})
+    return assemble_review(analyses, sections, job.selected_papers, job.evidence, plan, source_evidence=getattr(job, "source_evidence", None))

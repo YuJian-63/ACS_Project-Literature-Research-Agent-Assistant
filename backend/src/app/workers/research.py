@@ -19,8 +19,11 @@ from app.tasks.lifecycle import (
 from app.research.model_client import ChatModel, ModelTimeoutError, OpenAICompatibleChatModel
 from app.research.graph import build_research_graph
 from app.research.review_policy import WORKFLOW_VERSION
+from app.research.task_policy import POLICY_VERSION as SINGLE_POLICY_VERSION
 from app.research.review_runner import ReviewResultError, run_staged_review
 from app.research.review_store import ReviewStore, ReviewOwnershipLost, ReviewLimitError
+from app.research.search_policy import SEARCH_VERSION, read_snapshot
+from app.research.search_runner import prepare_search, run_single_search, supplement_review
 from app.research.validation import (
     evidence_insufficient_review, invalid_result_diagnostic, validate_paragraph_result,
     validate_result, validate_review_result, validate_selected_evidence_result,
@@ -50,6 +53,8 @@ class ResearchJob:
     prompt_version: str | None = None
     max_output_tokens: int = 2048
     review_plan: dict | None = None
+    search_policy: dict | None = None
+    source_evidence: list[EvidenceChunk] | None = None
 
 
 class TaskInputError(RuntimeError):
@@ -95,14 +100,40 @@ def load_research_job(sessions: sessionmaker[Session], task_id: UUID) -> Researc
             raise TaskInputError("INVALID_AGENT_RESULT", "任务模型配置不可用")
         max_output_tokens = run_config.get("max_output_tokens", 2048)
         allowed_output_caps = {2048, 4096} if task.task_type == "review" else {2048}
-        if type(max_output_tokens) is not int or max_output_tokens not in allowed_output_caps:
+        single_plan = run_config.get("research_policy")
+        search_policy = run_config.get("search_policy")
+        if search_policy is not None and search_policy.get("version") != SEARCH_VERSION:
+            raise TaskInputError("INVALID_AGENT_RESULT", "检索执行计划不可用")
+        automatic_single = task.task_type in {"summary", "qa"} and isinstance(single_plan, dict) and single_plan.get("version") in {SINGLE_POLICY_VERSION, SEARCH_VERSION}
+        if task.task_type in {"summary", "qa"} and run_config.get("budget_mode") == "automatic" and not automatic_single:
+            raise TaskInputError("INVALID_AGENT_RESULT", "研究执行计划不可用")
+        if type(max_output_tokens) is not int:
+            raise TaskInputError("INVALID_AGENT_RESULT", "任务输出预算配置不可用")
+        valid_output = (1024 <= max_output_tokens <= 32768 and max_output_tokens == single_plan.get("max_output_tokens")) if automatic_single else max_output_tokens in allowed_output_caps
+        if not valid_output:
             raise TaskInputError("INVALID_AGENT_RESULT", "任务输出预算配置不可用")
         context_chars = int(run_config.get("evidence_context_chars", 24000))
-        staged_review = task.workflow_version == WORKFLOW_VERSION
+        staged_review = task.task_type == "review" and (task.workflow_version == WORKFLOW_VERSION or search_policy is not None)
+        frozen_source = None
+        if search_policy is not None:
+            try:
+                frozen_source = read_snapshot(task.review_state["source_snapshot"], selected_papers)
+                snapshot_papers = task.review_state["source_snapshot"]["papers"]
+                if {paper["paper_id"]: paper["sha256"] for paper in snapshot_papers} != {str(paper.id): paper.sha256 for paper in papers.values()}:
+                    raise ValueError("Snapshot paper version changed")
+                selected_papers = [{"paper_id": paper["paper_id"], "paper_title": paper["paper_title"]} for paper in snapshot_papers]
+            except (ValueError, KeyError, TypeError):
+                raise TaskInputError("INVALID_AGENT_RESULT", "论文证据快照不可用") from None
         if staged_review:
             if not run_config.get("review_policy") or "evidence" not in task.review_state:
                 raise TaskInputError("INVALID_AGENT_RESULT", "综述执行计划不可用")
             evidence = [EvidenceChunk.model_validate(chunk) for chunk in task.review_state["evidence"]]
+        elif automatic_single:
+            if "evidence" not in task.review_state:
+                raise TaskInputError("INVALID_AGENT_RESULT", "研究执行计划不可用")
+            evidence = [EvidenceChunk.model_validate(chunk) for chunk in task.review_state["evidence"]]
+            if any(chunk.paper_id not in {paper["paper_id"] for paper in selected_papers} for chunk in evidence):
+                raise TaskInputError("INVALID_AGENT_RESULT", "研究证据不属于选定论文")
         elif task.task_type == "review":
             groups = {paper["paper_id"]: [] for paper in selected_papers}
             for chunk in evidence_source:
@@ -122,6 +153,7 @@ def load_research_job(sessions: sessionmaker[Session], task_id: UUID) -> Researc
             prompt_version=getattr(task, "prompt_version", None) or ("evidence-review-v1" if task.task_type == "review" else "evidence-v1"),
             max_output_tokens=max_output_tokens,
             review_plan=run_config.get("review_policy") if staged_review else None,
+            search_policy=search_policy, source_evidence=frozen_source,
         )
 
 
@@ -177,6 +209,22 @@ class RunnerWorker:
         thread.start()
         try:
             job = load_research_job(self.sessions, task_id)
+            if job.search_policy is not None:
+                store = ReviewStore(self.sessions, task_id, self.owner)
+                model = self.model_factory(job, self.settings)
+                try:
+                    stopped = lambda: self.stopped.is_set() or ownership_lost.is_set()
+                    job = prepare_search(job, model, store, stopped=stopped)
+                    if job.task_type == "review":
+                        result = run_staged_review(job, model, store, stopped=stopped, supplement=supplement_review)
+                    else:
+                        result = run_single_search(job, model, store, stopped=stopped)
+                finally:
+                    model.close()
+                store.progress("validating", "正在校验研究结果与引用")
+                usage = store.read().get("usage", {"input_tokens": 0, "output_tokens": 0, "model_calls": 0})
+                complete_real(self.sessions, task_id, self.owner, result, **usage)
+                return
             if getattr(job, "review_plan", None) is not None:
                 store = ReviewStore(self.sessions, task_id, self.owner)
                 model = self.model_factory(job, self.settings)
@@ -261,7 +309,7 @@ class RunnerWorker:
         except ReviewResultError as error:
             fail_owned(self.sessions, task_id, self.owner, "INVALID_AGENT_RESULT", str(error), details=error.details)
         except ReviewLimitError:
-            fail_owned(self.sessions, task_id, self.owner, "BUDGET_EXCEEDED", "综述已达到服务器自动分配的处理上限")
+            fail_owned(self.sessions, task_id, self.owner, "BUDGET_EXCEEDED", "研究任务已达到服务器自动分配的处理上限")
         except EvidenceBudgetError:
             fail_owned(self.sessions, task_id, self.owner, "BUDGET_EXCEEDED", "上下文预算不足以覆盖所有选定论文")
         except TaskInputError as error:

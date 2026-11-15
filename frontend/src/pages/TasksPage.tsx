@@ -27,7 +27,7 @@ export default function TasksPage() {
   const load = useCallback((signal: AbortSignal) => api.tasks({ limit: 20, offset: (page - 1) * 20, status, task_type: taskType }, signal), [page, status, taskType]);
   const resource = useResource(load);
   return <>
-    <PageHeader title={t("研究任务")} description={t("回到每一次研究，查看执行过程与已经保存的结果。")} action={<Link to="/tasks/new"><Button type="primary" icon={<PlusOutlined />}>{t("新建任务")}</Button></Link>} />
+    <PageHeader title={t("研究记录")} description={t("回到每一次研究，查看执行过程与已经保存的结果。")} action={<Link to="/tasks/new"><Button type="primary" icon={<PlusOutlined />}>{t("新建任务")}</Button></Link>} />
     <section className="content-panel">
       <div className="panel-heading"><div><h2>{t("任务记录")}</h2><p>{t("排队与运行状态以详情页轮询为准；重新执行会创建独立任务。")}</p></div><Button icon={<ReloadOutlined />} loading={resource.loading} onClick={resource.reload}>{t("刷新")}</Button></div>
       <div className="filter-toolbar">

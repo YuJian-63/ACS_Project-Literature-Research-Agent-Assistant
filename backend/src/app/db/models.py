@@ -20,11 +20,13 @@ from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base, CreatedAt, UpdatedAt, UUIDPrimaryKey
+from app.db.accounts import AuthEmailToken, AuthMailOutbox, AuthRateBucket, AuthSession, User
 
 
 class Paper(UUIDPrimaryKey, CreatedAt, UpdatedAt, Base):
     __tablename__ = "papers"
 
+    user_id: Mapped[UUID] = mapped_column(ForeignKey("users.id", ondelete="RESTRICT"))
     title: Mapped[str] = mapped_column(String(255))
     original_filename: Mapped[str] = mapped_column(String(255))
     storage_key: Mapped[str] = mapped_column(Text, unique=True)
@@ -40,7 +42,7 @@ class Paper(UUIDPrimaryKey, CreatedAt, UpdatedAt, Base):
     error_message: Mapped[str | None] = mapped_column(Text)
     error_details: Mapped[dict[str, Any] | None] = mapped_column(JSONB(none_as_null=True))
 
-    source: Mapped["PaperSource | None"] = relationship(lazy="selectin", uselist=False)
+    source: Mapped["PaperSource | None"] = relationship(lazy="selectin", uselist=False, foreign_keys="PaperSource.paper_id")
 
     __table_args__ = (
         CheckConstraint("length(btrim(title)) > 0"),
@@ -52,6 +54,8 @@ class Paper(UUIDPrimaryKey, CreatedAt, UpdatedAt, Base):
         CheckConstraint("page_count > 0"),
         CheckConstraint("length(btrim(parser_version)) > 0"),
         UniqueConstraint("id", "sha256", name="papers_source_identity"),
+        UniqueConstraint("id", "user_id", name="papers_owner_identity"),
+        Index("papers_owner_created_idx", "user_id", text("created_at DESC")),
         CheckConstraint("storage_key = 'uploads/' || id::text || '.pdf'", name="papers_storage_key"),
         CheckConstraint("updated_at >= created_at", name="papers_updated_at"),
         CheckConstraint(
@@ -103,6 +107,7 @@ class PaperChunk(UUIDPrimaryKey, CreatedAt, Base):
 class Task(UUIDPrimaryKey, CreatedAt, UpdatedAt, Base):
     __tablename__ = "tasks"
 
+    user_id: Mapped[UUID] = mapped_column(ForeignKey("users.id", ondelete="RESTRICT"))
     task_type: Mapped[str] = mapped_column(Text)
     question: Mapped[str | None] = mapped_column(Text)
     workflow_type: Mapped[str] = mapped_column(Text, server_default="baseline")
@@ -121,7 +126,7 @@ class Task(UUIDPrimaryKey, CreatedAt, UpdatedAt, Base):
     worker_id: Mapped[UUID | None]
     lease_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     last_event_seq: Mapped[int] = mapped_column(BigInteger, server_default=text("0"))
-    idempotency_key: Mapped[str | None] = mapped_column(String(128), unique=True)
+    idempotency_key: Mapped[str | None] = mapped_column(String(128))
     request_hash: Mapped[str] = mapped_column(String(64))
     input_tokens: Mapped[int | None] = mapped_column(BigInteger)
     output_tokens: Mapped[int | None] = mapped_column(BigInteger)
@@ -134,6 +139,9 @@ class Task(UUIDPrimaryKey, CreatedAt, UpdatedAt, Base):
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
     __table_args__ = (
+        UniqueConstraint("id", "user_id", name="tasks_owner_identity"),
+        UniqueConstraint("user_id", "idempotency_key", name="tasks_owner_idempotency"),
+        Index("tasks_owner_created_idx", "user_id", text("created_at DESC")),
         CheckConstraint("task_type IN ('summary', 'qa', 'review')"),
         CheckConstraint("workflow_type IN ('baseline', 'extended')"),
         CheckConstraint("runner_type IN ('mock', 'langgraph')"),
@@ -170,7 +178,7 @@ class Task(UUIDPrimaryKey, CreatedAt, UpdatedAt, Base):
             name="tasks_timestamps",
         ),
         CheckConstraint(
-            "(status = 'queued' AND stage = 'queued' AND (started_at IS NULL OR workflow_version = 'langgraph-review-v2') AND finished_at IS NULL "
+            "(status = 'queued' AND stage = 'queued' AND (started_at IS NULL OR workflow_version IN ('langgraph-review-v2', 'langgraph-search-v1')) AND finished_at IS NULL "
             "AND worker_id IS NULL AND lease_expires_at IS NULL) "
             "OR (status = 'running' AND started_at IS NOT NULL AND finished_at IS NULL "
             "AND worker_id IS NOT NULL AND lease_expires_at IS NOT NULL AND lease_expires_at > started_at) "
@@ -202,6 +210,8 @@ class Task(UUIDPrimaryKey, CreatedAt, UpdatedAt, Base):
 class TaskPaper(CreatedAt, Base):
     __tablename__ = "task_papers"
 
+    user_id: Mapped[UUID] = mapped_column(ForeignKey("users.id", ondelete="RESTRICT"))
+
     task_id: Mapped[UUID] = mapped_column(ForeignKey("tasks.id", ondelete="CASCADE"), primary_key=True)
     paper_id: Mapped[UUID] = mapped_column(primary_key=True)
     paper_sha256: Mapped[str] = mapped_column(String(64))
@@ -210,6 +220,8 @@ class TaskPaper(CreatedAt, Base):
     __table_args__ = (
         CheckConstraint("selection_order BETWEEN 0 AND 19"),
         UniqueConstraint("task_id", "selection_order", name="task_papers_order"),
+        ForeignKeyConstraint(["task_id", "user_id"], ["tasks.id", "tasks.user_id"], name="task_papers_task_owner", ondelete="CASCADE"),
+        ForeignKeyConstraint(["paper_id", "user_id"], ["papers.id", "papers.user_id"], name="task_papers_paper_owner", ondelete="RESTRICT"),
         ForeignKeyConstraint(
             ["paper_id", "paper_sha256"], ["papers.id", "papers.sha256"],
             name="task_papers_source", ondelete="RESTRICT", onupdate="RESTRICT",
@@ -303,6 +315,8 @@ ARXIV_SOURCE_ID = r"^([0-9]{2}(0[1-9]|1[0-2])\.[0-9]{4,5}|[a-z][a-z-]*(\.[A-Z]{2
 class PaperSource(UUIDPrimaryKey, CreatedAt, Base):
     __tablename__ = "paper_sources"
 
+    user_id: Mapped[UUID] = mapped_column(ForeignKey("users.id", ondelete="RESTRICT"))
+
     paper_id: Mapped[UUID] = mapped_column(ForeignKey("papers.id", ondelete="RESTRICT"), unique=True)
     provider: Mapped[str] = mapped_column(Text)
     external_id: Mapped[str] = mapped_column(String(80))
@@ -312,12 +326,16 @@ class PaperSource(UUIDPrimaryKey, CreatedAt, Base):
         CheckConstraint("provider = 'arxiv'"),
         CheckConstraint(f"external_id ~ '{ARXIV_SOURCE_ID}'"),
         CheckConstraint("jsonb_typeof(metadata) = 'object'"),
-        UniqueConstraint("provider", "external_id", name="paper_sources_identity"),
+        UniqueConstraint("user_id", "provider", "external_id", name="paper_sources_identity"),
+        ForeignKeyConstraint(["paper_id", "user_id"], ["papers.id", "papers.user_id"], name="paper_sources_paper_owner", ondelete="RESTRICT"),
+        Index("paper_sources_owner_idx", "user_id"),
     )
 
 
 class PaperImport(UUIDPrimaryKey, CreatedAt, UpdatedAt, Base):
     __tablename__ = "paper_imports"
+
+    user_id: Mapped[UUID] = mapped_column(ForeignKey("users.id", ondelete="RESTRICT"))
 
     provider: Mapped[str] = mapped_column(Text)
     external_id: Mapped[str] = mapped_column(String(80))
@@ -337,7 +355,9 @@ class PaperImport(UUIDPrimaryKey, CreatedAt, UpdatedAt, Base):
         CheckConstraint(f"external_id ~ '{ARXIV_SOURCE_ID}'"),
         CheckConstraint("attempt > 0"),
         CheckConstraint("status IN ('queued', 'running', 'succeeded', 'failed')"),
-        UniqueConstraint("provider", "external_id", name="paper_imports_identity"),
+        UniqueConstraint("user_id", "provider", "external_id", name="paper_imports_identity"),
+        ForeignKeyConstraint(["paper_id", "user_id"], ["papers.id", "papers.user_id"], name="paper_imports_paper_owner", ondelete="RESTRICT"),
+        Index("paper_imports_owner_idx", "user_id"),
         CheckConstraint(
             "(status = 'succeeded' AND paper_id IS NOT NULL AND paper_id = id) "
             "OR (status <> 'succeeded' AND paper_id IS NULL)", name="paper_imports_result",

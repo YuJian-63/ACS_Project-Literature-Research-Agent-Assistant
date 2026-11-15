@@ -1,13 +1,13 @@
 # Literature Research Agent Assistant — API 契约
 
-版本：v1 · 更新日期：2026-11-13。已实现 API/Mock Worker、独立 PDF Parser、真实摘要/问答 Runner、多论文综述及第 10 节 arXiv 搜索/导入接口。用户已完成 MVP-3 的隔离原生 PostgreSQL 八组专项验收、真实 arXiv 单版本搜索/下载/解析及浏览器 Mock 任务闭环；另已完成一次 DeepSeek 真实单篇摘要及人工引用/刷新核验，真实问答与多论文综述仍待验收。详细证据范围见实施记录；启动方式见 `backend/README.md`。
+版本：v1 · 更新日期：2026-11-14。账号契约与集成/验收边界见第 11 节；以下既有业务验收记录保留其原证据范围。已实现 API/Mock Worker、独立 PDF Parser、真实摘要/问答 Runner、多论文综述及第 10 节 arXiv 搜索/导入接口。用户已完成 MVP-3 的隔离原生 PostgreSQL 八组专项验收、真实 arXiv 单版本搜索/下载/解析及浏览器 Mock 任务闭环；另已完成一次 DeepSeek 真实单篇摘要及人工引用/刷新核验，真实问答与多论文综述仍待验收。详细证据范围见实施记录；启动方式见 `backend/README.md`。
 
 需求依据：`docs/Proposal.md` 第 2、3 节。数据库设计见 `docs/database-design.md`，参考 DDL 见 `backend/sql/schema.sql`。
 
 ## 1. 基本约定与范围
 
 - 业务前缀 `/api/v1`；开发默认 origin 为 `http://localhost:8000`；`/health`、`/ready` 不带前缀。
-- MVP 为受信本地环境的单用户应用，不建用户/租户表；公开部署前须另行实现身份与资源访问控制。
+- 账号采用用户名/密码和强制邮箱验证，业务接口以 Cookie 会话和服务端用户归属隔离；账号路由/CORS/归属及配额检查已实现，本次实施已验证原生账号与所有权链路通过，真实 SMTP 配置/投递验收待完成，详见第 11 节。
 - 前端只访问应用后端，不直接访问数据库、LangGraph 或模型服务。
 - JSON 使用 UTF-8、snake_case 字段；ID 使用 UUID；时间使用 RFC 3339 UTC 字符串，以 `Z` 结尾。
 - 单个对象直接返回，列表返回分页对象；未知请求体字段返回 422。
@@ -59,7 +59,7 @@
 | status | string | queued / running / succeeded / failed |
 | stage | string | 阶段代码，不作为判断终态的依据 |
 | budget | Budget | 执行预算快照 |
-| budget_mode | string | automatic 为新分阶段真实综述，其他为 manual |
+| budget_mode | string | automatic 为新建任务的后端自动分配，manual 仅用于历史手动预算任务 |
 | versions | object | model_id、workflow_version、prompt_version、dataset_version；未知值为 null |
 | stats | TaskStats | 实际统计，未知值为 null |
 | last_event_seq | integer | 最新持久化事件序号，最小为 0 |
@@ -79,13 +79,13 @@ queued → running → succeeded
 
 **Budget：**
 
-| 字段 | 默认值 | 硬上限范围 |
+| 字段 | 兼容请求的默认值 | 可接受范围 |
 | --- | --- | --- |
 | max_steps | 10 | 1—100 |
 | max_tokens | 8000 | 1—100000 |
 | timeout_seconds | 120 | 1—1800 |
 
-budget 可省略或只提供部分字段；缺项填默认值，部署配置可收紧上限。max_tokens 是任务累计输入与输出 token 预算，模型单次上下文限制另外检查；超时从首次开始执行计算，初始排队不计入，阶段恢复后的排队计入。真实 Runner 在步骤/调用边界检查预算，超出即失败；Mock 不伪造模型用量。
+新建 summary/qa/review（含 Mock）统一由后端计算预算，前端不发送 budget。该字段仅为旧客户端及历史幂等重放保留，可省略或只提供部分字段，schema 仍校验范围，但合法值不控制新任务执行。响应 budget 为实际冻结值，不采用表中的兼容默认值。max_tokens 是任务累计输入与输出 Token 上限，另检查单次上下文；超时从首次执行开始，初始排队不计入。Mock 不产生模型用量。
 
 **TaskStats：**
 
@@ -181,8 +181,7 @@ Content-Type 为 application/json；可选 Idempotency-Key 请求头，语义见
   "task_type": "qa",
   "question": "这篇论文的核心方法和局限是什么？",
   "paper_ids": ["11111111-1111-4111-8111-111111111111"],
-  "workflow_type": "baseline",
-  "budget": {"max_steps": 10, "max_tokens": 8000, "timeout_seconds": 120}
+  "workflow_type": "baseline"
 }
 ```
 
@@ -192,13 +191,15 @@ Content-Type 为 application/json；可选 Idempotency-Key 请求头，语义见
 | question | 条件必填 | 去首尾空白；qa/review 为 1—8000 字符；summary 可省略或为 null，空白归一为 null，非空时同样为 1—8000 字符；超长返回 422 INVALID_REQUEST |
 | paper_ids | 是 | summary/qa 恰好 1 篇；review 为 2—20 篇；UUID 不得重复 |
 | workflow_type | 否 | 默认 baseline，MVP-0 不开放 extended |
-| budget | 否 | 见 Budget，缺失字段填默认值 |
+| budget | 否 | 兼容旧客户端；新任务统一忽略合法值，由后端动态分配。非法值仍返回 422 |
 
 paper_ids 视为集合，转 UUID 标准字符串后排序。不存在论文返回 404，details.missing_paper_ids 列出缺失 ID。Mock 允许 uploaded/ready，processing/failed 返回 409 PAPER_NOT_READY；真实 Runner 只允许 ready。真实模式需配置 `LLM_BASE_URL`、`LLM_MODEL_ID` 和 `LLM_API_KEY`；缺少任一项时返回 `503 RUNNER_NOT_CONFIGURED`，不创建任务且不降级为 Mock。真实模式支持 summary、qa 及 review；review 要求全部 2—20 篇论文 ready。
 
 runner_type、is_mock、model_id、status、stage、thread_id 及存储配置均不接受客户端写入。后端冻结 Runner、工作流版本和模型等执行配置，后续配置变更不能改变已提交任务。
 
-历史 langgraph-review-v1 真实 review 后期提交时由服务端冻结内部 `run_config.max_output_tokens=4096`，该字段不是客户端请求参数，不增加公开任务/产物字段。模型单次输出上限为冻结值与剩余预估总 Token 预算的较小值；预估输入已耗尽总预算时不调用模型。旧任务缺少字段时保持 2048，含既有 review-v2；summary/qa 保持 2048，Mock 不变。持久化值仅允许精确整数（review 为 2048/4096，单篇为 2048），非法配置在调用前失败。实际用量仍受原总预算约束，时间预算、单次调用、严格引用与原子写入不变；4096 不保证完整输出，不自动重试/续写或修复 JSON。重建任务是新提交；旧任务和原幂等键的重放不升级输出上限。
+历史 langgraph-review-v1 真实 review 后期提交时由服务端冻结内部 `run_config.max_output_tokens=4096`，该字段不是客户端请求参数，不增加公开任务/产物字段。模型单次输出上限为冻结值与剩余预估总 Token 预算的较小值；预估输入已耗尽总预算时不调用模型。旧任务缺少字段时保持 2048，含既有 review-v2；历史 summary/qa 保持 2048，Mock 不变。持久化值仅允许精确整数（review 为 2048/4096，历史单篇为 2048），非法配置在调用前失败。实际用量仍受原总预算约束，时间预算、单次调用、严格引用与原子写入不变；4096 不保证完整输出，不自动重试/续写或修复 JSON。重建任务是新提交；旧任务和原幂等键的重放不升级输出上限。
+
+新建真实 summary/qa 使用自动策略 `single-auto-v1`，工作流仍为 `langgraph-v1`，提示版本仍为 `evidence-v4`。创建时按证据规模、问题长度及完整提示 UTF-8 字节数加 512 开销估算输入，冻结选定证据和资源。动态输出以 256 Token 为单位，受 RESEARCH_OUTPUT_TOKENS（默认 8192）限制；上下文受 RESEARCH_CONTEXT_TOKENS（32768）限制，总量含额外 512 余量且受 RESEARCH_TASK_TOKENS（100000）限制。不能容纳时缩减证据，仍不足返回 `422 RESEARCH_CAPACITY_EXCEEDED`，不创建任务或调用模型。单次调用期限随输入/输出估算增长，最大 RESEARCH_CALL_TIMEOUT_SECONDS（180 秒，允许 5—300）；任务总期限另加 30 秒余量，最多一次模型调用。空匹配证据直接返回证据不足，不调用模型。旧任务保留原输入、2048 输出上限和旧超时；重放不升级策略。Mock 新任务自动使用两步、1 Token 占位上限（实际模型用量为零）和至少 30 秒执行期限。自动预算不保证 JSON 永不截断，不增加自动重试、续写或放松引用校验。
 
 新建真实 summary/qa 任务的 versions.prompt_version 为 `evidence-v4`。后端从已选存储片段生成最长 1000 字符的连续证据摘录，保留内部排版与 Unicode，不跨片段或物理页码，并分配任务内 evidence_id。内部模型结果按 paragraphs 返回每段正文与 evidence_ids，后端解析 ID、取原样引文与来源身份、按首次使用顺序分配引用编号，再执行原有严格来源、逐字引文及大小校验。跨段同一证据共享编号；未知 ID、同段重复 ID、模型自写引用标记或额外引文/来源字段会失败，不进行模糊匹配或静默替换。paragraphs/evidence_ids 不是对外 API 字段，产物仍返回 content_markdown 与 citations。
 
@@ -238,11 +239,11 @@ Location 响应头为 `/api/v1/tasks/{task_id}`。202 表示任务、论文关�
 ### 5.1 幂等提交
 
 - 可省略 Idempotency-Key；提供时为 1—128 个 ASCII 可见字符，不含空白。一次提交使用新键，网络重试复用。
-- 单用户 MVP 使用全局唯一键；未来多用户按用户/工作区限定。首版不自动过期或复用键。
-- request_hash 对规范化后的 task_type、question、排序的 paper_ids、workflow_type、补齐默认值的 budget 计算 SHA-256；新 langgraph-review-v2 真实综述忽略并从哈希中移除 budget；JSON 使用 UTF-8、递归按键排序、无多余空格、不转义非 ASCII 字符。
+- `20261114_0004` 起幂等键按当前用户唯一：`(user_id,idempotency_key)`；不同用户的同键独立，业务请求不接收 user_id。不自动过期或复用键。
+- request_hash 对规范化后的 task_type、question、排序的 paper_ids、workflow_type 计算 SHA-256；所有新任务移除 budget。历史手动任务按原规则包含补齐默认值的 budget。重放先读取任务的冻结预算模式，再使用对应哈希规则，既不重算资源也不消耗新任务配额；JSON 使用 UTF-8、递归按键排序、无多余空格、不转义非 ASCII 字符。
 - 同键同哈希返回原任务，仍为 202，Idempotency-Replayed 响应头为 true；新任务为 false。
 - 同键不同哈希返回 `409 IDEMPOTENCY_CONFLICT`；并发由数据库唯一约束及冲突后重查保证只创建一项。
-- 请求规范化后先查幂等键；同请求重放不重新检查论文当前状态，首次提交仍完整校验。
+- 请求规范化后先在当前用户范围查幂等键；同请求重放不重新检查论文当前状态，首次提交仍完整校验全部论文归属和状态。
 - 无键时相同请求可创建多个任务；主动重跑失败任务必须使用新键。
 
 ### GET /api/v1/tasks
@@ -410,7 +411,9 @@ Task.error/Paper.error 直接使用内层 `{code,message,details}`，正常为 n
 
 | HTTP 状态/场景 | code | 说明 |
 | --- | --- | --- |
-| 404 | PAPER_NOT_FOUND / TASK_NOT_FOUND | 资源不存在 |
+| 401 | AUTH_REQUIRED | 未登录、会话过期/撤销或账号不可用 |
+| 403 | ORIGIN_REJECTED / CSRF_REJECTED | 来源或会话 CSRF 校验失败 |
+| 404 | PAPER_NOT_FOUND / TASK_NOT_FOUND | 资源不存在或不属于当前用户 |
 | 409 | PAPER_NOT_READY | 论文状态不允许执行 |
 | 409 | IDEMPOTENCY_CONFLICT | 幂等键已绑定不同请求 |
 | 413 | FILE_TOO_LARGE | 文件超过 20 MiB |
@@ -532,3 +535,75 @@ HTTP 错误沿用第 8 节 envelope；429 带整数秒 Retry-After 和相同 det
 已接收导入的执行失败返回 status=failed/error：ARXIV_NOT_FOUND、ARXIV_VERSION_MISMATCH、ARXIV_RATE_LIMITED、ARXIV_UNAVAILABLE、ARXIV_INVALID_RESPONSE、ARXIV_TIMEOUT、UNSAFE_SOURCE_URL、FILE_TOO_LARGE、INVALID_PDF、STORAGE_WRITE_FAILED、IMPORT_TIMEOUT、IMPORT_LEASE_EXPIRED、IMPORT_WORKER_STOPPED。details.retryable 必须为 boolean：暂时网络/服务/限流/超时/存储及 Worker 中断 true；不存在/版本不符/非法响应/不安全 URL/超限/非法 PDF false。错误不回显上游正文或内部路径。
 
 前端对 queued/running 每 2 秒轮询，终态停止；成功后跟踪 Paper 解析。失败仅 retryable=true 可重试。元数据作为纯文本显示，真正 ready 才允许真实研究任务。
+
+## 11. 账号、会话与资源归属（2026-11-14）
+
+本节依据当前导出的 `backend/src/app/auth/api.py`、service/security/dependencies 及 `20261114_0004` 记录账号契约。当前主应用已实现账号路由、带凭据 CORS 和私有缓存中间件，业务层已实现所有权/配额检查。2026-11-14 本次实施已验证：原生所有权 16 项（含 schema.sql/ORM 对照）、账号原生 harness 74 项（无跳过）、原生综述 8 项全部通过；默认 discover 共 124 项，68 项通过、56 项环境门控跳过，门控套件已另行原生执行通过。实际账号 API 完整注册/验证/登录/上传/找回/重置/撤销链路、本地账号配置校验，以及前端构建/隔离浏览器重跑均通过。实际配置数据库 head=20261114_0004、无漂移，业务记录/用户/生成文件均为 0，source gate seed 为 1。真实 QQ SMTP 与邮件端到端验收待执行，设置和独立邮件进程见 `backend/README.md` 第 10 节。
+
+### 11.1 输入、响应与状态
+
+前缀 `/api/v1/auth`。所有 POST 必须为 `application/json`，Origin 必须精确匹配 `FRONTEND_PUBLIC_URL`（去掉末尾 `/`）；浏览器自动提供 Origin，不由脚本伪造。账号 POST 请求体上限 16 KiB，未知字段或非法字段返回脱敏 `422 INVALID_REQUEST`，不回显密码/令牌。登录以用户名进行，邮箱只用于验证和找回，不作登录名。
+
+| 方法与路径 | JSON 输入 | 成功响应 | 会话要求 |
+| --- | --- | --- | --- |
+| POST /register | `{username,email,password}` | `202 {"accepted":true}` | 公开；创建 pending 账号和验证 outbox |
+| POST /verify-email | `{token,password}` | `200 {"ok":true}` | 公开；password 必须为注册时原密码；验证后另行登录 |
+| POST /resend-verification | `{email}` | `202 {"accepted":true}` | 公开；不透露邮箱存在、状态或投递结果 |
+| POST /forgot-password | `{email}` | `202 {"accepted":true}` | 公开；不透露邮箱存在、状态或投递结果 |
+| POST /login | `{username,password}` | `200 {user:{id,username,email},csrf_token}`，附 Set-Cookie | 公开；仅允许 active 且已验证的账号 |
+| GET /me | 无 | `200 {user:{id,username,email},csrf_token}` | Cookie |
+| POST /logout | `{}`，无业务字段 | `200 {"ok":true}`，清除 Cookie | Cookie + CSRF；仅撤销当前会话 |
+| POST /reset-password | `{token,password}` | `200 {"ok":true}`，清除 Cookie | 公开；password 是新密码，撤销所有会话 |
+| POST /change-password | `{current_password,password}` | `200 {"ok":true}`，清除 Cookie | Cookie + CSRF；验证当前密码，撤销所有会话 |
+
+注册/重发/忘记密码的 202 只表示请求受理，不表示 SMTP 已投递；用户名/邮箱冲突注册统一 `409 REGISTRATION_UNAVAILABLE`，不区分冲突字段。忘记密码对不存在、未验证或停用账号同样返回通用 202；格式错误、限流和服务配置错误仍可分别返回 422/429/503。错误凭据统一 `401 INVALID_CREDENTIALS`；仅在用户名密码正确但尚未验证时返回 `403 EMAIL_NOT_VERIFIED`。
+
+- 注册用户名去除首尾空白后为 3—32 个 ASCII 字母、数字或下划线，唯一键按小写处理；保留名 `admin`、`administrator`、`root`、`system`、`support`、`api`、`auth`、`postmaster`、`abuse` 不可注册。
+- 邮箱去首尾空白，当前服务接受最长 254 字符的 ASCII 本地部分和 DNS 域名格式（本地部分至多 64 字符），域名至少含一个点；完整邮箱按小写唯一，不折叠点或 `+` 后缀。数据库容量 320 不代表接口允许 320 字符。
+- 注册/新密码及验证原密码为 6—128 个 Unicode 字符，须为有效 UTF-8；不 trim、不强制字符种类。登录和 change-password 的 current_password 输入模型允许 1—128 字符；有效新建账号密码仍须满足 6—128。密码使用 Argon2id 存储。确认密码仅由前端验证，不提交额外字段。
+- 邮件 token 输入为 32—256 字符；实际发放为 32 随机字节的 URL-safe token，仅将 SHA-256 摘要保存到 token/session 表。验证与重置用途不可互换，消费/过期/撤销后统一 `400 AUTH_TOKEN_INVALID`；验证原密码错误也使用同一错误。
+- 验证 TTL 默认 24 小时、重置默认 30 分钟、会话默认 7 天。重发撤销同用途旧 token 和未完成邮件，不延长 pending 注册后的 24 小时总窗口。令牌消费锁定用户和 token，避免并发重复使用。
+
+### 11.2 Cookie、Origin、CSRF 与缓存
+
+生产会话 Cookie `__Host-lra_session`：Secure、HttpOnly、SameSite=Lax、Path=/、无 Domain；`AUTH_COOKIE_SECURE=true` 同时要求 HTTPS 前端 origin。本机 HTTP loopback 专用 `lra_dev_session`，其余属性相同但无 Secure。Cookie 的 Max-Age 来自 `AUTH_SESSION_TTL_SECONDS`，服务端仍检查用户 active、会话过期/revoked 和 auth_version。返回 JSON 不含原始会话 token；不得将认证 Cookie 改为 localStorage 中的 Bearer token。
+
+跨端口请求使用 `withCredentials: true` 或 `credentials: "include"`。CORS 允许明确前端 origin 与 credentials，预检须允许 Content-Type、Idempotency-Key、X-CSRF-Token，禁止通配 origin。所有账号 POST（包括公开注册、登录、重置）检查 Origin 与 JSON；其中 logout/change-password 另验证会话及 `X-CSRF-Token`。所有已认证业务写入（含 multipart 上传、任务提交、导入和重试）也必须带当前会话 CSRF 和匹配 Origin，不能因为不是 JSON 而跳过 CSRF。
+
+CSRF 从 login/me 响应读取并仅存内存，按独立密钥与当前会话绑定；更换会话后重新读取。缺失/错误 Origin 返回 `403 ORIGIN_REJECTED`，缺失/错误 CSRF 返回 `403 CSRF_REJECTED`。这两类错误不能解释为账号不存在。已认证业务请求收到 401 才按会话失效处理；公开登录/重置等有意产生的 401 在当前页面显示，不能触发全局重定向循环。
+
+全部 `/api/v1/` 响应（包括私有 PDF、错误响应）应设置 `Cache-Control: no-store`、`Pragma: no-cache` 和 `Referrer-Policy: no-referrer`。鉴权下载通过受控 API 校验所有权，不开放 uploads 静态文件路径。`/health`、`/ready` 保持匿名，只返回健康状态/脱敏就绪错误；数据库 ready 不等于账号密钥、SMTP 或外部模型可用。
+
+### 11.3 邮件与浏览器生命周期
+
+服务端从可信 FRONTEND_PUBLIC_URL 生成 `/verify-email#token=...` 和 `/reset-password#token=...`；不接收客户端指定回跳域名、不使用查询字符串放 token。前端只解析 fragment 一次并立即清理地址栏，在内存中保留待显式提交的 token；打开链接不自动验证/重置，不向第三方资源转发 token。`Accept-Language` 首语言以 zh 开头选择中文邮件，其余选择英文。
+
+注册需要密码确认；pending 页面说明检查邮件、使用原密码验证，并允许重新发送。验证成功返回登录页；重置/改密成功后所有设备重新登录。API 原子写入用户/token/加密 outbox，独立 `python -m app.mail_worker` 负责 QQ SSL465 投递；sent/failed 清空加密载荷，最多三次投递尝试，不在 API 请求内同步发信。账号 API 生命周期已通过上述验证；真实 SMTP 配置、实际中英文邮件收信及邮件链接端到端验收仍待完成，不能将 202、mock 或测试视为真实送达。
+
+受保护研究路由等待 me 结束再展示；未登录保存安全的站内路径，拒绝外部 URL、双斜杠、反斜杠、控制字符及编码绕过。账户菜单显示服务端用户名，并提供改密和退出。退出、业务 401 或跨标签身份变化必须取消旧请求/轮询，使迟到响应、旧幂等提交与私有状态失效，按新身份重新挂载研究子树；仅语言偏好保留。
+
+### 11.4 所有权、错误与验收边界
+
+论文、PDF、任务、事件、产物、引用、导入记录和重试均以服务端会话用户限定；业务输入不增加 user_id，客户端提供的 ID 也必须与当前用户所有权一起查询。未认证返回 `401 AUTH_REQUIRED`；其他账号资源与不存在资源统一 404，不返回其标题或状态。选择多篇论文时全部须属同一当前用户。
+
+任务幂等唯一键为 `(user_id,idempotency_key)`；arXiv Source/Import 唯一键为 `(user_id,provider,external_id)`。不同用户可使用相同键或导入相同版本，私有论文、导入和结果不共享。上游访问 gate/成功元数据缓存仍共享，但本地导入状态须按当前用户重新投影。USER_ACTIVE_TASKS、USER_ACTIVE_IMPORTS、USER_DAILY_TASKS 默认 2、2、20；服务层锁定当前用户行，统计 queued/running 任务或导入、UTC 当日创建任务后决定是否接受新工作（含导入重试）。超限分别为 `429 TASK_CAPACITY_EXCEEDED / IMPORT_CAPACITY_EXCEEDED / DAILY_TASK_LIMIT`，Retry-After 分别为 30/30/3600 秒；原生所有权测试已在本次实施验证通过；审查发现的重置后共享 gate 缺失已修复，reset 后许可领取/释放已有正向回归。导入完成/重试的锁冲突已修复：用户配额采用 FOR NO KEY UPDATE，兼容外键引用锁；原生交叠回归通过，详见 backend/README.md 第 10.6 节。配额中文消息及对应英文诊断映射已补齐，错误码及 Retry-After 契约保持不变。原任务幂等重放不消耗新配额。自动综述预算和旧任务冻结配置规则保持原契约。
+
+账号补充错误：`400 AUTH_TOKEN_INVALID`、`401 AUTH_REQUIRED / INVALID_CREDENTIALS`、`403 EMAIL_NOT_VERIFIED / ORIGIN_REJECTED / CSRF_REJECTED`、`409 REGISTRATION_UNAVAILABLE`、`413 REQUEST_TOO_LARGE`、`415 JSON_REQUIRED`、`429 AUTH_RATE_LIMITED`（附 Retry-After 秒数）、`503 AUTH_UNAVAILABLE`；统一使用第 8 节 Error 结构，不回显输入密码、token、Cookie、邮箱是否存在或原始 SMTP 异常。
+
+代码静态对照：前后端 endpoint、字段名、login/me 响应和凭据/CSRF 发送一致；logout/reset/change 实际返回 200 JSON，前端忽略响应体，兼容。当前前端 email 正则比后端宽松，未同步 ASCII/254 字符及保留用户名校验；登录/当前密码前端要求 6—128，后端模型允许 1—128（正常新账号不受影响）。前端验证文案固定 24 小时，而后端验证 TTL 可缩短；这些属于非阻断的预校验/文案差异，服务端仍执行完整规则；当前验收使用默认 24 小时时效和符合完整规则的输入。
+
+## 12. 跨语言研究检索（2026-11-15）
+
+新建真实 summary / qa / review 任务使用 workflow_version=langgraph-search-v1。单篇内部协议为 evidence-search-v1，综述为 evidence-review-search-v1；旧工作流按旧路径读取，历史结果不自动重跑。任务创建只执行本地规划，原有请求字段与自动预算规则不变。
+
+创建任务时将当前用户选定论文的完整解析片段、论文标题、文件哈希和 parser_version 存入 source_snapshot，并校验 SHA-256；默认序列化上限 8 MiB，可由 RETRIEVAL_SNAPSHOT_BYTES 配置。超过上限或不能为检索/生成预留资源时，在创建前返回 422 RESEARCH_CAPACITY_EXCEEDED 或 REVIEW_CAPACITY_EXCEEDED。快照、扩展查询和全文不通过任务详情接口返回。
+
+Worker 对含中文的问题最多调用一次查询扩展：1—3 个英文表达、每个最长 160 字符、输出至多 512 Token、超时至多 15 秒。扩展失败时记录 warning 并使用原问题、内置术语与论文结构继续。检索合并原问题与扩展表达，过滤英文停用词，按词面相关性和结构覆盖选择逐字连续原文；零命中仍提供上下文，不能直接断言全文无答案。摘要覆盖结构与问题；新摘要和问答允许一次补检索，综述逐篇覆盖并允许每篇一次补检索。所有模型尝试（包括未知结果和恢复尝试）计入服务器预算。生成、校验失败的重试额度也受任务总量限制。
+
+任务详情新增可空 retrieval 字段：旧任务/Mock 为 null；新任务包含 status、expansion_degraded、selected_chunks、lexical_matches、missing_aspects、papers。status 为 pending / matched / context_fallback / no_parsed_text / answered / partial / insufficient_selected_evidence。selected_chunks 和 lexical_matches 表示初次选证据情况，不能当作事实置信度；补检索数量见事件 payload.new_chunks。missing_aspects 为模型报告的单篇未覆盖问题；papers 为综述缺口数组，每项包含 paper_id、paper_title（提交时冻结的标题）、columns（缺失维度标签），仅返回本任务选中的论文，省略没有缺口的论文。历史检查点没有逐篇缺口时默认为空数组。
+
+证据覆盖后续改进：新摘要与问答都为一次补检索预留服务器预算；旧摘要没有 supplement_rounds 标记时不追加调用。补检索优先使用缺失项与内置中英术语，可选取已读原片段中的另一连续窗口。两次部分单篇回答合并有据段落；综述补检只填原空单元格，保留已有结论和引用。补检仍未覆盖时显示具体缺口，不能保证问题一定可回答。无需新数据库迁移，重启 API 与 Runner 后创建新任务。
+
+retrieving 阶段的事件可带 retrieval、retrieval_status、reason、paper_id、new_chunks、evidence_status 等诊断字段。前端必须区分无解析文本、当前证据不足、部分可回答；比较表 null 显示“当前证据未覆盖”，不能据此断言论文未报告。输出仍使用原 Artifact / Citation 结构，引用 ID 由后端解析为冻结原文及物理页码。
+
+新工作流使用与综述相同的租约和持久化调用预留。租约过期可重新排队，保留原 started_at 和截止时间；已完成查询、选证据、分析和输出检查点复用。未知模型调用按预留用量保守保留；查询扩展未知结果不重复发起，生成可在有剩余额度时恢复。迁移 20261115_0005 只扩展 tasks_lifecycle 约束，不删除数据。

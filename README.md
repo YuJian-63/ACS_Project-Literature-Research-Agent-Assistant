@@ -3,6 +3,7 @@ HKUST CSIT6000V Advanced AI Computing and Systems Project: Literature Research A
 
 ## 项目文档
 
+- [本地启动、测试与验收操作手册（终端命令速查）](docs/terminal-operations.md)
 - [项目提案](docs/Proposal.md)
 - [API 契约](docs/api-contract.md)
 - [数据库设计](docs/database-design.md)

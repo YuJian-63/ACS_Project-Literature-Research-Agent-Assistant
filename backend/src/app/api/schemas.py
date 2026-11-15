@@ -161,12 +161,28 @@ class TaskStats(BaseModel):
     tool_calls: int | None
 
 
+class MissingPaperEvidence(BaseModel):
+    paper_id: UUID
+    paper_title: str
+    columns: list[str]
+
+
+class RetrievalDiagnostics(BaseModel):
+    status: str
+    expansion_degraded: bool = False
+    selected_chunks: int = 0
+    lexical_matches: int = 0
+    missing_aspects: list[str] = Field(default_factory=list)
+    papers: list[MissingPaperEvidence] = Field(default_factory=list)
+
+
 class TaskResponse(TaskSummary):
     budget_mode: Literal["manual", "automatic"] = "manual"
     budget: Budget
     versions: Versions
     stats: TaskStats
     last_event_seq: int
+    retrieval: RetrievalDiagnostics | None = None
 
 
 class EventResponse(BaseModel):

@@ -5,9 +5,10 @@ import enUS from 'antd/locale/en_US';
 import { t, useLocale } from './index';
 
 const theme = { token: {
-  colorPrimary: '#315bd6', colorInfo: '#315bd6', borderRadius: 8, colorText: '#22314b',
-  colorTextSecondary: '#64748b', colorBorder: '#dce3ed', fontSize: 14,
-  fontFamily: '"Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif',
+  colorPrimary: '#176352', colorInfo: '#176352', borderRadius: 5, colorText: '#213a38',
+  colorTextSecondary: '#536e69', colorBorder: '#dbe5e1', colorBgLayout: '#f0f5f4', fontSize: 14,
+  colorSuccess: '#246647', colorWarning: '#8a601a', colorError: '#a33b36',
+  fontFamily: '"Research Sans", "Noto Sans SC", "Microsoft YaHei", sans-serif',
 } };
 
 export default function LocaleProvider({ children }: { children: ReactNode }) {

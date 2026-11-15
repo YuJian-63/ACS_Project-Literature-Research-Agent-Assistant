@@ -199,7 +199,7 @@ export default function SearchPapersPage() {
 
   return <>
     <PageHeader title={t("搜索论文")} description={t("从 arXiv 发现文献，将指定版本保存为可追溯的研究资料。")} action={<Link to="/papers"><Button>{t("返回论文库")}</Button></Link>} />
-    <section className="content-panel search-panel">
+    <div className="search-layout"><section className="content-panel search-panel">
       <form className="arxiv-search-form" onSubmit={submit}>
         <label htmlFor="arxiv-keywords">{t("arXiv 关键词")}</label>
         <div><Input id="arxiv-keywords" value={draft} maxLength={200} placeholder={t("例如：attention transformer")} onChange={(event) => setDraft(event.target.value)} /><Button type="primary" htmlType="submit" icon={<SearchOutlined />} disabled={!draft.trim() || searchSeconds > 0}>{t("搜索")}</Button></div>
@@ -242,6 +242,6 @@ export default function SearchPapersPage() {
         return <li key={item.id}><div><strong>{item.external_id}</strong><span>{t("第 {0} 次尝试", [item.attempt])}</span>{item.error && <p role="status">{errorText(item.error)}</p>}{item.paper_status === 'failed' && <p>{t("文件已保存，但未能解析文本。请在论文库查看原因；重新下载不会重试解析。")}</p>}</div>{importActions(item)}</li>;
       })}</ul>
       {history && history.total > 20 && <PaginationBar total={history.total} page={historyPage} onChange={setHistoryPage} />}
-    </section>
+    </section></div>
   </>;
 }

@@ -4,7 +4,7 @@ from datetime import datetime
 from typing import Annotated, Literal
 from uuid import UUID
 
-from fastapi import APIRouter, Query, Request, Response
+from fastapi import Depends, APIRouter, Query, Request, Response
 from pydantic import Field, field_validator
 from sqlalchemy import func, select
 
@@ -13,6 +13,11 @@ from app.db.models import PaperImport
 from app.errors import APIError
 from app.sources.imports import get_import, import_view, retry_import, submit_import
 from app.api.schemas import Error, ErrorResponse, Page, PaperSourceResponse, PaperStatus, StrictModel
+
+from app.auth.dependencies import require_user
+from app.db.models import User
+
+CurrentUser = Annotated[User, Depends(require_user)]
 
 logger = logging.getLogger(__name__)
 router = APIRouter(responses={status: {"model": ErrorResponse} for status in [404, 409, 422, 429, 502, 503, 504]})
@@ -65,7 +70,7 @@ def accepted(response: Response, item: dict) -> dict:
 
 @router.get("/api/v1/paper-search", response_model=Page[SearchPaper])
 def search_papers(
-    request: Request, q: Annotated[str, Query(min_length=1, max_length=200)],
+    request: Request, user: CurrentUser, q: Annotated[str, Query(min_length=1, max_length=200)],
     limit: Annotated[int, Query(ge=1, le=20)] = 10, offset: Annotated[int, Query(ge=0, le=1000)] = 0,
 ) -> dict:
     try:
@@ -87,7 +92,7 @@ def search_papers(
         cache.put(normalized, limit, offset, page)
     with request.app.state.sessions() as session:
         identities = [paper.external_id for paper in page.items]
-        imports = {item.external_id: item for item in session.scalars(select(PaperImport).where(PaperImport.provider == "arxiv", PaperImport.external_id.in_(identities)))}
+        imports = {item.external_id: item for item in session.scalars(select(PaperImport).where(PaperImport.user_id == user.id, PaperImport.provider == "arxiv", PaperImport.external_id.in_(identities)))}
         items = []
         for paper in page.items:
             item = imports.get(paper.external_id)
@@ -99,17 +104,19 @@ def search_papers(
 
 
 @router.post("/api/v1/paper-imports", response_model=ImportResponse)
-def create_import(request: Request, body: ImportCreate, response: Response) -> dict:
+def create_import(request: Request, body: ImportCreate, response: Response, user: CurrentUser) -> dict:
     require_arxiv(request)
-    return accepted(response, submit_import(request.app.state.sessions, body.provider, body.external_id))
+    return accepted(response, submit_import(request.app.state.sessions, body.provider, body.external_id, user_id=user.id, settings=request.app.state.settings))
 
 
 @router.get("/api/v1/paper-imports", response_model=Page[ImportResponse])
 def list_imports(
-    request: Request, limit: Annotated[int, Query(ge=1, le=100)] = 20,
+    request: Request, user: CurrentUser, limit: Annotated[int, Query(ge=1, le=100)] = 20,
     offset: Annotated[int, Query(ge=0)] = 0, status: ImportStatus | None = None,
 ) -> dict:
-    conditions = [PaperImport.status == status] if status is not None else []
+    conditions = [PaperImport.user_id == user.id]
+    if status is not None:
+        conditions.append(PaperImport.status == status)
     with request.app.state.sessions() as session:
         total = session.scalar(select(func.count()).select_from(PaperImport).where(*conditions))
         records = session.scalars(select(PaperImport).where(*conditions).order_by(PaperImport.created_at.desc(), PaperImport.id.desc()).offset(offset).limit(limit))
@@ -117,11 +124,11 @@ def list_imports(
 
 
 @router.get("/api/v1/paper-imports/{import_id}", response_model=ImportResponse)
-def import_detail(request: Request, import_id: UUID) -> dict:
-    return get_import(request.app.state.sessions, import_id)
+def import_detail(request: Request, import_id: UUID, user: CurrentUser) -> dict:
+    return get_import(request.app.state.sessions, import_id, user_id=user.id)
 
 
 @router.post("/api/v1/paper-imports/{import_id}/retry", response_model=ImportResponse)
-def retry(request: Request, import_id: UUID, body: ImportRetry, response: Response) -> dict:
+def retry(request: Request, import_id: UUID, body: ImportRetry, response: Response, user: CurrentUser) -> dict:
     require_arxiv(request)
-    return accepted(response, retry_import(request.app.state.sessions, import_id, body.expected_attempt))
+    return accepted(response, retry_import(request.app.state.sessions, import_id, body.expected_attempt, user_id=user.id, settings=request.app.state.settings))

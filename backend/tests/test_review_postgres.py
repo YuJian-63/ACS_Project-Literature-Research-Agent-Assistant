@@ -13,7 +13,7 @@ from sqlalchemy.orm import sessionmaker
 
 from app.api.schemas import TaskCreate
 from app.api.views import task_view
-from app.db.models import Artifact, Citation, Paper, PaperChunk, Task
+from app.db.models import Artifact, Citation, Paper, PaperChunk, Task, User
 from app.research.model_client import ModelCompletion
 from app.research.review_protocol import validate_analysis
 from app.research.review_store import ReviewOwnershipLost, ReviewStore
@@ -32,18 +32,14 @@ class ReviewPostgresTests(unittest.TestCase):
     def setUpClass(cls):
         from sqlalchemy.engine import make_url
         target = make_url(TEST_URL)
-        if target.host != "127.0.0.1" or target.database != "review_tests" or target.port != 55433:
-            raise RuntimeError("Refused: this suite requires the isolated review_tests database on port 55433")
+        if target.host != "127.0.0.1" or target.database != "review_tests" or target.port not in {55432, 55433}:
+            raise RuntimeError("Refused: this suite requires the isolated review_tests database on port 55432 or 55433")
         cls.engine = create_engine(TEST_URL)
         cls.sessions = sessionmaker(cls.engine, expire_on_commit=False)
         config = Config(str(Path(__file__).resolve().parents[1] / "alembic.ini"))
         with cls.engine.connect() as connection:
             config.attributes["connection"] = connection
             command.upgrade(config, "head")
-            if connection.scalar(text("SELECT count(*) FROM tasks")) == 0:
-                connection.commit()
-                command.downgrade(config, "20261112_0002")
-                command.upgrade(config, "head")
             command.check(config)
 
     @classmethod
@@ -51,11 +47,17 @@ class ReviewPostgresTests(unittest.TestCase):
         cls.engine.dispose()
 
     def setUp(self):
+        from datetime import datetime, timezone
+        self.user_id = uuid4()
+        with self.sessions.begin() as session:
+            session.add(User(id=self.user_id, username=self.user_id.hex, username_key=self.user_id.hex,
+                email=f"{self.user_id}@example.com", email_key=f"{self.user_id}@example.com",
+                password_hash="fixture", status="active", email_verified_at=datetime.now(timezone.utc)))
         self.paper_ids = []
         self.task_ids = []
         self.settings = settings(task_runner="langgraph", real_runner_configured=True, llm_base_url="https://fixture.invalid",
             llm_model_id="fixture", llm_api_key=None, llm_thinking_mode="disabled", llm_timeout_seconds=60,
-            evidence_context_chars=24000, mock_step_delay_seconds=0)
+            evidence_context_chars=24000, mock_step_delay_seconds=0, user_active_tasks=100, user_daily_tasks=1000)
 
     def tearDown(self):
         with self.sessions.begin() as session:
@@ -63,20 +65,21 @@ class ReviewPostgresTests(unittest.TestCase):
             session.execute(delete(Artifact).where(Artifact.task_id.in_(self.task_ids)))
             session.execute(delete(Task).where(Task.id.in_(self.task_ids)))
             session.execute(delete(Paper).where(Paper.id.in_(self.paper_ids)))
+            session.execute(delete(User).where(User.id == self.user_id))
 
     def submit(self, count=2, budget=None, key=None):
         with self.sessions.begin() as session:
             for index in range(count):
                 identity = uuid4()
                 self.paper_ids.append(identity)
-                session.add(Paper(id=identity, title=f"Rust agent paper {index}", original_filename="fixture.pdf", storage_key=f"uploads/{identity}.pdf",
+                session.add(Paper(id=identity, user_id=self.user_id, title=f"Rust agent paper {index}", original_filename="fixture.pdf", storage_key=f"uploads/{identity}.pdf",
                     size_bytes=100, sha256="a" * 64, status="ready", page_count=2, parser_version="fixture"))
                 session.flush()
                 session.add(PaperChunk(id=uuid4(), paper_id=identity, chunk_index=0, page_number=1,
                     content="Agents evaluate repository issue resolution methods and limitations.", content_sha256="b" * 64, parser_version="fixture"))
         request = TaskCreate(task_type="review", question="Compare methods", paper_ids=self.paper_ids,
                              **({"budget": budget} if budget else {}))
-        accepted, unused = submit_task(self.sessions, self.settings, request, key)
+        accepted, unused = submit_task(self.sessions, self.settings, request, key, user_id=self.user_id)
         identity = UUID(accepted["id"]) if isinstance(accepted["id"], str) else accepted["id"]
         self.task_ids.append(identity)
         return identity, request
@@ -97,11 +100,11 @@ class ReviewPostgresTests(unittest.TestCase):
         with self.sessions() as session:
             task = session.get(Task, identity)
             key = task.idempotency_key
-            self.assertEqual(task.workflow_version, "langgraph-review-v2")
+            self.assertEqual(task.workflow_version, "langgraph-search-v1")
             self.assertGreater(task.max_steps, 6)
             self.assertGreater(task.max_tokens, 8000)
         request.budget.max_tokens = 100000
-        accepted, replayed = submit_task(self.sessions, self.settings, request, key)
+        accepted, replayed = submit_task(self.sessions, self.settings, request, key, user_id=self.user_id)
         self.assertTrue(replayed)
         self.assertEqual(accepted["id"], identity)
 
@@ -210,10 +213,11 @@ class ReviewPostgresTests(unittest.TestCase):
         with self.sessions.begin() as session:
             task = session.get(Task, identity)
             task.workflow_version = "langgraph-review-v1"
+            task.run_config = {name: value for name, value in task.run_config.items() if name != "budget_mode"}
             task.request_hash = request_hash(request)
             key = task.idempotency_key
         self.settings.real_runner_configured = False
-        accepted, replayed = submit_task(self.sessions, self.settings, request, key)
+        accepted, replayed = submit_task(self.sessions, self.settings, request, key, user_id=self.user_id)
         self.assertTrue(replayed)
         self.assertEqual(accepted["id"], identity)
 

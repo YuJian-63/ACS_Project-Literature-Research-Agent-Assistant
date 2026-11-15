@@ -1,27 +1,68 @@
 import { t, useLocale } from '../i18n';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
+import { BookOutlined } from '@ant-design/icons';
 import { MockTag } from './Common';
-import type { Artifact } from '../api/types';
-import { paperFileUrl } from '../api/client';
+import ComparisonView from './ComparisonView';
+import EvidencePanel from './EvidencePanel';
+import type { Artifact, Paper } from '../api/types';
+import { citationLinks } from '../lib/citationLinks';
+import { useCompactViewport } from '../hooks/useCompactViewport';
 
-export default function ArtifactView({ artifact }: { artifact: Artifact }) {
+export default function ArtifactView({ artifact, papers = [], view = 'read' }: { artifact: Artifact; papers?: Paper[]; view?: 'read' | 'compare' }) {
   useLocale();
-  const comparison = artifact.comparison_table;
-  return <article className="artifact" aria-label={t("研究结果")}>
-    <div className="artifact-heading"><h2>{t(artifact.title)}</h2>{artifact.is_mock && <MockTag />}</div>
-    <div className="markdown"><ReactMarkdown remarkPlugins={[remarkGfm]} skipHtml components={{
-      img: () => null,
-      a: ({ href, children }) => {
-        if (!href) return <span>{children}</span>;
-        try {
-          const destination = new URL(href, window.location.origin);
-          if (!['http:', 'https:'].includes(destination.protocol)) return <span>{children}</span>;
-        } catch { return <span>{children}</span>; }
-        return <a href={href} target="_blank" rel="noopener noreferrer">{children}</a>;
-      },
-    }}>{artifact.content_markdown}</ReactMarkdown></div>
-    {comparison && <section className="comparison-section"><h3>{t("跨论文比较")}</h3><div className="comparison-scroll"><table><thead><tr><th>{t("论文")}</th>{comparison.columns.map((column) => <th key={column.key}>{column.label}</th>)}</tr></thead><tbody>{comparison.rows.map((row) => <tr key={row.paper_id}><td><a href={paperFileUrl(row.paper_id)} target="_blank" rel="noopener noreferrer">{row.paper_id.slice(0, 8)}</a></td>{comparison.columns.map((column) => <td key={column.key}>{row.cells[column.key]?.value ?? <span className="muted">{t("未报告")}</span>}{row.cells[column.key]?.citation_keys.map((key) => <a key={key} href={`#citation-${key}`} className="citation-mark">[{key}]</a>)}</td>)}</tr>)}</tbody></table></div></section>}
-    <section className="citations-section"><h3>{t("支持证据")} <span>{artifact.citations.length}</span></h3>{artifact.citations.length ? artifact.citations.map((citation) => <div id={`citation-${citation.citation_key}`} className="citation" key={citation.id}><a href={paperFileUrl(citation.paper_id, citation.page_number)} target="_blank" rel="noopener noreferrer">{t("[{0}] {1} · 第 {2} 页 · 查看原文", [citation.citation_key, citation.paper_title, citation.page_number])}</a><blockquote>{citation.quote}</blockquote></div>) : <p className="muted">{artifact.is_mock ? t("模拟结果不提供引用，也不代表论文结论。") : t("此结果没有可展示的来源引用。")}</p>}</section>
+  const compact = useCompactViewport();
+  const [selectedKey, setSelectedKey] = useState(artifact.citations[0]?.citation_key);
+  const [open, setOpen] = useState(false);
+  const [evidenceTab, setEvidenceTab] = useState('current');
+  const [outline, setOutline] = useState<{ id: string; title: string }[]>([]);
+  const manuscript = useRef<HTMLDivElement>(null);
+  const lastTrigger = useRef<HTMLElement | null>(null);
+  const keys = useMemo(() => artifact.citations.map((citation) => citation.citation_key), [artifact.citations]);
+  const plugins = useMemo(() => [remarkGfm, [citationLinks, { keys }]] as Parameters<typeof ReactMarkdown>[0]['remarkPlugins'], [keys]);
+  useEffect(() => { if (!compact) setOpen(false); }, [compact]);
+  useEffect(() => {
+    if (view !== 'read' || !manuscript.current) return;
+    setOutline([...manuscript.current.querySelectorAll('h1, h2, h3')].map((heading, index) => {
+      const id = 'section-' + artifact.id + '-' + index;
+      heading.id = id;
+      return { id, title: heading.textContent ?? '' };
+    }));
+  }, [artifact.id, artifact.content_markdown, view]);
+  const select = useCallback((key: string, trigger?: HTMLElement) => {
+    setSelectedKey(key);
+    setEvidenceTab('current');
+    if (trigger) lastTrigger.current = trigger;
+    if (compact) setOpen(true);
+  }, [compact]);
+  const markdownComponents = useMemo<Parameters<typeof ReactMarkdown>[0]['components']>(() => ({
+          img: () => null,
+          a: ({ href, children }) => {
+            if (!href) return <span>{children}</span>;
+            const key = /^#citation-(C[1-9][0-9]*)$/.exec(href)?.[1];
+            if (key && keys.includes(key)) return <button className="citation-trigger" aria-label={t('查看引用 {0}', [key])} onClick={(event) => select(key, event.currentTarget)}>{children}</button>;
+            try {
+              const destination = new URL(href, window.location.origin);
+              if (!['http:', 'https:'].includes(destination.protocol)) return <span>{children}</span>;
+            } catch { return <span>{children}</span>; }
+            return <a href={href} target="_blank" rel="noopener noreferrer">{children}</a>;
+          },
+        }), [keys, select]);
+  function returnToCitation() {
+    setOpen(false);
+    const trigger = lastTrigger.current;
+    if (trigger?.isConnected) { trigger.scrollIntoView({ block: 'center', behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'instant' : 'smooth' }); trigger.focus(); }
+  }
+  return <article className="artifact" aria-label={t('研究结果')}>
+    {artifact.is_mock && <div className="artifact-heading"><MockTag /><p>{t('模拟结果不提供引用，也不代表论文结论。')}</p></div>}
+    <div className="artifact-layout"><div className="artifact-main">
+      {view === 'compare' && artifact.comparison_table ? <ComparisonView comparison={artifact.comparison_table} papers={papers} citations={artifact.citations} onSelect={select} /> : <>
+        {outline.length > 0 && <nav className="result-outline" aria-label={t('正文目录')}><span>{t('本页内容')}</span>{outline.map((heading) => <a key={heading.id} href={'#' + heading.id}>{heading.title}</a>)}</nav>}
+        <div className="markdown" ref={manuscript}><ReactMarkdown remarkPlugins={plugins} skipHtml components={markdownComponents}>{artifact.content_markdown}</ReactMarkdown></div>
+        <div className="manuscript-footer"><BookOutlined /><span>{t('研究结论需要真实来源与证据支持')}</span></div>
+      </>}
+      {compact && <button className="mobile-evidence-button" onClick={(event) => { lastTrigger.current = event.currentTarget; setEvidenceTab('current'); setOpen(true); }}><BookOutlined />{t('证据与来源')}<span>{artifact.citations.length}</span></button>}
+    </div><EvidencePanel citations={artifact.citations} papers={papers} selectedKey={selectedKey} tab={evidenceTab} onTabChange={setEvidenceTab} open={open} onClose={() => setOpen(false)} onSelect={select} onReturn={returnToCitation} /></div>
   </article>;
 }

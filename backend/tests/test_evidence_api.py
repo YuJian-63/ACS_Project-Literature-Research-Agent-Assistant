@@ -3,6 +3,7 @@
 import hashlib
 import unittest
 from datetime import datetime, timezone
+from types import SimpleNamespace
 from uuid import uuid4
 
 from fastapi.testclient import TestClient
@@ -12,6 +13,7 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from app.config import Settings
+from app.auth.dependencies import require_user
 from app.db.base import Base
 from app.db.models import Paper, PaperChunk
 from app.main import create_app
@@ -29,9 +31,10 @@ class EvidenceAPITests(unittest.TestCase):
         metadata.create_all(self.engine)
         self.sessions = sessionmaker(self.engine)
         self.paper_id = uuid4()
+        self.user_id = uuid4()
         now = datetime.now(timezone.utc)
         with self.sessions.begin() as session:
-            session.add(Paper(id=self.paper_id, title="Fixture", original_filename="fixture.pdf",
+            session.add(Paper(id=self.paper_id, user_id=self.user_id, title="Fixture", original_filename="fixture.pdf",
                               storage_key=f"uploads/{self.paper_id}.pdf", content_type="application/pdf",
                               size_bytes=100, sha256="a" * 64, status="ready", page_count=104,
                               parser_version="fixture-v1", created_at=now, updated_at=now))
@@ -42,9 +45,10 @@ class EvidenceAPITests(unittest.TestCase):
                                        content_sha256=hashlib.sha256(content.encode()).hexdigest(),
                                        parser_version="fixture-v1", created_at=now))
         settings = Settings(database_url="postgresql+psycopg://fixture:fixture@127.0.0.1/fixture",
-                            task_monitor_enabled=False)
+                            task_monitor_enabled=False, auth_rate_key="r" * 32, auth_csrf_key="c" * 32)
         self.app = create_app(settings)
         self.app.state.sessions = self.sessions
+        self.app.dependency_overrides[require_user] = lambda: SimpleNamespace(id=self.user_id)
         # No lifespan: no real database engine, monitor, network client or migration runs.
         self.client = TestClient(self.app)
         self.path = f"/api/v1/papers/{self.paper_id}/evidence"
@@ -74,6 +78,22 @@ class EvidenceAPITests(unittest.TestCase):
         self.assertEqual([item["chunk_index"] for item in tail["items"]], [100, 101, 102, 103])
         self.assertFalse(tail["has_more"])
         self.assertEqual(tail["next_after_index"], 103)
+
+    def test_anonymous_access_is_rejected(self):
+        self.app.dependency_overrides.clear()
+        response = self.client.get(self.path)
+        self.assertEqual(response.status_code, 401)
+
+    def test_other_users_paper_is_hidden_even_when_not_ready(self):
+        self.app.dependency_overrides[require_user] = lambda: SimpleNamespace(id=uuid4())
+        for status in ("ready", "processing", "failed"):
+            with self.subTest(status=status):
+                with self.sessions.begin() as session:
+                    session.get(Paper, self.paper_id).status = status
+                response = self.client.get(self.path)
+                self.assertEqual(response.status_code, 404)
+                self.assertEqual(response.json()["error"]["code"], "PAPER_NOT_FOUND")
+                self.assertNotIn("items", response.json())
 
     def test_small_page_and_empty_page(self):
         page = self.client.get(self.path, params={"after_index": -1, "limit": 1}).json()
