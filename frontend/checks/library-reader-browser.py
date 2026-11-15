@@ -53,7 +53,7 @@ def main():
             const originalRevoke = URL.revokeObjectURL.bind(URL);
             URL.revokeObjectURL = (url) => { window.revokedDocuments.push(url); originalRevoke(url); };
         """)
-        state = {'failure': False, 'invalid': False, 'hold': False, 'expired': False, 'paged': False}
+        state = {'failure': False, 'invalid': False, 'hold': False, 'expired': False, 'paged': False, 'details_failure': False}
         files, held, errors, external = [], [], [], []
 
         def api(route):
@@ -69,6 +69,14 @@ def main():
                 dataset = PAPERS + ([{**PAPERS[0], 'id': 'extra-' + str(index), 'title': 'Additional research paper ' + str(index)} for index in range(20)] if state['paged'] else [])
                 papers = [paper for paper in dataset if query.lower() in paper['title'].lower()]
                 return route.fulfill(json={'items': papers[offset:offset + 20], 'total': len(papers), 'limit': 20, 'offset': offset})
+            if parsed.path.startswith('/api/v1/papers/') and not parsed.path.endswith('/file'):
+                if state['details_failure']:
+                    return route.fulfill(status=503, json={'error': {'code': 'PAPER_UNAVAILABLE', 'message': 'Paper details unavailable', 'details': {}}})
+                known = PAPERS + [{**PAPERS[0], 'id': 'extra-' + str(index), 'title': 'Additional research paper ' + str(index)} for index in range(20)]
+                paper = next((paper for paper in known if parsed.path.endswith('/' + paper['id'])), None)
+                if paper is None:
+                    return route.fulfill(status=404, json={'error': {'code': 'PAPER_NOT_FOUND', 'message': 'Paper not found', 'details': {}}})
+                return route.fulfill(json=paper)
             if parsed.path.endswith('/file'):
                 files.append(parsed.path)
                 if state['expired']:
@@ -92,6 +100,42 @@ def main():
         page = context.new_page()
         page.set_default_timeout(5000)
         page.on('pageerror', lambda error: errors.append(str(error)))
+        page.goto(BASE + '/tasks/new')
+        paper_link = page.get_by_role('link', name=PAPERS[0]['title'], exact=True)
+        expect(paper_link).to_have_attribute('href', '/papers?paper_id=' + PAPERS[0]['id'])
+        assert paper_link.get_attribute('target') is None
+        paper_link.click()
+        reader = page.locator('.paper-reader')
+        expect(reader.locator('iframe')).to_have_attribute('src', re.compile('^blob:'))
+        expect(reader.get_by_role('heading', name=PAPERS[0]['title'], exact=True)).to_be_visible()
+        assert len(context.pages) == 1
+        page.reload()
+        expect(reader.locator('iframe')).to_be_visible()
+        expect(reader.get_by_role('heading', name=PAPERS[0]['title'], exact=True)).to_be_visible()
+        page.go_back()
+        expect(page).to_have_url(BASE + '/tasks/new')
+        expect(page.get_by_role('heading', name='Select research sources', exact=True)).to_be_visible()
+        page.goto(BASE + '/papers?paper_id=extra-19')
+        expect(reader.get_by_role('heading', name='Additional research paper 19', exact=True)).to_be_visible()
+        expect(reader.locator('iframe')).to_be_visible()
+        assert page.get_by_role('button', name='Read Additional research paper 19', exact=True).count() == 0
+        reader.get_by_role('button', name='Close reader', exact=True).click()
+        expect(page).to_have_url(BASE + '/papers')
+        page.reload()
+        expect(page.get_by_role('heading', name='My papers', exact=True)).to_be_visible()
+        expect(reader).to_have_count(0)
+        state['details_failure'] = True
+        page.goto(BASE + '/papers?paper_id=paper-1')
+        expect(page.get_by_text('Paper details unavailable', exact=True)).to_be_visible()
+        state['details_failure'] = False
+        page.get_by_role('button', name='Try again', exact=True).click()
+        expect(reader.locator('iframe')).to_be_visible()
+        page.goto(BASE + '/papers?paper_id=missing-paper')
+        expect(page.get_by_text('Paper not found', exact=True)).to_be_visible()
+        expect(reader).to_have_count(0)
+        page.get_by_role('button', name='Back to library', exact=True).click()
+        expect(page).to_have_url(BASE + '/papers')
+        files.clear()
         page.goto(BASE + '/papers')
         expect(page.get_by_role('heading', name='My papers', exact=True)).to_be_visible()
         assert not files, 'Library browsing must not download PDFs'
@@ -200,7 +244,7 @@ def main():
         assert not errors, errors
         assert not external, external
         browser.close()
-        print('PASS: inline PDFs, switching, query/page/selection preservation, focus, URL cleanup, stale responses, retry, invalid files, session expiry and bilingual 320-1440px layouts; mocked APIs only.')
+        print('PASS: new-task reader links, refresh/history, off-page papers, metadata retry/missing papers, inline PDFs, switching, query/page/selection preservation, focus, URL cleanup, stale responses, retry, invalid files, session expiry and bilingual 320-1440px layouts; mocked APIs only.')
 
 
 if __name__ == '__main__':
