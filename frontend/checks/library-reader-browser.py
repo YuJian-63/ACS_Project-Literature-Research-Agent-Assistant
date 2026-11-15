@@ -115,6 +115,38 @@ def main():
         page.go_back()
         expect(page).to_have_url(BASE + '/tasks/new')
         expect(page.get_by_role('heading', name='Select research sources', exact=True)).to_be_visible()
+        state['paged'] = True
+        page.reload()
+        page.get_by_role('checkbox', name='Select paper ' + PAPERS[0]['title'], exact=True).check()
+        page.locator('.paper-picker .ant-pagination-item-2').click()
+        page.get_by_role('checkbox', name='Select paper Additional research paper 19', exact=True).check()
+        page.locator('.paper-picker .ant-pagination-item-1').click()
+        page.get_by_role('link', name=PAPERS[1]['title'], exact=True).click()
+        expect(reader.get_by_role('heading', name=PAPERS[1]['title'], exact=True)).to_be_visible()
+        expect(page.get_by_role('checkbox', name='Select paper ' + PAPERS[0]['title'], exact=True)).to_be_checked()
+        expect(page.get_by_role('checkbox', name='Select paper ' + PAPERS[1]['title'], exact=True)).not_to_be_checked()
+        expect(page.locator('.selection-notice strong')).to_have_text('2')
+        page.locator('.library-panel .ant-pagination-item-2').click()
+        expect(page.get_by_role('checkbox', name='Select paper Additional research paper 19', exact=True)).to_be_checked()
+        page.get_by_role('button', name='Read Additional research paper 19', exact=True).click()
+        expect(reader.get_by_role('heading', name='Additional research paper 19', exact=True)).to_be_visible()
+        page.reload()
+        expect(reader.locator('iframe')).to_be_visible()
+        expect(page.locator('.selection-notice strong')).to_have_text('2')
+        expect(page.get_by_role('checkbox', name='Select paper ' + PAPERS[0]['title'], exact=True)).to_be_checked()
+        page.get_by_role('checkbox', name='Select paper ' + PAPERS[0]['title'], exact=True).click()
+        expect(page.get_by_role('checkbox', name='Select paper ' + PAPERS[0]['title'], exact=True)).not_to_be_checked()
+        page.reload()
+        expect(reader.locator('iframe')).to_be_visible()
+        expect(page.locator('.selection-notice strong')).to_have_text('1')
+        expect(page.get_by_role('checkbox', name='Select paper ' + PAPERS[0]['title'], exact=True)).not_to_be_checked()
+        reader.get_by_role('button', name='Close reader', exact=True).click()
+        expect(page.locator('.selection-notice strong')).to_have_text('1')
+        page.locator('.page-actions a').click()
+        expect(page.locator('.selected-papers')).to_contain_text('Additional research paper 19')
+        page.locator('.paper-picker .ant-pagination-item-2').click()
+        expect(page.get_by_role('checkbox', name='Select paper Additional research paper 19', exact=True)).to_be_checked()
+        state['paged'] = False
         page.goto(BASE + '/papers?paper_id=extra-19')
         expect(reader.get_by_role('heading', name='Additional research paper 19', exact=True)).to_be_visible()
         expect(reader.locator('iframe')).to_be_visible()
@@ -139,7 +171,8 @@ def main():
         page.goto(BASE + '/papers')
         expect(page.get_by_role('heading', name='My papers', exact=True)).to_be_visible()
         assert not files, 'Library browsing must not download PDFs'
-        page.get_by_role('checkbox', name='Select paper ' + PAPERS[0]['title'], exact=True).check()
+        page.get_by_role('checkbox', name='Select paper ' + PAPERS[0]['title'], exact=True).click()
+        expect(page.get_by_role('checkbox', name='Select paper ' + PAPERS[0]['title'], exact=True)).to_be_checked()
         page.get_by_role('button', name=PAPERS[0]['title'], exact=True).click()
         reader = page.locator('.paper-reader')
         expect(reader).to_be_visible()
@@ -244,7 +277,7 @@ def main():
         assert not errors, errors
         assert not external, external
         browser.close()
-        print('PASS: new-task reader links, refresh/history, off-page papers, metadata retry/missing papers, inline PDFs, switching, query/page/selection preservation, focus, URL cleanup, stale responses, retry, invalid files, session expiry and bilingual 320-1440px layouts; mocked APIs only.')
+        print('PASS: new-task reader links, cross-route/cross-page selections, refresh and deselection, returning to research creation, refresh/history, off-page papers, metadata retry/missing papers, inline PDFs, switching, query/page/selection preservation, focus, URL cleanup, stale responses, retry, invalid files, session expiry and bilingual 320-1440px layouts; mocked APIs only.')
 
 
 if __name__ == '__main__':
