@@ -2,6 +2,49 @@
 
 React + TypeScript + Vite 单页应用，使用 Ant Design、Axios、React Router 和 React Markdown，对接 `../docs/api-contract.md`。工作台通过已验证邮箱的用户名/密码账号访问，包含个人论文库、PDF 上传/解析状态、新建任务、任务列表和详情；后端默认 Mock，也可通过服务端配置启用真实摘要、问答及跨论文综述 Runner。
 
+## 代码目录
+
+前端按业务模块组织，页面、专用组件和业务逻辑就近存放：
+
+~~~text
+src/
+├── main.tsx                     # 启动入口与 Provider 装配
+├── app/                         # 顶层路由、工作台布局与全局样式
+│   ├── App.tsx
+│   └── styles.css
+├── api/                         # HTTP 客户端、接口类型、账号 API 与会话请求控制
+├── features/
+│   ├── auth/                    # 登录、注册、密码恢复与会话上下文
+│   │   ├── AuthProvider.tsx
+│   │   ├── components/          # 账号布局、访问门禁、账号菜单及对应样式
+│   │   ├── pages/               # AuthPage
+│   │   └── lib/                 # 邮件链接和安全返回地址处理
+│   ├── papers/                  # 论文库与 PDF 阅读
+│   │   ├── components/          # 论文表格、选择、上传、阅读器及对应样式
+│   │   ├── pages/               # PapersPage
+│   │   └── lib/                 # 论文选择规则和 PDF 上传校验
+│   ├── search/                  # arXiv 搜索与导入入口
+│   │   ├── components/          # 摘要展开与收起
+│   │   └── pages/               # SearchPapersPage
+│   └── research/                # 摘要、问答、跨论文综述
+│       ├── components/          # 研究正文、比较表、证据面板与覆盖提示
+│       ├── pages/               # 新建任务、任务列表和任务详情
+│       ├── hooks/               # 任务状态与事件轮询
+│       └── lib/                 # 提交规范化、幂等签名与 Markdown 引用处理
+├── shared/
+│   ├── components/              # 页头、错误提示、状态、分页及语言切换
+│   ├── hooks/                   # 通用资源请求、响应式视口订阅
+│   └── lib/                     # 格式化与论文阅读导航参数
+├── i18n/                        # 中英文词条、语言状态与诊断翻译
+└── assets/                      # 本地字体和许可证
+~~~
+
+新增功能优先放入对应 features 模块；只有跨模块复用的组件、Hook 和工具才放入 shared。共享层不依赖业务页面，API 层不导入业务组件。论文上传校验与论文选择规则属于 papers，研究提交逻辑属于 research。单个共享组件使用独立文件并直接导入，避免重新堆入 Common.tsx 或统一导出所有业务模块。
+
+组件专用样式与组件放在一起，全局主题、字体和工作台样式位于 app/styles.css。路由仍使用按页面懒加载；目录调整不修改页面 URL、接口路径、存储键或查询参数。
+
+checks/ 保留稳定的脚本入口：search-browser.py 检查论文搜索体验，retrieval-browser.py 检查检索证据提示，library-reader-browser.py 和 evidence-reader-browser.py 检查 PDF 阅读与任务引用往返，auth-browser.py 检查账号流程，review.mjs 检查提交规范与诊断翻译。运行方式见本文验收说明。
+
 ## 1. 本地启动
 
 需要 Node.js `^20.19.0 || >=22.12.0` 和 npm。先按 `../backend/README.md` 启动 PostgreSQL、完成迁移，并在两个终端分别运行 API 和 Worker。然后在项目根目录新开终端：

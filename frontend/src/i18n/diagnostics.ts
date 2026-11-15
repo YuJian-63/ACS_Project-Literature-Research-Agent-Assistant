@@ -1,6 +1,6 @@
 import { english } from './messages';
 import { getLocale, t } from './store';
-import { stageLabels } from '../lib/format';
+import { stageLabels } from '../shared/lib/format';
 import type { ResourceError, TaskEvent } from '../api/types';
 
 const errorMessages: Record<string, string> = {

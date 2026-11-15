@@ -3,11 +3,11 @@ import { createRoot } from 'react-dom/client';
 import { App as AntApp } from 'antd';
 import LocaleProvider from './i18n/LocaleProvider';
 import { BrowserRouter } from 'react-router-dom';
-import App, { AppErrorBoundary } from './App';
-import AuthProvider from './auth/AuthProvider';
-import { captureEmailLink } from './auth/links';
+import App, { AppErrorBoundary } from './app/App';
+import AuthProvider from './features/auth/AuthProvider';
+import { captureEmailLink } from './features/auth/lib/links';
 import 'antd/dist/reset.css';
-import './styles.css';
+import './app/styles.css';
 
 captureEmailLink();
 

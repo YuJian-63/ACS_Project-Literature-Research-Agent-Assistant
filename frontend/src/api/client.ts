@@ -1,5 +1,5 @@
 import axios, { type AxiosRequestConfig } from 'axios';
-import { sessionSnapshot, unauthorized } from '../auth/session';
+import { sessionSnapshot, unauthorized } from './session';
 import type { Artifact, EventPage, Page, Paper, PaperImport, PaperSearchParameters, PaperStatus, SearchPaper, Task, TaskAccepted, TaskCreate, TaskStatus, TaskSummary, TaskType } from './types';
 
 const baseURL = (import.meta.env.VITE_API_BASE_URL || '').replace(/\/$/, '');

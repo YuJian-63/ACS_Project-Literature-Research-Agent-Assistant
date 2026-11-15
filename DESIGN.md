@@ -50,7 +50,7 @@ Paper search abstracts show three lines by default with an accessible expand/col
 
 ## Language and states
 
-Account entry uses a shared AuthLayout for sign-in, registration, email verification, password recovery and AuthGate loading/error states. The desktop layout pairs a pale sage research introduction with a white form surface; at 760px and below, the form appears first and the introduction becomes compact. Keep the existing local fonts and green accent, visible field labels, keyboard focus and explicit retry actions. Authentication styles live in frontend/src/auth/auth.css. The paper illustration is decorative and contains no research results.
+Account entry uses a shared AuthLayout for sign-in, registration, email verification, password recovery and AuthGate loading/error states. The desktop layout pairs a pale sage research introduction with a white form surface; at 760px and below, the form appears first and the introduction becomes compact. Keep the existing local fonts and green accent, visible field labels, keyboard focus and explicit retry actions. Authentication styles live in frontend/src/features/auth/components/auth.css. The paper illustration is decorative and contains no research results.
 
 Use the existing locale provider and message catalog for interface text. Preserve the user's saved language choice. Switching interface language translates controls and known generic result titles; it does not translate saved research questions, paper titles, generated Markdown, quotations or comparison values.
 
