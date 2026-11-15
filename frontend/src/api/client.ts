@@ -1,6 +1,6 @@
 import axios, { type AxiosRequestConfig } from 'axios';
 import { sessionSnapshot, unauthorized } from '../auth/session';
-import type { Artifact, EventPage, Page, Paper, PaperImport, PaperStatus, SearchPaper, Task, TaskAccepted, TaskCreate, TaskStatus, TaskSummary, TaskType } from './types';
+import type { Artifact, EventPage, Page, Paper, PaperImport, PaperSearchParameters, PaperStatus, SearchPaper, Task, TaskAccepted, TaskCreate, TaskStatus, TaskSummary, TaskType } from './types';
 
 const baseURL = (import.meta.env.VITE_API_BASE_URL || '').replace(/\/$/, '');
 const client = axios.create({ baseURL, timeout: 30000, withCredentials: true });
@@ -82,7 +82,7 @@ export async function request<T>(configuration: AxiosRequestConfig, publicAuth =
 }
 
 export const api = {
-  searchPapers: (parameters: { q: string; limit: number; offset: number }, signal: AbortSignal) =>
+  searchPapers: (parameters: PaperSearchParameters, signal: AbortSignal) =>
     request<Page<SearchPaper>>({ url: '/api/v1/paper-search', params: parameters, signal }),
   imports: (parameters: { limit?: number; offset?: number }, signal: AbortSignal) =>
     request<Page<PaperImport>>({ url: '/api/v1/paper-imports', params: parameters, signal }),

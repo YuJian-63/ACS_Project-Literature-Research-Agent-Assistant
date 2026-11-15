@@ -39,11 +39,13 @@ ComparisonView uses the actual backend columns and rows. Resolve paper names fro
 
 ## Responsive behavior
 
-- Above 1190px: full sidebar and wider working area; search and import history share a row.
+- Above 1190px: full sidebar and wider working area. Above 1280px, paper search pairs a wide result column with a compact 224px import history; at 1280px and below history moves underneath.
 - At 1190px and below: narrower sidebar and tighter page spacing.
 - At 1000px and below: source evidence opens in a modal drawer; input papers remain available there. Closing returns keyboard focus to the citation or source button.
 - At 760px and below: navigation becomes horizontal, forms stack, and comparison uses a paper selector with dimensions listed vertically. Data-heavy library/history tables retain contained horizontal scrolling.
 - The application supports a minimum viewport width of 320px. Keep long titles and manuscript text wrapping inside their own regions.
+
+Paper search abstracts show three lines by default with an accessible expand/collapse control for longer text. Search supports relevance, publication date and update date sorting, numbered pages, a page jump, and 10/25/50 papers per page (default 10). The existing maximum start offset of 1000 allows up to 101/41/21 pages respectively. Changing size or sort returns to page one while preserving the other search settings. On a successful page change, scroll and focus the result heading; failed requests preserve the previous page, its size and ordering. Import history refresh must not move focus or scroll.
 
 ## Language and states
 

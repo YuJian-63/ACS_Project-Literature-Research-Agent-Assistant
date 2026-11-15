@@ -464,11 +464,13 @@ FastAPI 实现阶段从 Pydantic 生成 OpenAPI，并逐项核对本文，不同
 
 ### GET /api/v1/paper-search
 
-q 必填，规范化后 1—200 字符/最多 20 词，普通关键词而非原始高级语法。limit 默认 10/范围 1—20；offset 默认 0/范围 0—1000。不接受上游 URL/provider/排序。
+q 必填，规范化后 1—200 字符/最多 20 词，普通关键词而非原始高级语法。limit 默认 10/范围 1—50；offset 默认 0/范围 0—1000。不接受上游 URL/provider。
+
+排序参数：sort_by 为 relevance（相关度，默认）、submittedDate（首次发布时间）或 lastUpdatedDate（来源最后更新时间）；sort_order 为 descending（默认）或 ascending。排序由来源对完整检索结果执行，无效枚举返回 422。前端每页条数可选 10、25、50，默认 10；切换条数或排序时回到第一页并保留其他检索条件。页码跳转按实际每页条数计算 offset；在 offset≤1000 的边界下，三种条数分别最多浏览 101、41、21 页。请求失败时保留上一批结果及其真实页码、条数。
 
 200：`{items: SearchPaper[], total: number, limit: number, offset: number}`。SearchPaper 为 PaperSource 加可空 import_id/import_status/paper_id/paper_status。import_status 为 queued/running/succeeded/failed；paper_status 为既有 PaperStatus。total 是上游本次报告，不保证跨页快照。
 
-成功上游数据缓存 600 秒/每进程最多 100 页，本地导入/解析投影每次重查。无匹配返回空数组和 total=0；offset 越过结果末尾时 items=[]，但保留上游 total。上游错误不能伪装空结果。
+成功上游数据缓存 600 秒/每进程最多 100 页，缓存键包含规范化关键词、limit、offset、sort_by 和 sort_order；不同排序互不复用结果。本地导入/解析投影每次重查。无匹配返回空数组和 total=0；offset 越过结果末尾时 items=[]，但保留上游 total。上游错误不能伪装空结果。
 
 ### POST /api/v1/paper-imports
 

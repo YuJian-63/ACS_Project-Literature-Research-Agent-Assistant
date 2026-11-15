@@ -62,6 +62,14 @@ export interface SearchPaper extends PaperSource {
   paper_status: PaperStatus | null;
 }
 
+export interface PaperSearchParameters {
+  q: string;
+  limit: number;
+  offset: number;
+  sort_by?: 'relevance' | 'submittedDate' | 'lastUpdatedDate';
+  sort_order?: 'ascending' | 'descending';
+}
+
 export interface Page<T> {
   items: T[];
   total: number;

@@ -1558,8 +1558,8 @@ main {
 
 .search-layout {
   display: grid;
-  grid-template-columns: minmax(0,1fr) 300px;
-  gap: 32px;
+  grid-template-columns: minmax(0,1fr) 224px;
+  gap: 28px;
   align-items: start
 }
 
@@ -1571,7 +1571,7 @@ main {
 
 .search-layout>.import-history {
   border-left: 1px solid var(--line);
-  padding-left: 24px
+  padding-left: 20px
 }
 
 .arxiv-search-form>label {
@@ -1581,10 +1581,59 @@ main {
   margin-bottom: 12px
 }
 
-.arxiv-search-form>div {
+.search-input-row {
   display: flex;
   gap: 10px;
-  max-width: 760px
+  width: 100%
+}
+
+.search-input-row .ant-input,.search-input-row .ant-btn {
+  min-height: 44px
+}
+
+.search-options {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  padding-bottom: 20px;
+  border-bottom: 1px solid var(--line);
+  color: var(--muted);
+  font-size: 12px
+}
+
+.search-options select {
+  max-width: 100%;
+  min-height: 40px;
+  padding: 7px 30px 7px 12px;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  background: #f7faf8;
+  color: var(--ink);
+  font: inherit;
+  cursor: pointer
+}
+
+.search-option-field {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  max-width: 100%
+}
+
+.search-option-field+.search-option-field {
+  margin-inline-start: 14px
+}
+
+@media(max-width:600px) {
+  .search-option-field+.search-option-field {
+    margin-inline-start: 0
+  }
+}
+
+.search-options select:disabled {
+  opacity: .6;
+  cursor: wait
 }
 
 .arxiv-search-form>p,.search-intro p,.import-records p {
@@ -1635,12 +1684,21 @@ main {
   color: var(--muted)
 }
 
-.search-result-context {
-  margin: 0 0 17px;
+.search-result-context,.search-sort-context {
+  margin: 0 0 6px;
   color: var(--muted);
   font-size: 11px;
   line-height: 1.9;
   overflow-wrap: anywhere
+}
+
+.search-sort-context {
+  padding-bottom: 16px;
+  border-bottom: 1px solid var(--line)
+}
+
+#search-results-heading {
+  scroll-margin-top: 24px
 }
 
 .search-paper {
@@ -1657,24 +1715,104 @@ main {
 }
 
 .search-paper h3 {
-  font: 600 21px/1.7 var(--serif);
+  font: 600 21px/1.55 var(--serif);
   color: var(--ink);
   margin: 0 0 10px
 }
 
 .paper-authors {
-  font-size: 11px;
-  line-height: 1.9;
+  font-size: 12px;
+  line-height: 1.8;
   color: var(--muted)
 }
 
 .paper-abstract {
-  max-width: 75ch;
+  max-width: none;
   font-size: 14px;
-  line-height: 1.95;
+  line-height: 1.85;
   color: var(--ink);
   white-space: pre-line;
+  margin: 0;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+  overflow: hidden
+}
+
+.paper-abstract.is-expanded {
+  display: block;
+  -webkit-line-clamp: unset;
+  overflow: visible
+}
+
+.paper-abstract-block {
   margin: 16px 0
+}
+
+.abstract-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 36px;
+  margin-top: 4px;
+  padding: 3px 0;
+  border: 0;
+  background: transparent;
+  color: var(--accent);
+  font: 500 12px/1.5 var(--sans);
+  cursor: pointer
+}
+
+.abstract-toggle:hover {
+  text-decoration: underline;
+  text-underline-offset: 4px
+}
+
+.search-pagination {
+  padding-top: 24px
+}
+
+.search-pagination>p {
+  margin: 0 0 14px;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.8
+}
+
+.search-pagination>p>span {
+  display: block;
+  font-size: 11px
+}
+
+.search-pagination .ant-pagination {
+  display: flex;
+  flex-wrap: wrap;
+  row-gap: 12px
+}
+
+.search-pagination .ant-pagination .ant-pagination-options {
+  display: inline-block;
+  margin-inline-start: 0
+}
+
+.search-pagination .ant-pagination-options-quick-jumper input {
+  width: 54px
+}
+
+.import-history .import-records>li {
+  flex-direction: column;
+  align-items: flex-start
+}
+
+@media(max-width:1280px) {
+  .search-layout {
+    grid-template-columns: minmax(0,1fr)
+  }
+  .search-layout>.import-history {
+    border-left: 0;
+    border-top: 1px solid var(--line);
+    padding: 24px 0 0
+  }
 }
 
 .source-categories {
@@ -1709,7 +1847,7 @@ main {
 }
 
 .import-history .panel-heading {
-  align-items: start;
+  display: grid;
   gap: 10px
 }
 
@@ -1718,6 +1856,7 @@ main {
 }
 
 .import-history .panel-heading .ant-btn {
+  justify-self: start;
   font-size: 11px;
   padding-inline: 8px
 }
@@ -1851,11 +1990,11 @@ main {
   .evidence-panel,.activity-layout .stats-panel {
     padding-left: 19px
   }
-  .creation-layout,.search-layout {
+  .creation-layout {
     grid-template-columns: minmax(0,1fr) 250px;
     gap: 25px
   }
-  .creation-aside,.search-layout>.import-history {
+  .creation-aside {
     padding-left: 19px
   }
   .content-panel {

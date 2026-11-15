@@ -18,7 +18,7 @@ from urllib.parse import urlsplit
 import httpx
 
 from app.sources.arxiv import (
-    API_URL, ERROR_PHASES, MAX_METADATA_BYTES, MAX_PDF_BYTES, ArxivError, DownloadReceipt,
+    API_URL, ERROR_PHASES, MAX_METADATA_BYTES, MAX_PDF_BYTES, MAX_SEARCH_RESULTS, SEARCH_SORT_FIELDS, SEARCH_SORT_ORDERS, ArxivError, DownloadReceipt,
     ProviderReply, invalid_response, normalize_arxiv_id, validate_pdf_url,
 )
 
@@ -54,8 +54,8 @@ def validate_request(url: str, params: dict | None, destination: Path | None) ->
             set(params) == {"search_query", "start", "max_results", "sortBy", "sortOrder"}
             and isinstance(params["search_query"], str) and 1 <= len(params["search_query"]) <= 1000
             and type(params["start"]) is int and 0 <= params["start"] <= 1000
-            and type(params["max_results"]) is int and 1 <= params["max_results"] <= 20
-            and params["sortBy"] == "relevance" and params["sortOrder"] == "descending"
+            and type(params["max_results"]) is int and 1 <= params["max_results"] <= MAX_SEARCH_RESULTS
+            and params["sortBy"] in SEARCH_SORT_FIELDS and params["sortOrder"] in SEARCH_SORT_ORDERS
         ):
             return
         raise invalid_response()
