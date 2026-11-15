@@ -54,7 +54,7 @@ export default function ArtifactView({ artifact, papers = [], view = 'read' }: {
     const trigger = lastTrigger.current;
     if (trigger?.isConnected) { trigger.scrollIntoView({ block: 'center', behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'instant' : 'smooth' }); trigger.focus(); }
   }
-  return <article className="artifact" aria-label={t('研究结果')}>
+  return <article className="artifact artifact-prose" aria-label={t('研究结果')}>
     {artifact.is_mock && <div className="artifact-heading"><MockTag /><p>{t('模拟结果不提供引用，也不代表论文结论。')}</p></div>}
     <div className="artifact-layout"><div className="artifact-main">
       {view === 'compare' && artifact.comparison_table ? <ComparisonView comparison={artifact.comparison_table} papers={papers} citations={artifact.citations} onSelect={select} /> : <>
