@@ -325,21 +325,59 @@ h3 {
 .language-switch {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
+  gap: 2px;
+  padding: 3px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #f3f7f5;
   color: var(--muted);
-  font-size: 11px;
-  flex-shrink: 0
+  font-size: 12px;
+  flex-shrink: 0;
+  user-select: none
 }
 
-.language-switch select {
+.language-switch-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  margin-right: 3px;
+  border-right: 1px solid var(--line);
+  font-size: 14px
+}
+
+.language-switch-option {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 46px;
   min-height: 32px;
-  padding: 4px 7px;
-  border: 1px solid var(--line);
+  padding: 5px 10px;
+  border: 1px solid transparent;
   border-radius: 5px;
-  background: #f8fbf9;
-  color: var(--ink);
+  background: transparent;
+  color: var(--muted);
   font: inherit;
-  cursor: pointer
+  font-weight: 500;
+  line-height: 1.4;
+  transition: background-color 150ms ease-out, border-color 150ms ease-out, color 150ms ease-out
+}
+
+.language-switch-option:hover {
+  background: var(--soft);
+  color: var(--accent)
+}
+
+.language-switch-option[aria-pressed="true"] {
+  border-color: #c6d9cf;
+  background: white;
+  color: var(--accent);
+  font-weight: 600
+}
+
+.language-switch-option:focus-visible {
+  position: relative;
+  outline-offset: 1px
 }
 
 .failure-language {
@@ -2072,14 +2110,14 @@ main {
     font-size: 17px
   }
   .language-switch {
-    font-size: 10px
+    font-size: 11px
   }
-  .language-switch>.anticon {
+  .language-switch-icon {
     display: none
   }
-  .language-switch select {
-    max-width: 125px;
-    min-height: 30px
+  .language-switch-option {
+    min-width: 40px;
+    padding-inline: 7px
   }
   .mobile-nav {
     display: flex;

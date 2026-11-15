@@ -1,4 +1,18 @@
 export const english: Record<string, string> = {
+  '论文列表': 'Paper list',
+  '{0} 页': '{0} pages',
+  '阅读论文 {0}': 'Read {0}',
+  '专注阅读': 'Focus on reading',
+  '显示论文列表': 'Show paper list',
+  '关闭阅读': 'Close reader',
+  '切换论文': 'Switch paper',
+  '在新标签页打开': 'Open in new tab',
+  '正在加载 PDF…': 'Loading PDF…',
+  '无法加载 PDF': 'Unable to load PDF',
+  'PDF 原文：{0}': 'PDF source: {0}',
+  '返回的文件不是有效的 PDF，请重试或在新标签页打开。': 'The returned file is not a valid PDF. Try again or open it in a new tab.',
+  '原文未显示？可使用上方的新标签页打开。': 'PDF not visible? Use Open in new tab above.',
+  '点击标题切换原文，勾选论文可继续创建研究。': 'Switch papers to read, or select them to start research.',
   '展开摘要': 'Expand abstract',
   '收起摘要': 'Collapse abstract',
   '结果排序': 'Sort results',
@@ -406,6 +420,7 @@ export const english: Record<string, string> = {
 };
 
 export const englishSingular: Record<string, string> = {
+  '{0} 页': '{0} page',
   "{0} 条": "{0} entry",
   "{0} 篇": "{0} paper",
   "{0} 篇论文已选": "{0} paper selected",

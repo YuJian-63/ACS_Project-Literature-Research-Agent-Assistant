@@ -289,12 +289,12 @@ def main():
             for width in [320, 390, 768, 1440]:
                 page.set_viewport_size({'width': width, 'height': 900})
                 page.wait_for_function('document.documentElement.scrollWidth <= innerWidth')
-        page.get_by_role('combobox', name='界面语言 / Interface language').select_option('zh-CN')
+        page.get_by_role('button', name='中文', exact=True).click()
         expect(page.get_by_role('heading', name='重置密码', exact=True)).to_be_visible()
         screenshot('reset-chinese')
         for path, title in [('/login', '登录'), ('/register', '创建账号')]:
             page.goto(BASE + path)
-            page.get_by_role('combobox', name='界面语言 / Interface language').select_option('zh-CN')
+            page.get_by_role('button', name='中文', exact=True).click()
             expect(page.get_by_role('heading', name=title, exact=True)).to_be_visible()
             screenshot(title + '-desktop')
             page.set_viewport_size({'width': 320, 'height': 800})

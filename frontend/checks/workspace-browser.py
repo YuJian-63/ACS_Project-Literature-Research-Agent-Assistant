@@ -78,7 +78,7 @@ def main():
         expect(page.locator('.evidence-quote')).to_contain_text('paper 1')
         page.get_by_role('tab', name='执行记录', exact=True).click()
         expect(page.locator('.trace-panel')).to_be_visible()
-        page.get_by_role('combobox', name='界面语言 / Interface language').select_option('en-US')
+        page.get_by_role('button', name='English', exact=True).click()
         expect(page.get_by_role('tab', name='Execution events', exact=True)).to_be_visible()
         page.get_by_role('tab', name='Review', exact=True).click()
         expect(page.locator('.markdown')).to_contain_text('Repository context matters')

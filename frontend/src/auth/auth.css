@@ -25,8 +25,6 @@
 .auth-brand:hover { color: var(--ink); text-decoration: none }
 .auth-brand-mark { width: 41px; height: 45px; display: grid; place-items: center; border-radius: 10px 3px 10px 3px; background: var(--accent); color: white; font-size: 24px }
 .auth-brand small { display: block; margin-top: 4px; font: 400 11px/1.4 var(--sans); color: var(--muted) }
-.auth-shell .language-switch { font-size: 12px }
-.auth-shell .language-switch select { min-height: 38px; background: transparent }
 
 .auth-shell .auth-main {
   width: min(100%,1080px);
@@ -132,7 +130,6 @@
   .auth-panel { padding: 26px 22px }
   .auth-note { padding: 22px }
   .auth-heading h1 { font-size: 27px }
-  .auth-shell .language-switch { font-size: 11px }
   .auth-header { gap: 8px }
   .auth-account { padding: 24px 20px }
 }

@@ -94,6 +94,8 @@ export const api = {
   papers: (parameters: { limit?: number; offset?: number; q?: string; status?: PaperStatus }, signal: AbortSignal) =>
     request<Page<Paper>>({ url: '/api/v1/papers', params: parameters, signal }),
   paper: (id: string, signal: AbortSignal) => request<Paper>({ url: `/api/v1/papers/${encodeURIComponent(id)}`, signal }),
+  paperFile: (id: string, signal: AbortSignal) =>
+    request<Blob>({ url: '/api/v1/papers/' + encodeURIComponent(id) + '/file', responseType: 'blob', signal }),
   upload: (file: File, signal: AbortSignal, onProgress: (percent: number) => void) => {
     const data = new FormData();
     data.append('file', file);

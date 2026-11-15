@@ -26,6 +26,7 @@ The application serves Research Sans and Research Serif Latin subsets locally fr
 ## Page structure
 
 - Library: compact upload section, parsing details on demand, filters, selectable paper table and research action. Source, page count and parsing state remain visible.
+- Library reading: opening a library title shows an inline PDF workspace. At widths above 1000px, pair the reader with a compact selectable paper list; focused reading hides that list. At 1000px and below, show a paper selector and a return action. Preserve library filters, page and research selection. Keep document loading/error/retry states explicit, and offer an external-open fallback for browsers without an embedded PDF viewer. Fetch through the authenticated file API and release document URLs on switching or leaving.
 - Search: explicit search submission, results and persistent import history in separate columns when space permits. Retain the previous successful results and error recovery behavior.
 - New research: source selection and research question alongside a submission summary. Literature review resources remain automatically allocated by the backend.
 - Research history: filters, question/type, status, source count, execution mode and date. Each record opens its saved task.

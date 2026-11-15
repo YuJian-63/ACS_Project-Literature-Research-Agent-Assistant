@@ -157,7 +157,7 @@ def main():
         size_control.select_option('10')
         expect(papers).to_have_count(10)
         for locale in ['zh-CN', 'en-US']:
-            page.get_by_role('combobox', name='界面语言 / Interface language').select_option(locale)
+            page.get_by_role('button', name='中文' if locale == 'zh-CN' else 'English', exact=True).click()
             for width in [320, 390, 768, 1190, 1440]:
                 page.set_viewport_size({'width': width, 'height': 1000})
                 page.wait_for_function('document.documentElement.scrollWidth <= innerWidth')
