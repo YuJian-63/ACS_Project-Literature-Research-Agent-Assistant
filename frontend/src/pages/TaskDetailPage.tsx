@@ -3,7 +3,7 @@ import { t, useLocale, getLocale } from '../i18n';
 import { lazy, Suspense, useCallback, useState } from 'react';
 import { Alert, Button, Empty, Skeleton, Spin, Tabs, Timeline } from 'antd';
 import { ArrowLeftOutlined, BookOutlined, FileTextOutlined, HistoryOutlined, ReloadOutlined, TableOutlined } from '@ant-design/icons';
-import { Link, useParams } from 'react-router-dom';
+import { Link, useParams, useSearchParams } from 'react-router-dom';
 import { api, paperFileUrl, type ApiError } from '../api/client';
 import type { Paper, Task } from '../api/types';
 import { ErrorNotice, MockTag, PageHeader, StatusBadge } from '../components/Common';
@@ -27,7 +27,8 @@ function TaskDetail({ taskId }: { taskId: string }) {
   useLocale();
   const state = useTask(taskId);
   const task = state.task;
-  const [view, setView] = useState('read');
+  const [parameters] = useSearchParams();
+  const [view, setView] = useState(() => parameters.get('view') === 'compare' ? 'compare' : 'read');
   const ids = task?.paper_ids.join(',') ?? '';
   const loadPapers = useCallback((signal: AbortSignal) => Promise.all(ids.split(',').filter(Boolean).map((id) => api.paper(id, signal))), [ids]);
   const inputs = useResource(loadPapers);
@@ -56,7 +57,7 @@ function TaskDetail({ taskId }: { taskId: string }) {
       {task.status === 'failed' && task.error && <Alert type="error" showIcon className="inline-alert" title={t('任务执行失败 · {0}', [task.error.code])} description={t('{0}。可重新创建任务，原任务记录会保留。', [errorText(task.error)])} />}
       {complete ? <>
         {inputs.error && <ErrorNotice error={inputs.error} title={t('论文信息查询失败')} retry={inputs.reload} />}
-        <Tabs className="result-tabs" activeKey={view} onChange={setView} destroyOnHidden items={[
+        <Tabs className="result-tabs" activeKey={view === 'compare' && !hasComparison ? 'read' : view} onChange={setView} destroyOnHidden items={[
           { key: 'read', label: t(task.task_type === 'review' ? '综述正文' : '研究结果'), icon: <FileTextOutlined aria-hidden />, children: result('read') },
           ...(hasComparison ? [{ key: 'compare', label: t('论文比较'), icon: <TableOutlined aria-hidden />, children: result('compare') }] : []),
           { key: 'activity', label: t('执行记录'), icon: <HistoryOutlined aria-hidden />, children: activity },

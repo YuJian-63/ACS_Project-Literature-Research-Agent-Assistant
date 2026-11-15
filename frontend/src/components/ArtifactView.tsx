@@ -9,12 +9,15 @@ import EvidencePanel from './EvidencePanel';
 import type { Artifact, Paper } from '../api/types';
 import { citationLinks } from '../lib/citationLinks';
 import { useCompactViewport } from '../hooks/useCompactViewport';
+import { useSearchParams } from 'react-router-dom';
 
 export default function ArtifactView({ artifact, papers = [], view = 'read' }: { artifact: Artifact; papers?: Paper[]; view?: 'read' | 'compare' }) {
   useLocale();
   const compact = useCompactViewport();
-  const [selectedKey, setSelectedKey] = useState(artifact.citations[0]?.citation_key);
-  const [open, setOpen] = useState(false);
+  const [parameters] = useSearchParams();
+  const restoring = parameters.get('artifact_id') === artifact.id;
+  const [selectedKey, setSelectedKey] = useState(() => artifact.citations.find((citation) => restoring && citation.citation_key === parameters.get('citation'))?.citation_key ?? artifact.citations[0]?.citation_key);
+  const [open, setOpen] = useState(() => compact && restoring && parameters.get('show_evidence') === '1');
   const [evidenceTab, setEvidenceTab] = useState('current');
   const [outline, setOutline] = useState<{ id: string; title: string }[]>([]);
   const manuscript = useRef<HTMLDivElement>(null);
@@ -63,6 +66,6 @@ export default function ArtifactView({ artifact, papers = [], view = 'read' }: {
         <div className="manuscript-footer"><BookOutlined /><span>{t('研究结论需要真实来源与证据支持')}</span></div>
       </>}
       {compact && <button className="mobile-evidence-button" onClick={(event) => { lastTrigger.current = event.currentTarget; setEvidenceTab('current'); setOpen(true); }}><BookOutlined />{t('证据与来源')}<span>{artifact.citations.length}</span></button>}
-    </div><EvidencePanel citations={artifact.citations} papers={papers} selectedKey={selectedKey} tab={evidenceTab} onTabChange={setEvidenceTab} open={open} onClose={() => setOpen(false)} onSelect={select} onReturn={returnToCitation} /></div>
+    </div><EvidencePanel citations={artifact.citations} papers={papers} selectedKey={selectedKey} taskReturn={{ taskId: artifact.task_id, artifactId: artifact.id, citationKey: selectedKey, view }} tab={evidenceTab} onTabChange={setEvidenceTab} open={open} onClose={() => setOpen(false)} onSelect={select} onReturn={returnToCitation} /></div>
   </article>;
 }

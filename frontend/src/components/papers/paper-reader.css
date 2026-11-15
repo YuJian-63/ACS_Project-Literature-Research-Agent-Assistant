@@ -57,6 +57,7 @@
 .paper-reader-heading p { display: flex; align-items: baseline; flex-wrap: wrap; gap: 12px; margin-top: 7px; color: var(--muted); font-size: 10px; line-height: 1.6; overflow-wrap: anywhere }
 .paper-reader-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 7px }
 .paper-reader-actions .ant-btn { font-size: 11px }
+.reader-task-return.ant-btn { height: 40px; padding-inline: 18px; font-size: 13px; font-weight: 600 }
 .paper-reader-switch { display: none; align-items: center; gap: 10px; padding: 12px 20px; border-bottom: 1px solid var(--line); color: var(--muted); font-size: 11px }
 .paper-reader-switch label { flex-shrink: 0 }
 .paper-reader-switch select { flex: 1; min-width: 0; width: 100%; min-height: 36px; padding: 6px 9px; border: 1px solid var(--line); border-radius: 4px; background: #f7faf8; color: var(--ink); font: inherit }
@@ -80,6 +81,8 @@
   .paper-reader-heading { flex-basis: 100% }
   .paper-reader-heading h2 { font-size: 14px }
   .paper-reader-actions { width: 100%; justify-content: space-between }
+  .reader-task-return.ant-btn { height: 44px }
+  .paper-reader-actions .reader-task-return { flex-basis: 100%; width: 100% }
   .paper-reader-switch { padding: 10px 14px; gap: 8px }
   .paper-reader-footer { padding-inline: 13px }
 }

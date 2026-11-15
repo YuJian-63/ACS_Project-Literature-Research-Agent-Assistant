@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { Button, Spin } from 'antd';
-import { CloseOutlined, FilePdfOutlined, FullscreenExitOutlined, FullscreenOutlined, SelectOutlined } from '@ant-design/icons';
+import { ArrowLeftOutlined, CloseOutlined, FilePdfOutlined, FullscreenExitOutlined, FullscreenOutlined, SelectOutlined } from '@ant-design/icons';
+import { useNavigate } from 'react-router-dom';
 import { api, ApiError, asApiError, isCanceled, paperFileUrl } from '../../api/client';
 import type { Paper } from '../../api/types';
 import { t, useLocale } from '../../i18n';
@@ -9,15 +10,18 @@ import './paper-reader.css';
 
 type DocumentState = { kind: 'loading' } | { kind: 'ready'; url: string } | { kind: 'error'; error: ApiError };
 
-export default function PaperReader({ paper, papers, expanded, onRead, onExpand, onClose }: {
+export default function PaperReader({ paper, papers, page = 1, returnToTask, expanded, onRead, onExpand, onClose }: {
   paper: Paper;
   papers: Paper[];
+  page?: number;
+  returnToTask?: string;
   expanded: boolean;
   onRead: (paper: Paper) => void;
   onExpand: () => void;
   onClose: () => void;
 }) {
   useLocale();
+  const navigate = useNavigate();
   const heading = useRef<HTMLHeadingElement>(null);
   const panel = useRef<HTMLElement>(null);
   const [documentState, setDocumentState] = useState<DocumentState>({ kind: 'loading' });
@@ -62,8 +66,9 @@ export default function PaperReader({ paper, papers, expanded, onRead, onExpand,
         <p><span>{paper.original_filename}</span>{paper.page_count !== null && <span>{t('{0} 页', [paper.page_count])}</span>}</p>
       </div></div>
       <div className="paper-reader-actions">
+        {returnToTask && <Button type="primary" className="reader-task-return" icon={<ArrowLeftOutlined aria-hidden="true" />} onClick={() => navigate(returnToTask)}>{t('返回任务')}</Button>}
         <Button className="reader-expand" icon={expanded ? <FullscreenExitOutlined aria-hidden="true" /> : <FullscreenOutlined aria-hidden="true" />} onClick={onExpand}>{expanded ? t('显示论文列表') : t('专注阅读')}</Button>
-        <Button href={paperFileUrl(paper.id)} target="_blank" rel="noopener noreferrer" icon={<SelectOutlined aria-hidden="true" />}>{t('在新标签页打开')}</Button>
+        <Button href={paperFileUrl(paper.id, page)} target="_blank" rel="noopener noreferrer" icon={<SelectOutlined aria-hidden="true" />}>{t('在新标签页打开')}</Button>
         <Button icon={<CloseOutlined aria-hidden="true" />} aria-label={t('关闭阅读')} title={t('返回论文库')} onClick={onClose} />
       </div>
     </header>
@@ -77,7 +82,7 @@ export default function PaperReader({ paper, papers, expanded, onRead, onExpand,
     <div className="paper-reader-document" aria-busy={documentState.kind === 'loading'}>
       {documentState.kind === 'loading' && <div className="paper-reader-state" role="status"><Spin /><p>{t('正在加载 PDF…')}</p></div>}
       {documentState.kind === 'error' && <div className="paper-reader-state"><ErrorNotice title={t('无法加载 PDF')} error={documentState.error} retry={() => setAttempt((value) => value + 1)} /></div>}
-      {documentState.kind === 'ready' && <iframe title={t('PDF 原文：{0}', [paper.title])} src={documentState.url + '#view=Fit'} referrerPolicy="no-referrer" />}
+      {documentState.kind === 'ready' && <iframe title={t('PDF 原文：{0}', [paper.title])} src={documentState.url + '#page=' + page + '&view=Fit'} referrerPolicy="no-referrer" />}
     </div>
     <footer className="paper-reader-footer"><span>{t('原文未显示？可使用上方的新标签页打开。')}</span><Button type="link" onClick={onClose}>{t('返回论文库')}</Button></footer>
   </section>;

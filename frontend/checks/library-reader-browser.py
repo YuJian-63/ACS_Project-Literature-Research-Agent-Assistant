@@ -21,24 +21,29 @@ PAPERS = [{
 ], start=1)]
 
 
-def pdf_fixture():
-    stream = b'BT /F1 20 Tf 60 730 Td (Research evidence - PDF reading fixture) Tj ET'
+def pdf_fixture(page_count=1):
+    font_id = 3 + page_count * 2
+    children = ' '.join(str(3 + index * 2) + ' 0 R' for index in range(page_count))
     objects = [
         b'<< /Type /Catalog /Pages 2 0 R >>',
-        b'<< /Type /Pages /Kids [3 0 R] /Count 1 >>',
-        b'<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Resources << /Font << /F1 5 0 R >> >> /Contents 4 0 R >>',
-        b'<< /Length ' + str(len(stream)).encode() + b' >>\nstream\n' + stream + b'\nendstream',
-        b'<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>',
+        f'<< /Type /Pages /Kids [{children}] /Count {page_count} >>'.encode(),
     ]
+    for index in range(page_count):
+        stream = f'BT /F1 20 Tf 60 730 Td (Research evidence - page {index + 1}) Tj ET'.encode()
+        objects.extend([
+            f'<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Resources << /Font << /F1 {font_id} 0 R >> >> /Contents {4 + index * 2} 0 R >>'.encode(),
+            b'<< /Length ' + str(len(stream)).encode() + b' >>\nstream\n' + stream + b'\nendstream',
+        ])
+    objects.append(b'<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>')
     result = b'%PDF-1.4\n'
     offsets = [0]
     for index, content in enumerate(objects, start=1):
         offsets.append(len(result))
         result += str(index).encode() + b' 0 obj\n' + content + b'\nendobj\n'
     xref = len(result)
-    result += b'xref\n0 6\n0000000000 65535 f \n'
+    result += f'xref\n0 {len(objects) + 1}\n0000000000 65535 f \n'.encode()
     result += b''.join(f'{offset:010d} 00000 n \n'.encode() for offset in offsets[1:])
-    return result + b'trailer\n<< /Size 6 /Root 1 0 R >>\nstartxref\n' + str(xref).encode() + b'\n%%EOF\n'
+    return result + f'trailer\n<< /Size {len(objects) + 1} /Root 1 0 R >>\nstartxref\n'.encode() + str(xref).encode() + b'\n%%EOF\n'
 
 
 def main():

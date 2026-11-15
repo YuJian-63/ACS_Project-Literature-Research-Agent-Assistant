@@ -68,7 +68,7 @@ def main():
         linked.click()
         expect(page.locator('.evidence-quote')).to_be_visible()
         expect(page.locator('.evidence-quote')).to_contain_text('paper 2')
-        assert '#page=3' in page.locator('.evidence-pdf-link').get_attribute('href')
+        assert 'pdf_page=3' in page.locator('.evidence-pdf-link').get_attribute('href')
         expect(page.locator('.result-outline a').first).to_be_visible()
         page.get_by_role('tab', name='论文比较', exact=True).click()
         expect(page.locator('.comparison-section table thead th')).to_have_count(5)

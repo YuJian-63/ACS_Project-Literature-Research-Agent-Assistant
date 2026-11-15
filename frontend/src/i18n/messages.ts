@@ -380,6 +380,7 @@ export const english: Record<string, string> = {
   "运行中": "Running",
   "返回任务列表": "Back to tasks",
   "返回论文库": "Back to library",
+  "返回任务": "Back to task",
   "还没有导入记录": "No imports yet",
   "还没有研究任务": "No research tasks yet",
   "还没有论文": "No papers yet",
