@@ -13,10 +13,11 @@ from starlette.exceptions import HTTPException
 from starlette.responses import StreamingResponse
 
 from app.api.pagination import Limit, Offset
-from app.api.schemas import Page, PaperResponse, PaperStatus
+from app.api.schemas import EvidencePage, Page, PaperResponse, PaperStatus
 from app.api.views import paper_view
 from app.db.models import Paper
 from app.errors import APIError
+from app.papers.evidence import read_evidence
 from app.papers.storage import controlled_path, save_paper
 
 router = APIRouter()
@@ -82,6 +83,18 @@ def list_papers(
 def paper_detail(request: Request, paper_id: UUID) -> dict:
     with request.app.state.sessions() as session:
         return paper_view(get_paper(session, paper_id))
+
+
+@router.get("/api/v1/papers/{paper_id}/evidence", response_model=EvidencePage,
+            summary="Read parsed paper evidence",
+            description="Read-only chunks from a ready paper, ordered by chunk_index. "
+                        "Use next_after_index while has_more is true. Page numbers are PDF physical pages.")
+def paper_evidence(
+    request: Request, paper_id: UUID,
+    after_index: Annotated[int, Query(ge=-1)] = -1,
+    limit: Annotated[int, Query(ge=1, le=100)] = 100,
+) -> dict:
+    return read_evidence(request.app.state.sessions, paper_id, after_index=after_index, limit=limit)
 
 
 @router.get("/api/v1/papers/{paper_id}/file", response_class=StreamingResponse, responses={200: {"content": {"application/pdf": {}}}})

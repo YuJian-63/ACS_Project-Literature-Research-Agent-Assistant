@@ -96,6 +96,26 @@ class PaperResponse(BaseModel):
     updated_at: datetime
 
 
+class EvidenceChunkResponse(BaseModel):
+    chunk_id: UUID
+    paper_id: UUID
+    chunk_index: int = Field(ge=0)
+    page_number: int = Field(ge=1, description="PDF physical page number, starting at 1")
+    content: str
+    content_sha256: str
+    parser_version: str
+
+
+class EvidencePage(BaseModel):
+    paper_id: UUID
+    paper_sha256: str
+    page_count: int = Field(ge=1)
+    parser_version: str
+    items: list[EvidenceChunkResponse]
+    has_more: bool
+    next_after_index: int = Field(ge=-1)
+
+
 class Page(BaseModel, Generic[Item]):
     items: list[Item]
     total: int
