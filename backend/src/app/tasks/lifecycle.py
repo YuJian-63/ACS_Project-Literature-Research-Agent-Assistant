@@ -47,7 +47,7 @@ def claim_task(sessions: sessionmaker[Session], owner: UUID, runner_type: str = 
         if task is None:
             return None
         now = database_time(session)
-        staged_review = task.workflow_version == "langgraph-review-v2"
+        staged_review = task.workflow_version in {"langgraph-review-v2", "langgraph-search-v1"}
         if staged_review and task.started_at is not None and task.started_at + timedelta(seconds=task.timeout_seconds) <= now:
             mark_failed(session, task, now, "TASK_TIMEOUT", "任务超过执行时间预算")
             return None
@@ -227,12 +227,12 @@ def reap_expired(sessions: sessionmaker[Session]) -> int:
                 mark_failed(session, task, now, "TASK_TIMEOUT", "任务超过执行时间预算")
                 count += 1
             elif task.lease_expires_at <= now:
-                if task.workflow_version == "langgraph-review-v2":
+                if task.workflow_version in {"langgraph-review-v2", "langgraph-search-v1"}:
                     task.status = "queued"
                     task.stage = "queued"
                     task.worker_id = None
                     task.lease_expires_at = None
-                    append_event(session, task, now, "综述执行中断，将从已保存的阶段恢复", "warning")
+                    append_event(session, task, now, "研究执行中断，将从已保存的阶段恢复", "warning")
                 else:
                     mark_failed(session, task, now, "WORKER_LOST", "Worker 租约已过期")
                 count += 1

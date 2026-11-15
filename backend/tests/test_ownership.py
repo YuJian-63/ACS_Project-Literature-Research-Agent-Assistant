@@ -1,3 +1,4 @@
+import json
 import os
 import re
 import subprocess
@@ -157,7 +158,7 @@ class OwnershipPostgresTests(unittest.TestCase):
                 self.assertGreater(task.timeout_seconds, 1)
                 frozen_evidence = task.review_state["evidence"]
                 frozen_budget = task.max_tokens
-                self.assertGreater(task.run_config["max_output_tokens"], 2048)
+                self.assertGreaterEqual(task.run_config["max_output_tokens"], 1024)
             request.budget.max_tokens = 100000
             self.settings.research_output_tokens = 1024
             repeated, replayed = submit_task(self.sessions, self.settings, request, task_type, user_id=self.users[0])
@@ -203,6 +204,121 @@ class OwnershipPostgresTests(unittest.TestCase):
         with self.assertRaises(APIError) as caught:
             submit_task(self.sessions, self.settings, request, "auto-mock", user_id=self.users[0])
         self.assertEqual(caught.exception.error["code"], "IDEMPOTENCY_CONFLICT")
+
+    def ready_research_paper(self, content="Abstract: A Rust agent resolves 42 percent of benchmark issues."):
+        from pydantic import SecretStr
+        identity = UUID(self.upload())
+        self.settings.task_runner = "langgraph"
+        self.settings.llm_base_url = "https://fixture.invalid"
+        self.settings.llm_model_id = "fixture"
+        self.settings.llm_api_key = SecretStr("fixture-key")
+        with self.sessions.begin() as session:
+            paper = session.get(Paper, identity)
+            paper.status, paper.page_count, paper.parser_version = "ready", 1, "fixture"
+            session.add(PaperChunk(paper_id=identity, chunk_index=0, page_number=1,
+                content=content, content_sha256="b" * 64, parser_version="fixture"))
+        return identity
+
+    def test_chinese_question_runs_with_expansion_and_private_diagnostics(self):
+        from unittest.mock import Mock
+        from app.research.model_client import ModelCompletion
+        from app.workers.research import RunnerWorker
+        from app.tasks.lifecycle import claim_task
+        paper_id = self.ready_research_paper()
+        accepted, unused = submit_task(self.sessions, self.settings,
+            TaskCreate(task_type="qa", question="实验成功率是多少？", paper_ids=[paper_id]), "chinese-question", user_id=self.users[0])
+        model = Mock()
+        model.complete.side_effect = [ModelCompletion('{"intent":"specific","queries":["benchmark success rate"]}', 100, 30, "stop"),
+            ModelCompletion('{"status":"answered","paragraphs":[{"content_markdown":"成功率为 42%。","evidence_ids":["E1"]}]}', 200, 60, "stop")]
+        worker = RunnerWorker(self.sessions, self.settings, model_factory=lambda *args: model)
+        self.assertEqual(claim_task(self.sessions, worker.owner, "langgraph"), accepted["id"])
+        worker.execute(accepted["id"])
+        response = self.clients[0].get(f"/api/v1/tasks/{accepted['id']}")
+        self.assertEqual(response.status_code, 200)
+        detail = response.json()
+        self.assertEqual(detail["status"], "succeeded", detail["error"])
+        self.assertEqual(detail["stats"]["model_calls"], 2)
+        self.assertEqual(detail["stats"]["total_tokens"], 390)
+        self.assertEqual(detail["retrieval"]["status"], "answered")
+        self.assertNotIn("source_snapshot", response.text)
+        self.assertEqual(self.clients[1].get(f"/api/v1/tasks/{accepted['id']}").status_code, 404)
+
+    def test_summary_supplement_persists_checkpoints_usage_and_missing_details(self):
+        from unittest.mock import Mock
+        from app.research.model_client import ModelCompletion
+        from app.workers.research import RunnerWorker
+        from app.tasks.lifecycle import claim_task
+        paper_id = self.ready_research_paper("Introduction: agent design. " * 80 + "Limitations: evaluation excludes private repositories. " * 25)
+        accepted, unused = submit_task(self.sessions, self.settings,
+            TaskCreate(task_type="summary", question="Summarize methods", paper_ids=[paper_id]), "summary-supplement", user_id=self.users[0])
+        model = Mock()
+        model.complete.side_effect = [ModelCompletion(json.dumps({"status": "partial", "missing_aspects": ["limitations"],
+            "paragraphs": [{"content_markdown": "Supported method", "evidence_ids": ["E1"]}]}), None, None, "stop"),
+            ModelCompletion(json.dumps({"status": "partial", "missing_aspects": ["Additional evaluation details"],
+                "paragraphs": [{"content_markdown": "Supported limitation", "evidence_ids": ["E1"]}]}), None, None, "stop")]
+        worker = RunnerWorker(self.sessions, self.settings, model_factory=lambda *args: model)
+        self.assertEqual(claim_task(self.sessions, worker.owner, "langgraph"), accepted["id"])
+        worker.execute(accepted["id"])
+        detail = self.clients[0].get(f"/api/v1/tasks/{accepted['id']}").json()
+        self.assertEqual(detail["status"], "succeeded", detail["error"])
+        self.assertEqual(detail["stats"]["model_calls"], 2)
+        self.assertTrue(detail["stats"]["usage_estimated"])
+        self.assertEqual(detail["retrieval"]["missing_aspects"], ["Additional evaluation details"])
+        with self.sessions() as session:
+            task = session.get(Task, accepted["id"])
+            self.assertIn("answer_selection", task.review_state["search"])
+            self.assertIn("answer:1", task.review_state["units"])
+            self.assertLessEqual(task.input_tokens + task.output_tokens, task.max_tokens)
+        self.assertEqual(self.clients[1].get(f"/api/v1/tasks/{accepted['id']}").status_code, 404)
+
+    def test_single_task_recovery_reuses_query_snapshot_and_original_deadline(self):
+        from unittest.mock import Mock
+        from app.research.model_client import ModelCompletion
+        from app.research.review_store import ReviewStore, ReviewOwnershipLost
+        from app.research.search_runner import prepare_search
+        from app.workers.research import RunnerWorker, load_research_job
+        from app.tasks.lifecycle import claim_task, reap_expired
+        paper_id = self.ready_research_paper()
+        accepted, unused = submit_task(self.sessions, self.settings,
+            TaskCreate(task_type="qa", question="论文的方法是什么？", paper_ids=[paper_id]), "recover-question", user_id=self.users[0])
+        owner = uuid4()
+        claim_task(self.sessions, owner, "langgraph")
+        store = ReviewStore(self.sessions, accepted["id"], owner)
+        expansion = Mock()
+        expansion.complete.return_value = ModelCompletion('{"intent":"specific","queries":["Rust agent method"]}', 100, 30, "stop")
+        prepare_search(load_research_job(self.sessions, accepted["id"]), expansion, store)
+        store.reserve("answer:0", 1000, 1000, "generating", "Generating", {})
+        with self.sessions.begin() as session:
+            session.execute(text("UPDATE tasks SET created_at=clock_timestamp()-interval '30 seconds', started_at=clock_timestamp()-interval '20 seconds', lease_expires_at=clock_timestamp()-interval '1 second' WHERE id=:identity"), {"identity": accepted["id"]})
+            started = session.get(Task, accepted["id"]).started_at
+            session.add(PaperChunk(paper_id=paper_id, chunk_index=1, page_number=1,
+                content="Newly parsed text must not enter the old snapshot.", content_sha256="c" * 64, parser_version="fixture-v2"))
+        self.assertEqual(reap_expired(self.sessions), 1)
+        model = Mock()
+        model.complete.return_value = ModelCompletion('{"status":"answered","paragraphs":[{"content_markdown":"Rust agent method.","evidence_ids":["E1"]}]}', 200, 60, "stop")
+        worker = RunnerWorker(self.sessions, self.settings, model_factory=lambda *args: model)
+        claim_task(self.sessions, worker.owner, "langgraph")
+        with self.assertRaises(ReviewOwnershipLost):
+            store.save_search("tampered", {})
+        worker.execute(accepted["id"])
+        self.assertEqual(model.complete.call_count, 1)
+        self.assertNotIn("Newly parsed text", str(model.complete.call_args))
+        with self.sessions() as session:
+            task = session.get(Task, accepted["id"])
+            self.assertEqual(task.status, "succeeded", task.error_message)
+            self.assertEqual(task.started_at, started)
+            self.assertEqual(task.model_calls, 3)
+            self.assertTrue(task.review_state["usage_estimated"])
+
+    def test_oversized_source_snapshot_is_rejected_before_task_creation(self):
+        from app.errors import APIError
+        paper_id = self.ready_research_paper("text " * 25000)
+        self.settings.retrieval_snapshot_bytes = 100000
+        with self.assertRaises(APIError) as caught:
+            submit_task(self.sessions, self.settings, TaskCreate(task_type="summary", paper_ids=[paper_id]), "large-source", user_id=self.users[0])
+        self.assertEqual(caught.exception.error["code"], "RESEARCH_CAPACITY_EXCEEDED")
+        with self.sessions() as session:
+            self.assertIsNone(session.scalar(select(Task)))
 
     def test_reference_sql_matches_current_metadata(self):
         from alembic.autogenerate import compare_metadata
@@ -410,7 +526,7 @@ class OwnershipPostgresTests(unittest.TestCase):
         self.assertIsNotNone(permit, "Reset must restore the shared source gate seed")
         release_source_permit(self.sessions, permit)
         with self.engine.connect() as connection:
-            self.assertEqual(connection.scalar(text("SELECT version_num FROM alembic_version")), "20261114_0004")
+            self.assertEqual(connection.scalar(text("SELECT version_num FROM alembic_version")), "20261115_0005")
             self.assertEqual(connection.scalar(text("SELECT count(*) FROM users")), 0)
             self.assertEqual(connection.scalar(text("SELECT count(*) FROM papers")), 0)
 

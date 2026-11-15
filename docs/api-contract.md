@@ -593,3 +593,19 @@ CSRF 从 login/me 响应读取并仅存内存，按独立密钥与当前会话�
 账号补充错误：`400 AUTH_TOKEN_INVALID`、`401 AUTH_REQUIRED / INVALID_CREDENTIALS`、`403 EMAIL_NOT_VERIFIED / ORIGIN_REJECTED / CSRF_REJECTED`、`409 REGISTRATION_UNAVAILABLE`、`413 REQUEST_TOO_LARGE`、`415 JSON_REQUIRED`、`429 AUTH_RATE_LIMITED`（附 Retry-After 秒数）、`503 AUTH_UNAVAILABLE`；统一使用第 8 节 Error 结构，不回显输入密码、token、Cookie、邮箱是否存在或原始 SMTP 异常。
 
 代码静态对照：前后端 endpoint、字段名、login/me 响应和凭据/CSRF 发送一致；logout/reset/change 实际返回 200 JSON，前端忽略响应体，兼容。当前前端 email 正则比后端宽松，未同步 ASCII/254 字符及保留用户名校验；登录/当前密码前端要求 6—128，后端模型允许 1—128（正常新账号不受影响）。前端验证文案固定 24 小时，而后端验证 TTL 可缩短；这些属于非阻断的预校验/文案差异，服务端仍执行完整规则；当前验收使用默认 24 小时时效和符合完整规则的输入。
+
+## 12. 跨语言研究检索（2026-11-15）
+
+新建真实 summary / qa / review 任务使用 workflow_version=langgraph-search-v1。单篇内部协议为 evidence-search-v1，综述为 evidence-review-search-v1；旧工作流按旧路径读取，历史结果不自动重跑。任务创建只执行本地规划，原有请求字段与自动预算规则不变。
+
+创建任务时将当前用户选定论文的完整解析片段、论文标题、文件哈希和 parser_version 存入 source_snapshot，并校验 SHA-256；默认序列化上限 8 MiB，可由 RETRIEVAL_SNAPSHOT_BYTES 配置。超过上限或不能为检索/生成预留资源时，在创建前返回 422 RESEARCH_CAPACITY_EXCEEDED 或 REVIEW_CAPACITY_EXCEEDED。快照、扩展查询和全文不通过任务详情接口返回。
+
+Worker 对含中文的问题最多调用一次查询扩展：1—3 个英文表达、每个最长 160 字符、输出至多 512 Token、超时至多 15 秒。扩展失败时记录 warning 并使用原问题、内置术语与论文结构继续。检索合并原问题与扩展表达，过滤英文停用词，按词面相关性和结构覆盖选择逐字连续原文；零命中仍提供上下文，不能直接断言全文无答案。摘要覆盖结构与问题；新摘要和问答允许一次补检索，综述逐篇覆盖并允许每篇一次补检索。所有模型尝试（包括未知结果和恢复尝试）计入服务器预算。生成、校验失败的重试额度也受任务总量限制。
+
+任务详情新增可空 retrieval 字段：旧任务/Mock 为 null；新任务包含 status、expansion_degraded、selected_chunks、lexical_matches、missing_aspects、papers。status 为 pending / matched / context_fallback / no_parsed_text / answered / partial / insufficient_selected_evidence。selected_chunks 和 lexical_matches 表示初次选证据情况，不能当作事实置信度；补检索数量见事件 payload.new_chunks。missing_aspects 为模型报告的单篇未覆盖问题；papers 为综述缺口数组，每项包含 paper_id、paper_title（提交时冻结的标题）、columns（缺失维度标签），仅返回本任务选中的论文，省略没有缺口的论文。历史检查点没有逐篇缺口时默认为空数组。
+
+证据覆盖后续改进：新摘要与问答都为一次补检索预留服务器预算；旧摘要没有 supplement_rounds 标记时不追加调用。补检索优先使用缺失项与内置中英术语，可选取已读原片段中的另一连续窗口。两次部分单篇回答合并有据段落；综述补检只填原空单元格，保留已有结论和引用。补检仍未覆盖时显示具体缺口，不能保证问题一定可回答。无需新数据库迁移，重启 API 与 Runner 后创建新任务。
+
+retrieving 阶段的事件可带 retrieval、retrieval_status、reason、paper_id、new_chunks、evidence_status 等诊断字段。前端必须区分无解析文本、当前证据不足、部分可回答；比较表 null 显示“当前证据未覆盖”，不能据此断言论文未报告。输出仍使用原 Artifact / Citation 结构，引用 ID 由后端解析为冻结原文及物理页码。
+
+新工作流使用与综述相同的租约和持久化调用预留。租约过期可重新排队，保留原 started_at 和截止时间；已完成查询、选证据、分析和输出检查点复用。未知模型调用按预留用量保守保留；查询扩展未知结果不重复发起，生成可在有剩余额度时恢复。迁移 20261115_0005 只扩展 tasks_lifecycle 约束，不删除数据。

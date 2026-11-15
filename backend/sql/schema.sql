@@ -93,7 +93,7 @@ CREATE TABLE tasks (
         AND (finished_at IS NULL OR finished_at >= coalesce(started_at, created_at))
     ),
     CONSTRAINT tasks_lifecycle CHECK (
-        (status = 'queued' AND stage = 'queued' AND (started_at IS NULL OR workflow_version = 'langgraph-review-v2') AND finished_at IS NULL
+        (status = 'queued' AND stage = 'queued' AND (started_at IS NULL OR workflow_version IN ('langgraph-review-v2', 'langgraph-search-v1')) AND finished_at IS NULL
             AND worker_id IS NULL AND lease_expires_at IS NULL)
         OR (status = 'running' AND started_at IS NOT NULL AND finished_at IS NULL
             AND worker_id IS NOT NULL AND lease_expires_at IS NOT NULL AND lease_expires_at > started_at)

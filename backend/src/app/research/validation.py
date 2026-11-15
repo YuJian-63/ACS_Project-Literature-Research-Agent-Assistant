@@ -311,7 +311,7 @@ def validate_paragraph_result(raw: str, evidence: list[EvidenceChunk]) -> Valida
     }), evidence)
 
 
-def validate_selected_evidence_result(raw: str, evidence: list[EvidenceChunk]) -> ValidatedResult:
+def validate_selected_evidence_result(raw: str, evidence: list[EvidenceChunk], *, source_evidence: list[EvidenceChunk] | None = None) -> ValidatedResult:
     draft = EvidenceSelectionDraft.model_validate_json(raw)
     passages = {passage.evidence_id: passage for passage in build_citation_passages(evidence)}
     paragraphs: list[dict] = []
@@ -325,11 +325,12 @@ def validate_selected_evidence_result(raw: str, evidence: list[EvidenceChunk]) -
                 raise ValueError("Citation references evidence outside the task context")
             citations.append({"chunk_id": passage.chunk_id, "quote": passage.quote})
         paragraphs.append({"content_markdown": paragraph.content_markdown, "citations": citations})
-    return validate_paragraph_result(json.dumps({"paragraphs": paragraphs}), evidence)
+    return validate_paragraph_result(json.dumps({"paragraphs": paragraphs}), source_evidence if source_evidence is not None else evidence)
 
 
 def validate_selected_review_result(
     raw: str, evidence: list[EvidenceChunk], selected_papers: list[dict[str, str]],
+    *, source_evidence: list[EvidenceChunk] | None = None,
 ) -> ValidatedResult:
     draft = EvidenceSelectionReviewDraft.model_validate_json(raw)
     passages = {passage.evidence_id: passage for passage in build_citation_passages(evidence)}
@@ -383,4 +384,4 @@ def validate_selected_review_result(
             "columns": [column.model_dump() for column in draft.comparison_table.columns],
             "rows": rows,
         },
-    }), evidence, selected_papers)
+    }), source_evidence if source_evidence is not None else evidence, selected_papers)

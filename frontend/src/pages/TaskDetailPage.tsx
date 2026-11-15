@@ -7,6 +7,7 @@ import { Link, useParams, useSearchParams } from 'react-router-dom';
 import { api, paperFileUrl, type ApiError } from '../api/client';
 import type { Paper, Task } from '../api/types';
 import { ErrorNotice, MockTag, PageHeader, StatusBadge } from '../components/Common';
+import EvidenceCoverageNotice from '../components/EvidenceCoverageNotice';
 import { useResource } from '../hooks/useResource';
 import { useTask } from '../hooks/useTask';
 import { dateTime, duration, isTerminal, stageLabels, taskTypeLabels } from '../lib/format';
@@ -55,6 +56,7 @@ function TaskDetail({ taskId }: { taskId: string }) {
       {task.question && <div className="result-question"><span>{t('研究问题')}</span><p>{task.question}</p></div>}
       {task.is_mock && <Alert className="inline-alert" type="warning" showIcon title={t('模拟运行与模拟结果')} description={t('尚未解析或分析论文，未调用模型。以下内容用于验证流程，不应作为研究结论或模型效果指标。')} />}
       {task.status === 'failed' && task.error && <Alert type="error" showIcon className="inline-alert" title={t('任务执行失败 · {0}', [task.error.code])} description={t('{0}。可重新创建任务，原任务记录会保留。', [errorText(task.error)])} />}
+      {complete && <EvidenceCoverageNotice task={task} papers={inputs.data ?? []} />}
       {complete ? <>
         {inputs.error && <ErrorNotice error={inputs.error} title={t('论文信息查询失败')} retry={inputs.reload} />}
         <Tabs className="result-tabs" activeKey={view === 'compare' && !hasComparison ? 'read' : view} onChange={setView} destroyOnHidden items={[

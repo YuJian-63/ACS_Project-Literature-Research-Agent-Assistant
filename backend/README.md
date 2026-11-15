@@ -421,3 +421,40 @@ uv run --locked python tests/test_ownership.py --postgres
 这些变量有默认值，已有 .env 无需补填；部署者应按实际模型上下文/输出能力调整。新单篇任务不使用 LLM_TIMEOUT_SECONDS 作为调用上限，旧任务继续使用冻结值。证据过大时缩减采样，仍无法容纳返回 422 RESEARCH_CAPACITY_EXCEEDED；没有匹配证据时不调用模型。自动预算不等于完整阅读全文，也不保证生成不会截断；证据校验及失败处理保持严格，不自动续写或重试单篇调用。综述继续使用 REVIEW_* 配置。
 
 本次调整无需数据库迁移，重启 API 与真实 Runner 后创建新任务即可。隔离 PostgreSQL 回归入口为 uv run --locked python -B tests/test_ownership.py --postgres；策略测试为 uv run --locked python -B -m unittest discover -s tests -p test_task_policy.py -v。
+
+## 12. 跨语言检索与证据覆盖（2026-11-15）
+
+本节更新第 4、9、11 节对新任务的检索/预算描述。新的真实摘要、问答和综述均使用 langgraph-search-v1；原 langgraph-v1、langgraph-review-v2 的已有任务继续走原路径。
+
+- 提交时冻结所选论文的完整解析文本、标题、文件哈希、解析版本及快照摘要；默认上限 8 MiB。只允许当前用户所选论文，不跨用户或联网补证据。
+- Worker 内为中文问题生成有限的英文检索表达，原问题始终保留。扩展失败会记录降级事件，使用原问题、内置术语和结构补充检索。
+- document_search.py 提供去停用词的中英词面排序、章节覆盖、相邻片段与精确原文窗口。不是向量或语义检索；复杂同义表达仍可能漏召回。
+- search_policy.py 为扩展、生成、一次补检索及有限失败恢复预留上下文、Token 和时限。规模大时压缩证据与输出；仍不能容纳则在提交时返回容量错误，不接受注定预算不足的任务。
+- search_runner.py 保存查询、初选/补选证据、诊断和模型输出。新摘要与问答不足时最多补一次；综述每篇不足时最多补一次，并保持已分配证据 ID 稳定。补检索优先匹配具体缺失项，可读取同一原始片段的不同逐字窗口。中文“创新点、贡献”会映射为英文检索术语。
+- 摘要、问答的两次部分回答保留各自有引用支持的段落，综述仅填充原有空单元格。摘要、问答补检调用失败或预算不足时保留已通过校验的初次结果；最终仍按实际证据显示 partial。旧摘要没有补检预算标记时继续按原策略执行。
+- 任务详情 retrieval.papers 按论文返回未覆盖维度及冻结标题；前端列出 missing_aspects 和逐篇缺失维度。缺失维度可随界面语言切换，模型生成的缺失说明保留任务输出语言，不自动翻译。
+- review_store.py 同时为新单篇与综述记录调用预留和实耗；模型用量未知时保守保留预留。Worker 重启复用检查点、保持原截止时间；旧 Worker 无权写检查点或产物。
+- retrieval 字段、执行事件和页面警告区分无解析文本、上下文回退、部分可回答及当前证据不足。引用继续逐字校验，不能把召回失败描述为论文全文未报告。
+
+已有 0004 数据库升级时，停止 API 和全部 Worker，从项目根目录执行：
+
+~~~powershell
+Set-Location .\backend
+uv run --locked alembic upgrade head
+uv run --locked alembic current
+uv run --locked alembic check
+~~~
+
+预期 revision 为 20261115_0005；该迁移只扩展恢复约束，无需清数据。随后按 docs/terminal-operations.md 重启各进程并新建任务。已有模型地址、密钥和 .env 可继续使用；RETRIEVAL_SNAPSHOT_BYTES 不配置时使用默认值。
+
+离线验证入口（从项目根目录开始）：
+
+~~~powershell
+Set-Location .\backend
+uv run --locked python -B -m unittest discover -s tests -q
+uv run --locked python -B tests/test_ownership.py --postgres
+~~~
+
+第一条运行离线测试；数据库用例默认跳过。第二条在本机 PostgreSQL 新建随机 ownership_tests 数据库并在结束时删除自己的测试库，不清理实际业务库。浏览器诊断用例为 frontend/checks/retrieval-browser.py，测试全部拦截 API，不访问真实模型或邮箱。
+
+验收应使用新建任务：中文询问英文论文目标/方法/结论、具体实验指标、论文未覆盖的问题，以及六篇英文论文中文比较。每项检查回答内容、逐字引用、PDF 页码、缺失维度说明、执行记录及刷新恢复。自动测试只证明代码路径和约束，真实模型回答质量需另外人工核验。

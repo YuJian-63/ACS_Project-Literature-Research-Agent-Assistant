@@ -22,6 +22,11 @@ try {
   assert.equal(eventText(event), 'Analyzing papers: 4 / 6');
   setLocale('zh-CN');
   assert.equal(eventText(event), '正在分析论文：4 / 6');
+  const insufficient = { stage: 'retrieving', message: '已完成证据检查', payload: { evidence_status: 'insufficient_selected_evidence' } };
+  assert.match(eventText(insufficient), /不代表论文全文/);
+  setLocale('en-US');
+  assert.match(eventText(insufficient), /retrieved passages/);
+  assert.match(eventText({ stage: 'retrieving', message: '检索词扩展不可用，已使用原问题和论文结构继续检索', payload: {} }), /Query expansion is unavailable/);
   console.log('PASS: server-owned review budgets, stable submissions, automatic summary/QA budgets and bilingual progress');
 } finally {
   await server.close();

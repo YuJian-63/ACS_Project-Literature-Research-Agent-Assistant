@@ -40,7 +40,7 @@ uv run --locked alembic current
 uv run --locked alembic check
 ~~~
 
-预期：postgres 显示 healthy；截至本文整理时，迁移版本为 20261114_0004 (head)；结构检查输出 No new upgrade operations detected.。Docker 的 -d 表示后台运行，因此这个终端可以继续输入命令。
+预期：postgres 显示 healthy；升级本次跨语言检索功能后，迁移版本为 20261115_0005 (head)；结构检查输出 No new upgrade operations detected.。尚未升级时先按第 2.2 节操作。Docker 的 -d 表示后台运行，因此这个终端可以继续输入命令。
 
 这里的 Compose 项目名仅适用于当前本机；backend/.env 中的 POSTGRES_*、DATABASE_URL 应继续指向原来的数据库。不要在已有项目上随意切换 Compose 项目名，否则可能创建另一套空卷，或发生端口冲突。
 
@@ -56,6 +56,8 @@ uv run --locked alembic check
 ~~~
 
 确认成功后，再启动第 3 节的服务。不要为了消除迁移错误直接删除数据库。账号迁移 20261114_0004 对旧业务数据有保护检查；如果提示拒绝迁移，先阅读 [后端文档第 10 节](../backend/README.md#10-账号qq-邮件与私有数据2026-11-14)。当前本机此前已完成该迁移，无需重复清理旧数据。
+
+20261115_0005 仅扩展任务恢复约束，允许新的摘要、问答和综述工作流保留原始截止时间后恢复，不清除数据、不增加数据表。已有 0004 数据库可直接升级；不要执行旧账号迁移的数据清理流程。重启 API 与所有 Worker，前端刷新后新建任务即可使用新检索策略。历史任务保留原策略，不会自动重新生成结果。现有模型配置可继续使用，无需新增服务。
 
 ## 3. 六个常驻终端：逐个复制执行
 
@@ -372,3 +374,42 @@ $OutputEncoding = [Console]::OutputEncoding
 仍有乱码时，优先通过前端或浏览器开发者工具查看原始响应；终端编码设置不能修复已经错误解码的内容。
 
 排查时记录：使用的页面功能、任务 ID 或请求编号、发生时间、对应 Worker 日志，以及第 4.2 节不含密钥的输出。避免粘贴密码、Authorization、Cookie、CSRF 或邮件令牌。
+
+## 跨语言检索更新后的验收
+
+先按第 2.2 节升级到 20261115_0005，再重启第 3 节的 API 和后端 Worker，刷新前端。无需修改已有模型变量；新建任务使用新策略，旧结果不会自动更新。
+
+1. 对一篇已就绪英文论文创建问答：“这篇论文要解决什么问题？作者提出了什么方法，主要结论是什么？”检查回答及引用。
+2. 询问一个论文中有原文支持的具体实验数字，检查数字、上下文和页码。
+3. 询问一个论文未覆盖的问题，确认显示当前证据不足，不编造数字，也不直接断言全文不存在该信息。
+4. 创建六篇论文的中文综述，检查每篇参与比较，空单元格显示“当前证据未覆盖”。
+5. 在执行记录中检查跨语言扩展、证据选择、必要时的补检索记录；如扩展降级，应有明确 warning。
+6. 新建摘要，要求概括方法、创新点和局限性。首次证据不足且找到新窗口时应出现一次补检记录；若仍显示部分可回答，提示下方应列出具体缺失项。
+7. 打开已有的部分综述，检查提示按论文标题列出缺失维度；切换界面语言后固定维度标签同步切换，模型生成说明保留任务语言。
+
+证据覆盖补检与缺口展示改进无需再次迁移数据库。分别在现有 API 和研究 Runner 终端按 Ctrl+C，然后从项目根目录重新执行（两个独立终端）：
+
+~~~powershell
+Set-Location .\backend
+uv run --locked uvicorn app.main:create_app --factory --host 127.0.0.1 --port 8000 --reload
+~~~
+
+~~~powershell
+Set-Location .\backend
+uv run --locked python -m app.runner_worker
+~~~
+
+刷新前端并新建任务；已有结果不会自动重新生成。PDF Parser、导入和邮件 Worker 按需保持运行。研究 Runner 终端必须保持运行，否则新研究任务只会排队。
+
+本地回归（从项目根目录开始；不调用真实模型）：
+
+~~~powershell
+Set-Location .\backend
+uv run --locked python -B -m unittest discover -s tests -q
+uv run --locked python -B tests/test_ownership.py --postgres
+Set-Location ..\frontend
+npm.cmd run verify:review
+npm.cmd run build
+~~~
+
+PostgreSQL 回归会创建并清理本次随机测试库，保留业务库。浏览器诊断测试需本地已有 Playwright 环境；脚本 frontend/checks/retrieval-browser.py 默认访问 127.0.0.1:5194，全部 API 为本地夹具。
