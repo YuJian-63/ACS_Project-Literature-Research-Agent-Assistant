@@ -9,6 +9,7 @@ from playwright.sync_api import expect, sync_playwright
 ROOT = Path(__file__).resolve().parents[2]
 os.environ['PLAYWRIGHT_BROWSERS_PATH'] = str(ROOT / 'runtime/pw-browsers')
 BASE = os.environ.get('AUTH_PREVIEW_URL', 'http://127.0.0.1:5193')
+SCREENSHOTS = os.environ.get('AUTH_SCREENSHOT_DIR')
 PASSWORD = 'ab_123'
 USER = {'id': 'account-a', 'username': 'researcher_a', 'email': 'a@example.org'}
 OTHER = {'id': 'account-b', 'username': 'researcher_b', 'email': 'b@example.org'}
@@ -22,7 +23,7 @@ def main():
         browser = driver.chromium.launch(headless=True)
         context = browser.new_context(viewport={'width': 390, 'height': 844})
         context.add_init_script("localStorage.setItem('literature-ui-locale', 'en-US')")
-        state = {'user': None, 'csrf': 'csrf-a', 'user_papers': 1, 'expire': False, 'hold': False, 'hold_logout': False, 'hold_me': True}
+        state = {'user': None, 'csrf': 'csrf-a', 'user_papers': 1, 'expire': False, 'hold': False, 'hold_logout': False, 'hold_me': True, 'session_failed': True}
         calls, errors, held, canceled, external, logouts, sessions = [], [], [], [], [], [], []
 
         def api(route):
@@ -34,6 +35,8 @@ def main():
                 if state['hold_me']:
                     sessions.append(route)
                     return
+                if state['session_failed']:
+                    return route.fulfill(status=503, json={})
                 return route.fulfill(status=200 if state['user'] else 401, json={'user': state['user'], 'csrf_token': state['csrf']})
             if path == '/api/v1/auth/login':
                 if data['password'] == 'invalid password':
@@ -96,15 +99,30 @@ def main():
         page.set_default_timeout(6000)
         page.on('pageerror', lambda error: errors.append(str(error)))
         page.on('requestfailed', lambda request: canceled.append(request.url))
+        def screenshot(name, width=1440):
+            if SCREENSHOTS:
+                page.set_viewport_size({'width': width, 'height': 1000})
+                Path(SCREENSHOTS).mkdir(parents=True, exist_ok=True)
+                page.screenshot(path=str(Path(SCREENSHOTS) / (name + '.png')), full_page=True)
         page.goto(BASE + '/tasks/new?draft=private')
         expect(page.get_by_role('status')).to_contain_text('Checking your sign-in status')
+        screenshot('loading')
         assert not [call for call in calls if '/auth/' not in call[0]]
         state['hold_me'] = False
         for route in sessions:
-            route.fulfill(status=401, json={})
+            route.fulfill(status=503, json={})
+        expect(page.get_by_role('alert')).to_contain_text('Unable to confirm your sign-in status')
+        screenshot('connection-error')
+        state['session_failed'] = False
+        page.get_by_role('button', name='Retry', exact=True).click()
         expect(page).to_have_url(BASE + '/login?next=%2Ftasks%2Fnew%3Fdraft%3Dprivate')
+        expect(page.get_by_role('heading', name='Log in', exact=True)).to_be_visible()
+        screenshot('login-desktop')
+        screenshot('login-mobile', 390)
         assert not [call for call in calls if '/auth/' not in call[0]]
         page.get_by_role('link', name='Create account', exact=True).click()
+        expect(page.get_by_role('heading', name='Create account', exact=True)).to_be_visible()
+        screenshot('register-desktop')
         page.get_by_label('Username', exact=True).fill('bad-name')
         page.get_by_label('Email', exact=True).fill('invalid-email')
         page.get_by_label('Password', exact=True).fill('short')
@@ -273,6 +291,15 @@ def main():
                 page.wait_for_function('document.documentElement.scrollWidth <= innerWidth')
         page.get_by_role('combobox', name='界面语言 / Interface language').select_option('zh-CN')
         expect(page.get_by_role('heading', name='重置密码', exact=True)).to_be_visible()
+        screenshot('reset-chinese')
+        for path, title in [('/login', '登录'), ('/register', '创建账号')]:
+            page.goto(BASE + path)
+            page.get_by_role('combobox', name='界面语言 / Interface language').select_option('zh-CN')
+            expect(page.get_by_role('heading', name=title, exact=True)).to_be_visible()
+            screenshot(title + '-desktop')
+            page.set_viewport_size({'width': 320, 'height': 800})
+            page.wait_for_function('document.documentElement.scrollWidth <= innerWidth')
+            screenshot(title + '-mobile', 320)
         assert not errors, errors
         assert not external, external
         browser.close()

@@ -1,9 +1,8 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { Alert, Button, Input } from 'antd';
-import { BookOutlined } from '@ant-design/icons';
 import { Link, Navigate, useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 import { asApiError, isCanceled } from '../api/client';
-import LanguageSwitch from '../components/LanguageSwitch';
+import AuthLayout from './AuthLayout';
 import { t, useLocale } from '../i18n';
 import { authPost } from './api';
 import { useAuth } from './AuthProvider';
@@ -160,7 +159,7 @@ export default function AuthPage() {
       {change ? field('current_password', '当前密码', true, 'current-password') : null}
       {!forgot ? field('password', verify ? '原密码' : reset || change ? '新密码' : '密码', true, register || reset || change ? 'new-password' : 'current-password') : null}
       {register || reset || change ? field('confirm', '确认密码', true, 'new-password') : null}
-      {!forgot ? <p className="auth-hint">{t('密码为 6–128 个字符，可使用数字、字母、下划线等符号，无需混合字符种类，中文和空格也会保留。')}</p> : null}
+      {!forgot && !login ? <p className="auth-hint">{t('密码为 6–128 个字符，可使用数字、字母、下划线等符号，无需混合字符种类，中文和空格也会保留。')}</p> : null}
       <Button aria-label={t(forgot ? '发送重置链接' : title)} type="primary" htmlType="submit" loading={busy} disabled={(needsToken && !token) || (login && auth.status === 'loading')} block>{t(forgot ? '发送重置链接' : title)}</Button>
     </form> : null}
     {(done && register) || verify || pendingVerification ? <form className="auth-resend" onSubmit={resend} noValidate>
@@ -177,5 +176,5 @@ export default function AuthPage() {
     </nav>
   </>;
   if (change) return <section className="auth-account">{content}</section>;
-  return <div className="auth-shell"><header className="auth-header"><Link to="/login" className="auth-brand"><BookOutlined /><span>Literature</span></Link><LanguageSwitch /></header><main className="auth-main"><section className="auth-panel">{content}</section><aside className="auth-note"><BookOutlined /><h2>{t('让研究回到原文')}</h2><p>{t('整理文献、比较观点，沿着引用核对每一项研究发现。')}</p></aside></main><footer className="auth-footer">{t('研究始于阅读，也应能回到原文。')}</footer></div>;
+  return <AuthLayout>{content}</AuthLayout>;
 }
