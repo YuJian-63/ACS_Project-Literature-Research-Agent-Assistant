@@ -1,0 +1,6 @@
+{
+  "question": "搜索 arXiv 上的 LoRA 和 QLoRA 原论文，比较它们的核心方法与显存节约机制。最多两篇，表格各项关联原文证据，不将不同实验配置的数字直接比较。",
+  "sources": [],
+  "allow_search": true,
+  "max_papers": 2
+}

@@ -1,0 +1,6 @@
+{
+  "question": "总结《Attention Is All You Need》的研究问题、方法、翻译实验结果与适用条件。明确指出尚未覆盖的内容，每项事实引用原文。",
+  "sources": ["1706.03762v7"],
+  "allow_search": false,
+  "max_papers": 1
+}

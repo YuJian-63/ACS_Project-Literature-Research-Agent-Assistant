@@ -1,0 +1,6 @@
+{
+  "question": "《Attention Is All You Need》为什么在 scaled dot-product attention 中用 sqrt(d_k) 缩放？请根据原文回答并给出页码证据。",
+  "sources": ["1706.03762v7"],
+  "allow_search": false,
+  "max_papers": 1
+}
