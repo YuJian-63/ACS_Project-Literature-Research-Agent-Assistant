@@ -296,3 +296,22 @@ Desktop.ini
 
 # Keep dependency lockfiles, migrations, evaluation fixtures, and documentation.
 # Do not add blanket rules such as *.pdf, *.json, *.sql, or data/.
+
+# Agent local credentials, downloaded data, and run output
+/agent/**/*.key
+/agent/**/*.pem
+/agent/apis/api-keys.txt
+/agent/data/
+/agent/output/
+/agent/tmp/
+/agent/runs/
+/agent/slurm_log/
+/agent/**/result-*.json
+
+# Agent local TACC build products
+/agent/vllm-src/
+/agent/vllm-source.tar.gz
+/agent/.venv-private/
+
+# Local root agent notes
+/AGENTS.md
