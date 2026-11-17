@@ -14,6 +14,11 @@ from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, field_validato
 API_URL = "https://export.arxiv.org/api/query"
 MAX_METADATA_BYTES = 2 * 1024 * 1024
 MAX_PDF_BYTES = 20 * 1024 * 1024
+MAX_SEARCH_RESULTS = 50
+SearchSortBy = Literal["relevance", "submittedDate", "lastUpdatedDate"]
+SearchSortOrder = Literal["ascending", "descending"]
+SEARCH_SORT_FIELDS = ("relevance", "submittedDate", "lastUpdatedDate")
+SEARCH_SORT_ORDERS = ("ascending", "descending")
 ATOM = "{http://www.w3.org/2005/Atom}"
 OPENSEARCH = "{http://a9.com/-/spec/opensearch/1.1/}"
 ARXIV = "{http://arxiv.org/schemas/atom}"
@@ -197,11 +202,11 @@ def source_timestamp(value: str) -> datetime:
     return datetime.fromisoformat(value.replace("Z", "+00:00"))
 
 
-def parse_arxiv_feed(payload: bytes, *, max_results: int = 20) -> ArxivPage:
+def parse_arxiv_feed(payload: bytes, *, max_results: int = MAX_SEARCH_RESULTS) -> ArxivPage:
     try:
         if not isinstance(payload, bytes) or len(payload) > MAX_METADATA_BYTES:
             raise ValueError("Invalid metadata body")
-        if type(max_results) is not int or not 1 <= max_results <= 20:
+        if type(max_results) is not int or not 1 <= max_results <= MAX_SEARCH_RESULTS:
             raise ValueError("Invalid result bound")
         document = payload.decode("utf-8-sig", errors="strict")
         if re.search(r"<!\s*(?:DOCTYPE|ENTITY)", document, flags=re.IGNORECASE):
@@ -270,13 +275,16 @@ class ArxivClient:
     def __init__(self, transport: ProviderTransport):
         self.transport = transport
 
-    def search(self, q: str, limit: int = 10, offset: int = 0) -> ArxivPage:
+    def search(self, q: str, limit: int = 10, offset: int = 0, *,
+               sort_by: SearchSortBy = "relevance", sort_order: SearchSortOrder = "descending") -> ArxivPage:
         _, query = build_search_query(q)
-        if type(limit) is not int or not 1 <= limit <= 20 or type(offset) is not int or not 0 <= offset <= 1000:
+        if type(limit) is not int or not 1 <= limit <= MAX_SEARCH_RESULTS or type(offset) is not int or not 0 <= offset <= 1000:
             raise ValueError("Invalid search pagination")
+        if sort_by not in SEARCH_SORT_FIELDS or sort_order not in SEARCH_SORT_ORDERS:
+            raise ValueError("Invalid search sorting")
         reply = self.transport.request(API_URL, params={
             "search_query": query, "start": offset, "max_results": limit,
-            "sortBy": "relevance", "sortOrder": "descending",
+            "sortBy": sort_by, "sortOrder": sort_order,
         }, deadline=time.monotonic() + 20)
         check_status(reply)
         page = parse_arxiv_feed(reply.body, max_results=limit)

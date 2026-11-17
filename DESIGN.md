@@ -26,6 +26,7 @@ The application serves Research Sans and Research Serif Latin subsets locally fr
 ## Page structure
 
 - Library: compact upload section, parsing details on demand, filters, selectable paper table and research action. Source, page count and parsing state remain visible.
+- Library reading: opening a library title shows an inline PDF workspace. At widths above 1000px, pair the reader with a compact selectable paper list; focused reading hides that list. At 1000px and below, show a paper selector and a return action. Preserve library filters, page and research selection. Keep document loading/error/retry states explicit, and offer an external-open fallback for browsers without an embedded PDF viewer. Fetch through the authenticated file API and release document URLs on switching or leaving.
 - Search: explicit search submission, results and persistent import history in separate columns when space permits. Retain the previous successful results and error recovery behavior.
 - New research: source selection and research question alongside a submission summary. Literature review resources remain automatically allocated by the backend.
 - Research history: filters, question/type, status, source count, execution mode and date. Each record opens its saved task.
@@ -39,13 +40,17 @@ ComparisonView uses the actual backend columns and rows. Resolve paper names fro
 
 ## Responsive behavior
 
-- Above 1190px: full sidebar and wider working area; search and import history share a row.
+- Above 1190px: full sidebar and wider working area. Above 1280px, paper search pairs a wide result column with a compact 224px import history; at 1280px and below history moves underneath.
 - At 1190px and below: narrower sidebar and tighter page spacing.
 - At 1000px and below: source evidence opens in a modal drawer; input papers remain available there. Closing returns keyboard focus to the citation or source button.
 - At 760px and below: navigation becomes horizontal, forms stack, and comparison uses a paper selector with dimensions listed vertically. Data-heavy library/history tables retain contained horizontal scrolling.
 - The application supports a minimum viewport width of 320px. Keep long titles and manuscript text wrapping inside their own regions.
 
+Paper search abstracts show three lines by default with an accessible expand/collapse control for longer text. Search supports relevance, publication date and update date sorting, numbered pages, a page jump, and 10/25/50 papers per page (default 10). The existing maximum start offset of 1000 allows up to 101/41/21 pages respectively. Changing size or sort returns to page one while preserving the other search settings. On a successful page change, scroll and focus the result heading; failed requests preserve the previous page, its size and ordering. Import history refresh must not move focus or scroll.
+
 ## Language and states
+
+Account entry uses a shared AuthLayout for sign-in, registration, email verification, password recovery and AuthGate loading/error states. The desktop layout pairs a pale sage research introduction with a white form surface; at 760px and below, the form appears first and the introduction becomes compact. Keep the existing local fonts and green accent, visible field labels, keyboard focus and explicit retry actions. Authentication styles live in frontend/src/features/auth/components/auth.css. The paper illustration is decorative and contains no research results.
 
 Use the existing locale provider and message catalog for interface text. Preserve the user's saved language choice. Switching interface language translates controls and known generic result titles; it does not translate saved research questions, paper titles, generated Markdown, quotations or comparison values.
 

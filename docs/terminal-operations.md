@@ -412,4 +412,4 @@ npm.cmd run verify:review
 npm.cmd run build
 ~~~
 
-PostgreSQL 回归会创建并清理本次随机测试库，保留业务库。浏览器诊断测试需本地已有 Playwright 环境；脚本 frontend/checks/search-browser.py 默认访问 127.0.0.1:5194，全部 API 为本地夹具。
+PostgreSQL 回归会创建并清理本次随机测试库，保留业务库。浏览器诊断测试需本地已有 Playwright 环境；脚本 frontend/checks/retrieval-browser.py 默认访问 127.0.0.1:5194，全部 API 为本地夹具。

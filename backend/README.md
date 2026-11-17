@@ -455,6 +455,6 @@ uv run --locked python -B -m unittest discover -s tests -q
 uv run --locked python -B tests/test_ownership.py --postgres
 ~~~
 
-第一条运行离线测试；数据库用例默认跳过。第二条在本机 PostgreSQL 新建随机 ownership_tests 数据库并在结束时删除自己的测试库，不清理实际业务库。浏览器诊断用例为 frontend/checks/search-browser.py，测试全部拦截 API，不访问真实模型或邮箱。
+第一条运行离线测试；数据库用例默认跳过。第二条在本机 PostgreSQL 新建随机 ownership_tests 数据库并在结束时删除自己的测试库，不清理实际业务库。浏览器诊断用例为 frontend/checks/retrieval-browser.py，测试全部拦截 API，不访问真实模型或邮箱。
 
 验收应使用新建任务：中文询问英文论文目标/方法/结论、具体实验指标、论文未覆盖的问题，以及六篇英文论文中文比较。每项检查回答内容、逐字引用、PDF 页码、缺失维度说明、执行记录及刷新恢复。自动测试只证明代码路径和约束，真实模型回答质量需另外人工核验。

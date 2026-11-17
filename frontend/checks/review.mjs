@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url';
 const root = fileURLToPath(new URL('../', import.meta.url));
 const server = await createServer({ root, server: { middlewareMode: true, watch: null }, appType: 'custom' });
 try {
-  const { normalizeSubmission, submissionSignature } = await server.ssrLoadModule('/src/lib/submission.ts');
+  const { normalizeSubmission, submissionSignature } = await server.ssrLoadModule('/src/features/research/lib/submission.ts');
   const { eventText } = await server.ssrLoadModule('/src/i18n/diagnostics.ts');
   const { setLocale } = await server.ssrLoadModule('/src/i18n/store.ts');
   const first = normalizeSubmission('review', 'Compare', ['b', 'a']);

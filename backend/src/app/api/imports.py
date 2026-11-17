@@ -8,7 +8,7 @@ from fastapi import Depends, APIRouter, Query, Request, Response
 from pydantic import Field, field_validator
 from sqlalchemy import func, select
 
-from app.sources.arxiv import ERROR_PHASES, ArxivError, build_search_query, normalize_arxiv_id
+from app.sources.arxiv import ERROR_PHASES, MAX_SEARCH_RESULTS, ArxivError, SearchSortBy, SearchSortOrder, build_search_query, normalize_arxiv_id
 from app.db.models import PaperImport
 from app.errors import APIError
 from app.sources.imports import get_import, import_view, retry_import, submit_import
@@ -71,7 +71,8 @@ def accepted(response: Response, item: dict) -> dict:
 @router.get("/api/v1/paper-search", response_model=Page[SearchPaper])
 def search_papers(
     request: Request, user: CurrentUser, q: Annotated[str, Query(min_length=1, max_length=200)],
-    limit: Annotated[int, Query(ge=1, le=20)] = 10, offset: Annotated[int, Query(ge=0, le=1000)] = 0,
+    limit: Annotated[int, Query(ge=1, le=MAX_SEARCH_RESULTS)] = 10, offset: Annotated[int, Query(ge=0, le=1000)] = 0,
+    sort_by: SearchSortBy = "relevance", sort_order: SearchSortOrder = "descending",
 ) -> dict:
     try:
         normalized, _ = build_search_query(q)
@@ -79,17 +80,17 @@ def search_papers(
         raise APIError(422, "INVALID_REQUEST", "关键词须为 1—200 字符且最多 20 个词，不得含控制字符") from None
     require_arxiv(request)
     cache = request.app.state.arxiv_cache
-    page = cache.get(normalized, limit, offset)
+    page = cache.get(normalized, limit, offset, sort_by=sort_by, sort_order=sort_order)
     if page is None:
         started = time.monotonic()
         try:
-            page = request.app.state.arxiv_client.search(normalized, limit=limit, offset=offset)
+            page = request.app.state.arxiv_client.search(normalized, limit=limit, offset=offset, sort_by=sort_by, sort_order=sort_order)
         except ArxivError as error:
             phase = error.phase if isinstance(error.phase, str) and error.phase in ERROR_PHASES else "unknown"
             logger.warning("arXiv search failed: request_id=%s phase=%s elapsed_ms=%d code=%s",
                            request.state.request_id, phase, round((time.monotonic() - started) * 1000), error.code)
             raise
-        cache.put(normalized, limit, offset, page)
+        cache.put(normalized, limit, offset, page, sort_by=sort_by, sort_order=sort_order)
     with request.app.state.sessions() as session:
         identities = [paper.external_id for paper in page.items]
         imports = {item.external_id: item for item in session.scalars(select(PaperImport).where(PaperImport.user_id == user.id, PaperImport.provider == "arxiv", PaperImport.external_id.in_(identities)))}

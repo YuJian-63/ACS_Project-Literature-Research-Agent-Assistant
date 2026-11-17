@@ -12,7 +12,7 @@ from uuid import UUID, uuid4
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session, sessionmaker
 
-from app.sources.arxiv import ArxivError, ArxivPage, build_search_query
+from app.sources.arxiv import MAX_SEARCH_RESULTS, SEARCH_SORT_FIELDS, SEARCH_SORT_ORDERS, ArxivError, ArxivPage, SearchSortBy, SearchSortOrder, build_search_query
 from app.db.models import SourceRequestGate
 
 
@@ -97,16 +97,20 @@ class SearchCache:
     def __init__(self, *, clock: Callable[[], float] = time.monotonic):
         self.clock = clock
         self.lock = Lock()
-        self.entries: OrderedDict[tuple[str, int, int], tuple[float, ArxivPage]] = OrderedDict()
+        self.entries: OrderedDict[tuple[str, int, int, str, str], tuple[float, ArxivPage]] = OrderedDict()
 
-    def key(self, q: str, limit: int, offset: int) -> tuple[str, int, int]:
+    def key(self, q: str, limit: int, offset: int, sort_by: SearchSortBy = "relevance",
+            sort_order: SearchSortOrder = "descending") -> tuple[str, int, int, str, str]:
         normalized, _ = build_search_query(q)
-        if type(limit) is not int or not 1 <= limit <= 20 or type(offset) is not int or not 0 <= offset <= 1000:
+        if type(limit) is not int or not 1 <= limit <= MAX_SEARCH_RESULTS or type(offset) is not int or not 0 <= offset <= 1000:
             raise ValueError("Invalid search pagination")
-        return normalized, limit, offset
+        if sort_by not in SEARCH_SORT_FIELDS or sort_order not in SEARCH_SORT_ORDERS:
+            raise ValueError("Invalid search sorting")
+        return normalized, limit, offset, sort_by, sort_order
 
-    def get(self, q: str, limit: int, offset: int) -> ArxivPage | None:
-        key = self.key(q, limit, offset)
+    def get(self, q: str, limit: int, offset: int, *, sort_by: SearchSortBy = "relevance",
+            sort_order: SearchSortOrder = "descending") -> ArxivPage | None:
+        key = self.key(q, limit, offset, sort_by, sort_order)
         with self.lock:
             cached = self.entries.get(key)
             if cached is None:
@@ -117,8 +121,9 @@ class SearchCache:
             self.entries.move_to_end(key)
             return copy.deepcopy(cached[1])
 
-    def put(self, q: str, limit: int, offset: int, page: ArxivPage) -> None:
-        key = self.key(q, limit, offset)
+    def put(self, q: str, limit: int, offset: int, page: ArxivPage, *, sort_by: SearchSortBy = "relevance",
+            sort_order: SearchSortOrder = "descending") -> None:
+        key = self.key(q, limit, offset, sort_by, sort_order)
         if not isinstance(page, ArxivPage):
             raise ValueError("Only successful upstream pages can be cached")
         with self.lock:
