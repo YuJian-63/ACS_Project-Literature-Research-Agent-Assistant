@@ -12,6 +12,7 @@ from typing import Annotated, Any, TypedDict
 
 from langchain_core.messages import BaseMessage, HumanMessage, SystemMessage, ToolMessage
 from langchain_core.tools import BaseTool, InjectedToolArg, tool
+from langchain_core.utils.function_calling import convert_to_openai_tool
 from langgraph.graph import END, START, StateGraph
 from pydantic import Field, ValidationError
 
@@ -20,6 +21,7 @@ from apis.papers import normalize_arxiv_id
 from apis.papers import read_paper as read_paper_api
 from apis.search_web import search_web
 from config import RUNS_DIR
+from context import TokenCounter, prepare_context
 from schemas import Evidence, Task, TaskResult, Usage
 
 
@@ -28,6 +30,9 @@ from schemas import Evidence, Task, TaskResult, Usage
 class RunLog:
     timeout_seconds: float | None
     started: float
+    context_window: int | None = 32000
+    context_policy: Callable = prepare_context
+    context_counters: dict[str, TokenCounter] = field(default_factory=dict)
     usage: Usage = field(default_factory=Usage)
     trace: list[dict] = field(default_factory=list)
     errors: list[dict] = field(default_factory=list)
@@ -40,6 +45,7 @@ class PaperContext:
     search: Callable
     reader: Callable
     model: Any = None
+    tool_schemas: list[dict] = field(default_factory=list)
     allowed: set[str] = field(default_factory=set)
     papers: dict[str, dict] = field(default_factory=dict)
     evidence: dict[str, Evidence] = field(default_factory=dict)
@@ -275,7 +281,49 @@ def request_timeout(log: RunLog, default: float) -> float:
     return min(default, max(0.001, log.timeout_seconds - (time.monotonic() - log.started)))
 
 
-def invoke_model(model, messages: list, log: RunLog, purpose: str, *, max_tokens: int):
+def invoke_model(
+    model,
+    messages: list,
+    log: RunLog,
+    purpose: str,
+    *,
+    max_tokens: int,
+    tools: list[dict] | None = None,
+):
+    check_time(log)
+    tools = tools or []
+    counter = log.context_counters.setdefault(purpose, TokenCounter())
+    # Only the main agent uses the injected history policy. Excerpt summaries
+    # still get a window check, without recursively compacting their own input.
+    policy = log.context_policy if purpose == "agent" else prepare_context
+    prepared = policy(
+        [message.model_copy(deep=True) for message in messages],
+        tools=tools,
+        context_window=log.context_window,
+        max_output_tokens=max_tokens,
+        counter=counter,
+    )
+    messages = prepared.messages
+    measurement = {
+        "window": log.context_window,
+        "input_tokens_estimate": prepared.input_tokens_estimate,
+        "count_method": prepared.count_method,
+    }
+    if (
+        log.context_window is not None
+        and prepared.input_tokens_estimate + max_tokens > log.context_window
+    ):
+        log.trace.append(
+            {
+                "kind": "context",
+                "purpose": purpose,
+                "context": measurement,
+                "output_limit": max_tokens,
+                "stop_reason": "context_limit",
+                "messages": [m.model_dump(mode="json", exclude_none=True) for m in messages],
+            }
+        )
+        raise RunStopped("context_limit")
     timeout = request_timeout(log, 180)
     started = time.monotonic()
     log.usage.model_calls += 1
@@ -285,6 +333,7 @@ def invoke_model(model, messages: list, log: RunLog, purpose: str, *, max_tokens
         "kind": "model",
         "purpose": purpose,
         "output_limit": max_tokens,
+        "context": measurement,
         "messages": [m.model_dump(mode="json", exclude_none=True) for m in messages],
     }
     try:
@@ -306,6 +355,8 @@ def invoke_model(model, messages: list, log: RunLog, purpose: str, *, max_tokens
             "context_limit" if code == "context_length_exceeded" else "model_error"
         ) from None
     metadata = response.usage_metadata
+    if metadata:
+        counter.observe(messages, tools, metadata.get("input_tokens"))
     if metadata and all(
         type(metadata.get(k)) is int for k in ("input_tokens", "output_tokens", "total_tokens")
     ):
@@ -406,6 +457,7 @@ def agent_node(state: GraphState, *, model, context: PaperContext) -> dict:
             log,
             "agent",
             max_tokens=context.task.max_output_tokens,
+            tools=context.tool_schemas,
         )
     except RunStopped as exc:
         return {"stop_reason": str(exc)}
@@ -530,6 +582,10 @@ def make_result(state: GraphState, context: PaperContext) -> TaskResult:
             "task": task.model_dump(),
             "model": getattr(context.model, "model_name", None),
             "temperature": getattr(context.model, "temperature", None),
+            "context_window": log.context_window,
+            "context_policy": getattr(
+                log.context_policy, "__name__", type(log.context_policy).__name__
+            ),
         },
         sources=[
             {key: paper.get(key) for key in ("paper_id", "source_id", "title", "url", "version")}
@@ -556,12 +612,21 @@ def run_task(
     search: Callable = search_web,
     reader: Callable = read_paper_api,
     persist: bool = False,
+    context_window: int | None = 32000,
+    context_policy: Callable = prepare_context,
 ) -> TaskResult:
     """Create tools and model, run the graph, then validate and optionally save the result."""
     task = task if isinstance(task, Task) else Task.model_validate(task)
+    if context_window is not None and (type(context_window) is not int or context_window <= 0):
+        raise ValueError("context_window must be a positive integer or None")
     context = PaperContext(
         task=task,
-        log=RunLog(timeout_seconds=task.timeout_seconds, started=time.monotonic()),
+        log=RunLog(
+            timeout_seconds=task.timeout_seconds,
+            started=time.monotonic(),
+            context_window=context_window,
+            context_policy=context_policy,
+        ),
         search=search,
         reader=reader,
         allowed={normalize_arxiv_id(source) for source in task.sources},
@@ -569,6 +634,7 @@ def run_task(
     tools = [open_paper, read_paper, summarize_paper]
     if task.allow_search:
         tools.insert(0, search_papers)
+    context.tool_schemas = [convert_to_openai_tool(item) for item in tools]
     state = GraphState(
         messages=[
             SystemMessage(content=SYSTEM),
@@ -605,9 +671,12 @@ def main() -> int:
     parser.add_argument("--task", type=Path, required=True)
     parser.add_argument("--output", type=Path)
     parser.add_argument("--persist", action="store_true", help="Save papers and result to Neon")
+    parser.add_argument(
+        "--context-window", type=int, default=32000, help="Local estimated input + output limit"
+    )
     args = parser.parse_args()
     task = Task.model_validate_json(args.task.read_text())
-    result = run_task(task, persist=args.persist)
+    result = run_task(task, persist=args.persist, context_window=args.context_window)
     output = args.output or RUNS_DIR / f"{task.task_id}.json"
     output.parent.mkdir(parents=True, exist_ok=True)
     output.write_text(result.model_dump_json(indent=2) + "\n")

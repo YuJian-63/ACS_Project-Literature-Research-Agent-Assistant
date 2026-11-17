@@ -27,6 +27,7 @@ PDF 缓存在 `data/papers/`；解析保留页码、版本及原文块。设计�
 uv run python baseline.py --task examples/qa.json --persist
 uv run python baseline.py --task examples/summary.json
 uv run python baseline.py --task examples/review.json
+uv run python baseline.py --task examples/qa.json --context-window 32000
 uv run pytest -q
 ```
 
@@ -44,9 +45,11 @@ uv run pytest -q
 
 模型请求工具时继续循环，返回最终 JSON 时结束。到达轮数或时间上限直接记录 `step_limit` / `time_limit`，保留证据与 trace，不追加收尾调用。时间在调用前后检查，并收紧单次请求超时；它不是到点强杀。Token 用量只按 API usage 记录，不设累计额度。
 
-上下文容量由模型 API 校验，超限保留为运行失败；当前不做本地 token 估算拦截，也不自动压缩历史或强制收尾。上下文优化待实际需要时加入。
+每次主模型或摘要调用前，检查估算输入 token 加本次输出额度是否超过 `context_window`；超过则直接停止为 `context_limit`，不发起模型调用。窗口默认 `32000`，CLI 通过 `--context-window` 配置；Python 可传 `run_task(..., context_window=None)` 关闭本地上限。这是运行参数，不放入任务 JSON。服务端报告上下文超限时也记录 `context_limit`。
 
-`usage.agent_steps` 记录主 agent 轮数，`usage.model_calls` 包含摘要调用；同时记录工具调用数、token 和耗时，缺失的 API token 统计保留为空。原文和摘要分别按 chunk 去重，摘要后仍可读取原文核实。摘要工具的现有行为保留，后续单独评估。
+默认 [prepare_context](context.py) 保留完整历史，不压缩或强制收尾，也不增加模型调用。首次计数使用字符、消息包装和工具定义估算；后续请求的历史前缀和工具定义匹配时，用 API `input_tokens` 校准并估算新增内容。主 agent 与摘要分别维护计数锚点；所有本地计数仍是近似值，实际 TACC 容量与 tokenizer 待对齐。Python 可通过 `context_policy` 替换主历史处理策略；摘要仍使用默认准备逻辑和容量检查。
+
+`usage.agent_steps` 记录主 agent 轮数，`usage.model_calls` 包含摘要调用；本地容量拦截不增加这两项。同时记录工具调用数、token 和耗时，缺失的 API token 统计保留为空，不用估算补齐。原文和摘要分别按 chunk 去重，摘要后仍可读取原文核实。摘要工具的现有行为保留，后续单独评估。
 
 代码入口是 [baseline.py](baseline.py)，按工具、模型、state、nodes、构图和运行组织。`@tool` 对象统一提供工具名称、参数和描述；当前工具节点按模型返回顺序串行执行。底层适配器在 [apis/](apis/)，任务与结果字段在 [schemas.py](schemas.py)。
 

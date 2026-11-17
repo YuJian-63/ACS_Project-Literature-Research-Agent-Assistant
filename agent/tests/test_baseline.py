@@ -110,12 +110,16 @@ class ScriptedModel:
         return reply
 
 
-def run(replies, *, reader=paper, search=None, **task_fields):
+def run(replies, *, reader=paper, search=None, context_window=32000, **task_fields):
     model = ScriptedModel(replies)
     task = Task(
         **{"question": "What does the paper say?", "sources": ["1706.03762v7"], **task_fields}
     )
-    dependencies = {"model_factory": model.factory, "reader": reader}
+    dependencies = {
+        "model_factory": model.factory,
+        "reader": reader,
+        "context_window": context_window,
+    }
     if search is not None:
         dependencies["search"] = search
     return run_task(task, **dependencies), model
@@ -622,7 +626,7 @@ def test_failed_summary_does_not_publish_partial_evidence_or_block_retry(retry):
 
 def test_history_is_passed_through_without_compaction_or_forced_synthesis():
     history = "Earlier reasoning and evidence. " * 4000
-    result, model = run([message(history, calls=[call()]), final()])
+    result, model = run([message(history, calls=[call()]), final()], context_window=100000)
     assert result.stop_reason == "completed"
     assert any(item.content == history for item in model.inputs[-1])
     assert all(item["bound"] for item in model.invocations)

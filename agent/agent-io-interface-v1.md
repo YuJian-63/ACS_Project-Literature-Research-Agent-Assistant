@@ -1,10 +1,10 @@
 # Agent Baseline 输入输出接口 v1
 
-更新：2026-11-16。依据当前 `agent/schemas.py`、`agent/baseline.py` 和 `agent/apis/papers.py` 整理。
+更新：2026-11-17。依据当前 `agent/schemas.py`、`agent/baseline.py`、`agent/context.py` 和 `agent/apis/papers.py` 整理。
 
 本文约定 Agent 的任务输入与结果输出。当前提供 Python 函数和本地 CLI，跨模块调用、传输及部署方式尚未联调；本文不定义 HTTP 路由。
 
-Agent 支持可选的 Neon 持久化：`persist=false`（默认）不写入数据库；`persist=true` 保存论文和运行结果。该选项属于运行配置，不放在任务输入 JSON 中。
+Agent 支持可选的 Neon 持久化：`persist=false`（默认）不写入数据库；`persist=true` 保存论文和运行结果。`persist`、`context_window` 和 `context_policy` 属于运行参数，不放在任务输入 JSON 中，调用方式见第 4 节。
 
 ## 1. 输入
 
@@ -48,7 +48,8 @@ Agent 支持可选的 Neon 持久化：`persist=false`（默认）不写入数�
 - 达到轮数或时间上限直接停止，不追加最终回答调用。最后一轮若仍请求工具，该轮工具不会执行。
 - 时间限制通过调用前后检查及收紧单次请求超时实现，不是到点强杀。`timeout_seconds=null` 不取消各适配器的单次请求超时。
 - 摘要内部每次模型调用的输出上限为 `min(1200, max_output_tokens)`。
-- 当前不设置独立的工具调用次数上限、累计 token 预算或本地上下文 token 预算。上下文容量由模型 API 校验；不自动压缩历史，也不根据连续无进展强制生成答案。
+- 当前不设置独立的工具调用次数上限或累计 token 预算。运行参数 `context_window` 默认 `32000`；主模型和摘要调用前，估算输入加本次输出额度超过窗口则停止为 `context_limit`，不发起该次模型调用。服务端可识别的容量错误也记录为 `context_limit`。
+- 默认 `prepare_context` 保留完整历史，不自动压缩或追加收尾调用，也不根据连续无进展强制生成答案。它不额外调用模型；本地容量拦截不增加 `usage.model_calls` 或 `usage.agent_steps`。
 
 最小输入：
 
@@ -121,9 +122,9 @@ Agent 支持可选的 Neon 持久化：`persist=false`（默认）不写入数�
 | `stop_reason` | string | 本次运行的最终停止原因，见第 3 节 |
 | `usage` | object | 主 agent 轮数、调用次数、token 消耗与执行耗时 |
 | `sources` | object[] | 实际获取的论文元数据，按 `source_id` 去重 |
-| `trace` | object[] | 本次运行的模型与工具执行记录 |
+| `trace` | object[] | 本次运行的模型、工具及本地上下文拦截记录 |
 | `errors` | object[] | 错误摘要，每项包含 `stage` 和 `type` |
-| `configuration` | object | 本次运行采用的完整任务与模型配置 |
+| `configuration` | object | 本次运行采用的完整任务、模型及上下文配置 |
 
 引用与来源约定：
 
@@ -145,7 +146,7 @@ Agent 支持可选的 Neon 持久化：`persist=false`（默认）不写入数�
 | `token_usage_complete` | 是否取得每次模型调用的完整 token 统计 |
 | `elapsed_seconds` | Agent 执行耗时，单位秒；不含后端排队、随后的 Neon 保存和 CLI 结果文件写入 |
 
-调用次数包含失败尝试。任一次模型调用缺少完整 usage 或调用失败时，三个累计 token 字段均置为 `null`，同时 `token_usage_complete=false`；不使用估算值补齐。当前没有 `budget_tokens` 字段。
+调用次数包含已发起的失败尝试，不包含调用前的本地容量拦截。任一次模型调用缺少完整 usage 或调用失败时，三个累计 token 字段均置为 `null`，同时 `token_usage_complete=false`；不使用估算值补齐。当前没有 `budget_tokens` 字段。
 
 ### 2.1 执行记录 `trace`
 
@@ -158,6 +159,11 @@ Agent 支持可选的 Neon 持久化：`persist=false`（默认）不写入数�
       "kind": "model",
       "purpose": "agent",
       "output_limit": 4096,
+      "context": {
+        "window": 32000,
+        "input_tokens_estimate": 1100,
+        "count_method": "heuristic"
+      },
       "messages": [
         {
           "type": "system",
@@ -229,18 +235,23 @@ Agent 支持可选的 Neon 持久化：`persist=false`（默认）不写入数�
 模型记录：
 
 - `purpose`：`agent` 表示主循环，包含最终回答调用；`chunk_summary` 表示工具内部的分块摘要调用。
-- `messages` 和 `response` 是 LangChain 消息对象的序列化结果，不是供应商原始 HTTP 请求和响应。后续主循环请求的 `messages` 包含此前消息和工具结果。
+- `messages` 和 `response` 是 LangChain 消息对象的序列化结果，不是供应商原始 HTTP 请求和响应。`messages` 记录准备后实际发送的输入视图；默认策略保留此前消息和工具结果，自定义主历史策略可返回不同视图。
 - 初始 human message 包含任务 JSON：`task_id`、`question`、`sources`、`allow_search`、`max_papers`。`question` 原样传入主模型；程序不按任务类型分流。
 - `max_steps`、`timeout_seconds`、`max_output_tokens` 不进入该任务消息；补齐默认值的完整任务保存在 `configuration.task`。
 - 分块摘要调用的 human message 只包含原始 `question` 和本批 `chunks`。
 - `output_limit` 是本次模型调用配置的最大输出 token 数；`response.usage_metadata` 是本次 API 返回的用量，可能缺失。
-- 模型调用失败时，保留 `kind`、`purpose`、`output_limit`、`messages` 和 `elapsed_seconds`，以 `error` 记录异常类型，不包含 `response`。
+- `context` 包含运行窗口 `window`（可为 `null`）、本次估算输入 `input_tokens_estimate` 和计数方式 `count_method`。默认方式为 `heuristic` 或 `usage_anchored_estimate`，均不是精确 tokenizer 计数。
+- 模型调用失败时，保留 `kind`、`purpose`、`output_limit`、`context`、`messages` 和 `elapsed_seconds`，以 `error` 记录异常类型，不包含 `response`。
+
+默认计数先按序列化请求中的 ASCII 字符数 / 3、非 ASCII 字符数 × 2，加消息包装与工具定义估算。已有 API `input_tokens` 且历史前缀、工具定义均匹配时，改用该输入用量加新增消息估算；否则回退为 `heuristic`。主 agent 与摘要分别维护计数锚点。估算仅用于本地容量检查，不替代 API usage；实际 TACC 窗口和 tokenizer 仍待对齐。
+
+本地容量拦截记录使用 `kind="context"`，包含 `purpose`、`context`、`output_limit`、`stop_reason="context_limit"` 和准备后的 `messages`；没有 `response` 或模型调用耗时。它表示请求尚未发出，与 API 返回上下文超限时的失败 `kind="model"` 记录不同。
 
 工具记录：
 
 - `name`、`arguments` 是模型请求的工具名称和参数；`observation` 是工具结果，结构随工具而变化。
 - 失败时，`observation` 包含 `error` 和 `type`。运行上下文由程序注入，不属于模型工具参数。
-- 工具与模型记录均不包含剩余预算或本地 token 估算字段。
+- 工具记录不含模型容量估算；各类记录均不维护累计剩余 token 预算。
 
 当前工具的记录概要：
 
@@ -264,8 +275,10 @@ Agent 支持可选的 Neon 持久化：`persist=false`（默认）不写入数�
 | `task` | 补齐默认值后的完整输入任务，包含第 1 节的三个执行参数 |
 | `model` | 实际使用的模型标识；未取得时为 `null` |
 | `temperature` | 实际使用的温度参数；未取得时为 `null` |
+| `context_window` | 本地估算输入加输出上限，默认 `32000`；`null` 表示关闭本地上限 |
+| `context_policy` | 主 agent 使用的策略函数名，默认 `"prepare_context"`；可调用对象无函数名时记录类名 |
 
-当前结果构造始终包含这三个键。`persist` 不包含在 `configuration.task` 中。
+当前结果构造始终包含这五个键。`context_window/context_policy` 不属于 `configuration.task`；`persist` 不记录在 `configuration` 中。
 
 ## 3. 结果状态与错误处理
 
@@ -275,7 +288,7 @@ Agent 支持可选的 Neon 持久化：`persist=false`（默认）不写入数�
 | `partial` | 最终输出已解析且引用检查通过，但存在 `unresolved` |
 | `step_limit` | 达到主 agent 轮数上限，未生成最终回答 |
 | `time_limit` | 检查时已达到整任务时间上限 |
-| `context_limit` | 模型 API 返回可识别的 `context_length_exceeded` 错误 |
+| `context_limit` | 本地估算输入加本次输出额度超过窗口，或模型 API 返回可识别的 `context_length_exceeded` 错误 |
 | `model_error` | 模型初始化、工具绑定或模型调用失败；未识别为上下文超限的模型错误也归入此项 |
 | `invalid_tool_call` | 主模型响应包含无法正确解析的工具调用 |
 | `output_truncated` | 主模型响应的 `finish_reason="length"`，输出被截断 |
@@ -290,7 +303,7 @@ Agent 支持可选的 Neon 持久化：`persist=false`（默认）不写入数�
 - 达到执行上限或运行失败时不补最终答案；已有来源、trace 和错误记录仍保留。最终未引用的证据不会额外填入 `citations`，阅读原文等可从 trace 查看。
 - `errors` 可能包含已恢复的工具错误，非空不一定表示最终失败。未知工具、禁用工具或无效参数通常返回工具错误供模型继续处理，不直接设置 `invalid_tool_call`。
 - 摘要输出截断或引用无效通常作为工具错误返回；主模型输出截断才直接设置 `output_truncated`。摘要内部模型调用失败可能直接终止任务。
-- 输入校验失败直接抛出 `ValidationError`；非法 arXiv 来源可能直接抛出 `ValueError`。调用方需捕获异常并映射为自己的错误响应；并非所有运行环境或文件错误都会包装成 `TaskResult`。
+- 输入校验失败直接抛出 `ValidationError`；非法 arXiv 来源或非法 `context_window` 可能直接抛出 `ValueError`。调用方需捕获异常并映射为自己的错误响应；并非所有运行环境或文件错误都会包装成 `TaskResult`。
 - Neon 保存失败时，结果追加 `stage="persistence"` 的错误，保留研究结果，且不改变 `stop_reason`。
 
 错误摘要示例：
@@ -321,11 +334,28 @@ result = run_task(
         "sources": ["1706.03762v7"],
     },
     persist=False,
+    context_window=32000,
 )
 payload = result.model_dump(mode="json")
 ```
 
 `run_task` 接受 `Task` 对象或字典，返回完整 `TaskResult`。
+
+新增上下文参数均为 keyword-only 运行参数：
+
+| 参数 | 默认值 | 说明 |
+|---|---|---|
+| `context_window: int \| None` | `32000` | 正整数；Python 传 `None` 关闭本地上限，服务端仍校验容量 |
+| `context_policy: Callable` | `prepare_context` | 替换主 agent 的输入准备策略；摘要始终使用默认 `prepare_context` 和容量检查 |
+
+策略接口定义在 [context.py](context.py)：
+
+```text
+prepare_context(messages, *, tools, context_window, max_output_tokens, counter)
+    -> PreparedContext(messages, input_tokens_estimate, count_method)
+```
+
+策略收到历史消息的副本、工具定义、容量配置和本调用流的 `TokenCounter`；返回准备后的模型输入及其估算。保存的原始历史与该输入视图分离；容量判断由调用层统一执行。当前默认实现不修改历史，未实现压缩或收尾策略。
 
 CLI 示例，从项目根目录运行：
 
@@ -336,6 +366,7 @@ uv run python baseline.py --task examples/qa.json --output runs/task-001.json
 
 - `--output` 指定完整结果 JSON 文件；省略时写入 `runs/<task_id>.json`。
 - `--persist` 同时保存到 Neon；不影响 CLI 写入本地结果文件。
+- `--context-window INT` 配置本地窗口，默认 `32000`；关闭本地上限需使用 Python `context_window=None`。
 - 标准输出只包含 `task_id/stop_reason/answer/comparison_table/unresolved/usage/errors/output`，其中 `output` 是结果文件路径。标准输出不是完整 `TaskResult`；需要引用和 trace 时，应读取结果文件。
 - 退出码为 0 的条件：`stop_reason` 是 `completed` 或 `partial`，且无持久化错误；否则返回 1。输入、文件等直接抛出的异常也会导致进程失败。
 
@@ -346,11 +377,12 @@ uv run python baseline.py --task examples/qa.json --output runs/task-001.json
 | `budget` 对象 | 删除；使用任务顶层 `max_steps/timeout_seconds/max_output_tokens` |
 | `budget.model_calls` | 无等价字段；`max_steps` 仅限制主 agent 轮数，不限制摘要模型调用数 |
 | `budget.seconds` / `budget.output_tokens` | 对应 `timeout_seconds` / `max_output_tokens` |
-| `budget.tool_calls/tokens/context_tokens` | 已移除，无对应限制字段 |
+| `budget.tool_calls/tokens` | 已移除，无对应限制字段 |
+| `budget.context_tokens` | 已移除；本地容量检查由运行参数 `context_window` 配置，不属于任务字段 |
 | `task_type` | 输入输出均已移除；任务意图由 `question` 表达 |
 | `usage.budget_tokens` | 删除；新增 `usage.agent_steps` |
 | `model_call_budget/tool_call_budget/token_budget/time_budget/context_budget` | 不再产生；当前执行限制或容量错误使用 `step_limit/time_limit/context_limit`，并非逐项等价替换 |
-| trace 中的 `budget_remaining/estimated_input_tokens/token_estimator` | 删除 |
+| trace 中的 `budget_remaining/estimated_input_tokens/token_estimator` | 旧字段删除；当前容量估算记录在 model/context 事件的 `context` 对象中 |
 | 预留最终回答、压缩上下文、两轮无进展后收尾 | 当前无这些机制及其 trace 事件 |
 | `configuration.model/temperature` 可能缺省 | 当前始终含键，未取得时为 `null` |
 
