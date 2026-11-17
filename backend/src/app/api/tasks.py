@@ -6,7 +6,7 @@ from sqlalchemy import func, select
 
 from app.api.pagination import Limit, Offset
 from app.api.schemas import (
-    ArtifactList, EventPage, Page, TaskAccepted, TaskCreate, TaskResponse,
+    ArtifactList, EventPage, Page, TaskAccepted, TaskCreate, TaskResponse, AgentTaskCreate,
     TaskStatus, TaskSummary, TaskType, WorkflowType,
 )
 from app.api.views import summary_view, task_view
@@ -24,12 +24,16 @@ router = APIRouter()
 
 @router.post("/api/v1/tasks", status_code=202, response_model=TaskAccepted)
 def create_task(
-    request: Request, body: TaskCreate, response: Response, user: CurrentUser,
+    request: Request, body: AgentTaskCreate | TaskCreate, response: Response, user: CurrentUser,
     idempotency_key: Annotated[str | None, Header()] = None,
 ) -> dict:
     if len(request.headers.getlist("idempotency-key")) > 1:
         raise APIError(422, "INVALID_REQUEST", "Idempotency-Key 不能重复")
-    result, replayed = submit_task(request.app.state.sessions, request.app.state.settings, body, idempotency_key, user_id=user.id)
+    if isinstance(body, AgentTaskCreate):
+        from app.tasks.agent import submit_agent_task
+        result, replayed = submit_agent_task(request.app.state.sessions, request.app.state.settings, body, idempotency_key, user_id=user.id)
+    else:
+        result, replayed = submit_task(request.app.state.sessions, request.app.state.settings, body, idempotency_key, user_id=user.id)
     response.headers["Location"] = f"/api/v1/tasks/{result['id']}"
     response.headers["Idempotency-Replayed"] = str(replayed).lower()
     return result
@@ -46,7 +50,7 @@ def list_tasks(
         if value is not None:
             conditions.append(column == value)
     if is_mock is not None:
-        conditions.append(Task.runner_type == ("mock" if is_mock == "true" else "langgraph"))
+        conditions.append(Task.runner_type == "mock" if is_mock == "true" else Task.runner_type != "mock")
     with request.app.state.sessions() as session:
         total = session.scalar(select(func.count()).select_from(Task).where(*conditions))
         tasks = list(session.scalars(
@@ -114,3 +118,17 @@ def task_artifacts(request: Request, task_id: UUID, user: CurrentUser) -> dict:
                 "quote": citation.quote,
             } for citation, paper_title in citation_rows],
         }]}
+
+
+@router.get("/api/v1/tasks/{task_id}/agent-result")
+def agent_result(request: Request, task_id: UUID, user: CurrentUser):
+    from app.tasks.agent import public_agent_result
+    with request.app.state.sessions() as session:
+        return public_agent_result(get_task(session, task_id, user.id))
+
+
+@router.get("/api/v1/tasks/{task_id}/agent-trace")
+def agent_trace(request: Request, task_id: UUID, user: CurrentUser):
+    from app.tasks.agent import public_agent_result
+    with request.app.state.sessions() as session:
+        return public_agent_result(get_task(session, task_id, user.id), trace=True)

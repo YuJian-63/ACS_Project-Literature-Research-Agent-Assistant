@@ -66,6 +66,50 @@ class TaskCreate(StrictModel):
         return self
 
 
+class AgentTaskCreate(StrictModel):
+    question: str = Field(min_length=1, max_length=8000)
+    sources: list[str] = Field(default_factory=list, max_length=100)
+    allow_search: bool = False
+    max_papers: int = Field(default=3, ge=1, le=20, strict=True)
+    max_steps: int = Field(default=40, ge=1, le=100, strict=True)
+    timeout_seconds: int = Field(default=600, ge=1, le=1800, strict=True)
+    max_output_tokens: int = Field(default=4096, ge=1, le=32768, strict=True)
+    task_type: TaskType = "qa"
+
+    @field_validator("question")
+    @classmethod
+    def nonempty_question(cls, value: str) -> str:
+        value = value.strip()
+        if not value or "\x00" in value:
+            raise ValueError("问题不能为空")
+        return value
+
+    @field_validator("sources")
+    @classmethod
+    def arxiv_sources(cls, values: list[str]) -> list[str]:
+        import re
+        pattern = r"(?:\d{4}\.\d{4,5}|[a-zA-Z][a-zA-Z.\-]*/\d{7})(?:v[1-9]\d*)?"
+        normalized = []
+        for value in values:
+            value = value.strip()
+            candidate = re.sub(r"^https?://(?:www\.)?arxiv\.org/(?:abs|pdf|html)/", "", value)
+            candidate = re.sub(r"\.pdf$", "", candidate)
+            if not re.fullmatch(pattern, candidate):
+                raise ValueError("当前仅支持 arXiv ID 或 arXiv abs/pdf/html URL")
+            normalized.append(value)
+        return normalized
+
+    @model_validator(mode="after")
+    def require_sources(self):
+        if not self.allow_search and not self.sources:
+            raise ValueError("请提供 arXiv 来源或开启搜索")
+        return self
+
+
+class AgentBudget(Budget):
+    max_tokens: int | None = None
+
+
 class PaperSourceResponse(BaseModel):
     provider: Literal["arxiv"]
     external_id: str
@@ -178,7 +222,9 @@ class RetrievalDiagnostics(BaseModel):
 
 class TaskResponse(TaskSummary):
     budget_mode: Literal["manual", "automatic"] = "manual"
-    budget: Budget
+    budget: AgentBudget
+    result_format: Literal["legacy", "agent-v1"] = "legacy"
+    agent_input: dict[str, Any] | None = None
     versions: Versions
     stats: TaskStats
     last_event_seq: int

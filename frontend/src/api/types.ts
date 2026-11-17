@@ -79,7 +79,7 @@ export interface Page<T> {
 
 export interface Budget {
   max_steps: number;
-  max_tokens: number;
+  max_tokens: number | null;
   timeout_seconds: number;
 }
 
@@ -111,6 +111,8 @@ export interface TaskSummary extends TaskAccepted {
 }
 
 export interface Task extends TaskSummary {
+  result_format?: 'legacy' | 'agent-v1';
+  agent_input?: AgentTaskCreate | null;
   retrieval?: {
     status: string;
     expansion_degraded: boolean;
@@ -187,4 +189,27 @@ export interface Artifact {
   comparison_table: ComparisonTable | null;
   citations: Citation[];
   created_at: string;
+}
+
+export interface AgentTaskCreate {
+  task_type?: TaskType;
+  question: string;
+  sources: string[];
+  allow_search: boolean;
+  max_papers: number;
+  max_steps: number;
+  timeout_seconds: number | null;
+  max_output_tokens: number;
+}
+export interface AgentResult {
+  task_id: string;
+  question: string;
+  answer: string;
+  comparison_table: string;
+  citations: { chunk_id: string; source_id: string; paper_id: string; version: string | number | null; page: number; source_text: string; url: string; title: string }[];
+  unresolved: string[];
+  stop_reason: string;
+  usage: { agent_steps: number; model_calls: number; tool_calls: number; input_tokens: number | null; output_tokens: number | null; total_tokens: number | null; token_usage_complete: boolean; elapsed_seconds: number };
+  sources: Record<string, unknown>[];
+  errors: Record<string, string>[];
 }

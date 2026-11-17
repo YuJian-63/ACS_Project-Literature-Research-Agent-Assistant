@@ -15,15 +15,18 @@ import { useResource } from '../../../shared/hooks/useResource';
 import { useTask } from '../hooks/useTask';
 import { dateTime, duration, isTerminal, stageLabels, taskTypeLabels } from '../../../shared/lib/format';
 
+const AgentResultView = lazy(() => import('../components/AgentResultView'));
+
 const ArtifactView = lazy(() => import('../components/ArtifactView'));
 
 function TaskInputs({ task, papers, loading, error, retry }: { task: Task; papers: Paper[]; loading: boolean; error?: ApiError; retry: () => void }) {
+  if (task.result_format === 'agent-v1') return <section className="content-panel input-panel"><h2>{t('研究输入')}</h2><p>{task.question}</p><ul>{task.agent_input?.sources.map((source, index) => <li key={index}>{source}</li>)}</ul><p>{t('允许搜索：{0}', [task.agent_input?.allow_search ? t('是') : t('否')])}</p><p>{t('Agent 限制：{0} 步 · {1} 秒 · 单次输出 {2} Token', [task.agent_input?.max_steps ?? task.budget.max_steps, task.agent_input?.timeout_seconds ?? '—', task.agent_input?.max_output_tokens ?? '—'])}</p></section>;
   return <section className="content-panel input-panel"><h2>{t('研究输入')}</h2>
     {task.question && <p className="research-question">{task.question}</p>}
     <h3>{t('选定论文')} <span>{t('{0} 篇', [task.paper_ids.length])}</span></h3>
     {error && <ErrorNotice error={error} title={t('论文信息查询失败')} retry={retry} />}
     {loading ? <Skeleton active title={false} paragraph={{ rows: 2 }} /> : <ul className="source-papers">{papers.map((paper) => <li key={paper.id}><a href={paperFileUrl(paper.id)} target="_blank" rel="noopener noreferrer">{paper.title}</a><span>{t('查看 PDF')}</span></li>)}</ul>}
-    <p className="section-footnote">{t(task.budget_mode === 'automatic' ? '系统自动分配：最多 {0} 次调用 · {1} Token · {2} 秒' : '预算：{0} 步 · {1} Token · {2} 秒执行超时', [task.budget.max_steps, task.budget.max_tokens.toLocaleString(getLocale()), task.budget.timeout_seconds])}</p>
+    <p className="section-footnote">{t(task.budget_mode === 'automatic' ? '系统自动分配：最多 {0} 次调用 · {1} Token · {2} 秒' : '预算：{0} 步 · {1} Token · {2} 秒执行超时', [task.budget.max_steps, task.budget.max_tokens?.toLocaleString(getLocale()) ?? '—', task.budget.timeout_seconds])}</p>
   </section>;
 }
 
@@ -59,8 +62,12 @@ function TaskDetail({ taskId }: { taskId: string }) {
       {task.question && <div className="result-question"><span>{t('研究问题')}</span><p>{task.question}</p></div>}
       {task.is_mock && <Alert className="inline-alert" type="warning" showIcon title={t('模拟运行与模拟结果')} description={t('尚未解析或分析论文，未调用模型。以下内容用于验证流程，不应作为研究结论或模型效果指标。')} />}
       {task.status === 'failed' && task.error && <Alert type="error" showIcon className="inline-alert" title={t('任务执行失败 · {0}', [task.error.code])} description={t('{0}。可重新创建任务，原任务记录会保留。', [errorText(task.error)])} />}
-      {complete && <EvidenceCoverageNotice task={task} papers={inputs.data ?? []} />}
-      {complete ? <>
+      {complete && task.result_format !== 'agent-v1' && <EvidenceCoverageNotice task={task} papers={inputs.data ?? []} />}
+      {task.result_format === 'agent-v1' ? <>
+        {state.artifactError && <ErrorNotice error={state.artifactError} title={t('Agent 结果查询失败')} retry={state.refresh} />}
+        {state.agentResult ? <Suspense fallback={<Spin />}><AgentResultView result={state.agentResult} /></Suspense> : <section className="content-panel"><p>{isTerminal(task.status) ? t('尚无 Agent 结果；请查看诊断或刷新。') : t('Agent 在结束后返回结果与引用。执行期间仅显示后端状态。')}</p></section>}
+        {activity}
+      </> : complete ? <>
         {inputs.error && <ErrorNotice error={inputs.error} title={t('论文信息查询失败')} retry={inputs.reload} />}
         <Tabs className="result-tabs" activeKey={view === 'compare' && !hasComparison ? 'read' : view} onChange={setView} destroyOnHidden items={[
           { key: 'read', label: t(task.task_type === 'review' ? '综述正文' : '研究结果'), icon: <FileTextOutlined aria-hidden />, children: result('read') },

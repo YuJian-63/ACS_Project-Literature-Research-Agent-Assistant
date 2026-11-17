@@ -22,7 +22,8 @@ class Settings(BaseSettings):
     task_monitor_enabled: bool = True
     mock_step_delay_seconds: float = Field(default=0.5, ge=0, le=10, allow_inf_nan=False)
     parser_timeout_seconds: float = Field(default=120, ge=1, le=600, allow_inf_nan=False)
-    task_runner: Literal["mock", "langgraph"] = "mock"
+    task_runner: Literal["mock", "langgraph", "agent"] = "mock"
+    agent_python: str = str(Path(__file__).resolve().parents[3] / "agent" / ".venv" / "bin" / "python")
     llm_base_url: str | None = None
     llm_model_id: str | None = None
     llm_api_key: SecretStr | None = None

@@ -119,7 +119,9 @@ class Task(UUIDPrimaryKey, CreatedAt, UpdatedAt, Base):
     run_config: Mapped[dict[str, Any]] = mapped_column(JSONB, server_default=text("'{}'::jsonb"))
     review_state: Mapped[dict[str, Any]] = mapped_column(JSONB, server_default=text("'{}'::jsonb"))
     max_steps: Mapped[int] = mapped_column(Integer, server_default=text("10"))
-    max_tokens: Mapped[int] = mapped_column(Integer, server_default=text("8000"))
+    max_tokens: Mapped[int | None] = mapped_column(Integer().evaluates_none(), server_default=text("8000"))
+    agent_input: Mapped[dict[str, Any] | None] = mapped_column(JSONB(none_as_null=True))
+    agent_result: Mapped[dict[str, Any] | None] = mapped_column(JSONB(none_as_null=True), deferred=True)
     timeout_seconds: Mapped[int] = mapped_column(Integer, server_default=text("120"))
     status: Mapped[str] = mapped_column(Text, server_default="queued")
     stage: Mapped[str] = mapped_column(String(64), server_default="queued")
@@ -144,15 +146,17 @@ class Task(UUIDPrimaryKey, CreatedAt, UpdatedAt, Base):
         Index("tasks_owner_created_idx", "user_id", text("created_at DESC")),
         CheckConstraint("task_type IN ('summary', 'qa', 'review')"),
         CheckConstraint("workflow_type IN ('baseline', 'extended')"),
-        CheckConstraint("runner_type IN ('mock', 'langgraph')"),
+        CheckConstraint("runner_type IN ('mock', 'langgraph', 'agent')"),
         CheckConstraint("length(btrim(workflow_version)) > 0"),
         CheckConstraint("length(btrim(prompt_version)) > 0"),
         CheckConstraint("length(btrim(model_id)) > 0"),
         CheckConstraint("length(btrim(dataset_version)) > 0"),
         CheckConstraint("jsonb_typeof(run_config) = 'object'"),
         CheckConstraint("jsonb_typeof(review_state) = 'object'", name="ck_tasks_review_state_object"),
+        CheckConstraint("agent_input IS NULL OR jsonb_typeof(agent_input) = 'object'", name="tasks_agent_input_object"),
+        CheckConstraint("agent_result IS NULL OR jsonb_typeof(agent_result) = 'object'", name="tasks_agent_result_object"),
         CheckConstraint("max_steps BETWEEN 1 AND 100"),
-        CheckConstraint("max_tokens BETWEEN 1 AND 100000"),
+        CheckConstraint("(runner_type = 'agent' AND max_tokens IS NULL) OR (runner_type <> 'agent' AND max_tokens BETWEEN 1 AND 100000 AND max_tokens IS NOT NULL)", name="tasks_token_policy"),
         CheckConstraint("timeout_seconds BETWEEN 1 AND 1800"),
         CheckConstraint("status IN ('queued', 'running', 'succeeded', 'failed')"),
         CheckConstraint("stage ~ '^[a-z][a-z0-9_]{0,63}$'"),

@@ -41,6 +41,28 @@ def replay(task: Task, digest: str) -> tuple[dict, bool]:
 def submit_task(
     sessions: sessionmaker[Session], settings: Settings, request: TaskCreate, key: str | None, *, user_id: UUID
 ) -> tuple[dict, bool]:
+    if settings.task_runner == "agent":
+        validate_idempotency_key(key)
+        if key is not None:
+            with sessions() as session:
+                existing = session.scalar(select(Task).where(Task.user_id == user_id, Task.idempotency_key == key))
+                if existing is not None:
+                    return replay(existing, request_hash(request, automatic=automatic_budget(existing)))
+        from app.api.schemas import AgentTaskCreate
+        from app.tasks.agent import submit_agent_task
+        with sessions() as session:
+            papers = list(session.scalars(select(Paper).where(Paper.user_id == user_id, Paper.id.in_(request.paper_ids))))
+            if len(papers) != len(request.paper_ids):
+                raise APIError(404, "PAPER_NOT_FOUND", "选定论文不存在")
+            if any(paper.source is None for paper in papers):
+                raise APIError(422, "AGENT_SOURCE_UNSUPPORTED", "Agent 当前仅支持 arXiv 来源，本地 PDF 暂不支持")
+            sources = [paper.source.external_id for paper in sorted(papers, key=lambda item: str(item.id))]
+        converted = AgentTaskCreate(question=request.question or "总结这篇论文的方法、实验结果与局限，并提供原文引用。",
+            sources=sources, task_type=request.task_type, max_papers=len(sources))
+        if request.workflow_type != "baseline":
+            raise APIError(422, "WORKFLOW_NOT_AVAILABLE", "当前仅开放 baseline")
+        return submit_agent_task(sessions, settings, converted, key, user_id=user_id,
+                                 request_digest=request_hash(request, automatic=True))
     validate_idempotency_key(key)
     digest = request_hash(request)
     try:

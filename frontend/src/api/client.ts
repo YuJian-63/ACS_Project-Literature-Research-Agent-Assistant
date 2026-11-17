@@ -1,6 +1,6 @@
 import axios, { type AxiosRequestConfig } from 'axios';
 import { sessionSnapshot, unauthorized } from './session';
-import type { Artifact, EventPage, Page, Paper, PaperImport, PaperSearchParameters, PaperStatus, SearchPaper, Task, TaskAccepted, TaskCreate, TaskStatus, TaskSummary, TaskType } from './types';
+import type { AgentResult, AgentTaskCreate, Artifact, EventPage, Page, Paper, PaperImport, PaperSearchParameters, PaperStatus, SearchPaper, Task, TaskAccepted, TaskCreate, TaskStatus, TaskSummary, TaskType } from './types';
 
 const baseURL = (import.meta.env.VITE_API_BASE_URL || '').replace(/\/$/, '');
 const client = axios.create({ baseURL, timeout: 30000, withCredentials: true });
@@ -106,10 +106,11 @@ export const api = {
   tasks: (parameters: { limit?: number; offset?: number; status?: TaskStatus; task_type?: TaskType }, signal: AbortSignal) =>
     request<Page<TaskSummary>>({ url: '/api/v1/tasks', params: parameters, signal }),
   task: (id: string, signal: AbortSignal) => request<Task>({ url: `/api/v1/tasks/${encodeURIComponent(id)}`, signal }),
-  createTask: (data: TaskCreate, key: string, signal: AbortSignal) =>
+  createTask: (data: TaskCreate | AgentTaskCreate, key: string, signal: AbortSignal) =>
     request<TaskAccepted>({ url: '/api/v1/tasks', method: 'POST', data, headers: { 'Idempotency-Key': key }, signal }),
   events: (id: string, after: number, signal: AbortSignal) =>
     request<EventPage>({ url: `/api/v1/tasks/${encodeURIComponent(id)}/events`, params: { after_seq: after, limit: 500 }, signal }),
+  agentResult: (id: string, signal: AbortSignal) => request<AgentResult | null>({ url: `/api/v1/tasks/${encodeURIComponent(id)}/agent-result`, signal }),
   artifacts: (id: string, signal: AbortSignal) => request<{ items: Artifact[] }>({ url: `/api/v1/tasks/${encodeURIComponent(id)}/artifacts`, signal }),
 };
 

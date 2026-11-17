@@ -76,6 +76,8 @@ def task_view(task: Task, paper_ids: list) -> dict:
             "missing_aspects": outcome.get("missing_aspects", []), "papers": missing_papers}
     return {
         **summary_view(task, paper_ids),
+        "result_format": "agent-v1" if task.runner_type == "agent" else "legacy",
+        "agent_input": task.agent_input if task.runner_type == "agent" else None,
         "budget_mode": "automatic" if automatic_budget(task) else "manual",
         "budget": {name: getattr(task, name) for name in (
             "max_steps", "max_tokens", "timeout_seconds"

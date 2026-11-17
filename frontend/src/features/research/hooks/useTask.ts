@@ -1,11 +1,12 @@
 import { useEffect, useRef, useState } from 'react';
 import { api, asApiError, isCanceled, type ApiError } from '../../../api/client';
-import type { Artifact, Task, TaskEvent } from '../../../api/types';
+import type { AgentResult, Artifact, Task, TaskEvent } from '../../../api/types';
 import { isTerminal } from '../../../shared/lib/format';
 
 export function useTask(taskId: string) {
   const [task, setTask] = useState<Task>();
   const [events, setEvents] = useState<TaskEvent[]>([]);
+  const [agentResult, setAgentResult] = useState<AgentResult | null>();
   const [artifacts, setArtifacts] = useState<Artifact[]>();
   const [queryError, setQueryError] = useState<ApiError>();
   const [eventError, setEventError] = useState<ApiError>();
@@ -48,7 +49,16 @@ export function useTask(taskId: string) {
         setTask(result);
         setQueryError(undefined);
         stop = isTerminal(result.status);
-        if (result.status === 'succeeded') {
+        if (result.result_format === 'agent-v1' && isTerminal(result.status)) {
+          try {
+            const response = await api.agentResult(taskId, controller.signal);
+            if (controller.signal.aborted) return;
+            setAgentResult(response);
+            setArtifactError(undefined);
+          } catch (error) {
+            if (!controller.signal.aborted && !isCanceled(error)) setArtifactError(asApiError(error));
+          }
+        } else if (result.status === 'succeeded') {
           try {
             const response = await api.artifacts(taskId, controller.signal);
             if (controller.signal.aborted) return;
@@ -81,5 +91,5 @@ export function useTask(taskId: string) {
     };
   }, [taskId, revision]);
 
-  return { task, events, artifacts, queryError, eventError, artifactError, loading, refreshing, refresh: () => setRevision((value) => value + 1) };
+  return { task, events, artifacts, agentResult, queryError, eventError, artifactError, loading, refreshing, refresh: () => setRevision((value) => value + 1) };
 }

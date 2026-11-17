@@ -37,7 +37,7 @@ def owns_task(task: Task | None, owner: UUID, now: datetime) -> bool:
 
 
 def claim_task(sessions: sessionmaker[Session], owner: UUID, runner_type: str = "mock") -> UUID | None:
-    if runner_type not in {"mock", "langgraph"}:
+    if runner_type not in {"mock", "langgraph", "agent"}:
         raise ValueError("Unsupported runner type")
     with sessions.begin() as session:
         task = session.scalar(
@@ -57,7 +57,9 @@ def claim_task(sessions: sessionmaker[Session], owner: UUID, runner_type: str = 
         if not staged_review or task.started_at is None:
             task.started_at = now
         task.lease_expires_at = now + timedelta(seconds=LEASE_SECONDS)
-        message = "模拟任务开始执行，尚未分析论文" if runner_type == "mock" else "真实研究任务开始，正在读取已解析证据"
+        message = ("模拟任务开始执行，尚未分析论文" if runner_type == "mock" else
+                   "Agent 研究任务开始执行" if runner_type == "agent" else
+                   "真实研究任务开始，正在读取已解析证据")
         append_event(session, task, now, message, "status")
         return task.id
 
