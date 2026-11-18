@@ -1596,7 +1596,7 @@ main {
 
 .search-layout {
   display: grid;
-  grid-template-columns: minmax(0,1fr) 224px;
+  grid-template-columns: minmax(0,1fr);
   gap: 28px;
   align-items: start
 }
@@ -1717,25 +1717,21 @@ main {
   align-items: baseline
 }
 
-.search-result-heading>span,.source-identity {
+.search-result-heading>span {
+  font-size: 16px;
+  font-weight: 500;
+  line-height: 1.6;
+  color: var(--ink)
+}
+
+.source-identity {
   font-size: 11px;
   color: var(--muted)
 }
 
-.search-result-context,.search-sort-context {
-  margin: 0 0 6px;
-  color: var(--muted);
-  font-size: 11px;
-  line-height: 1.9;
-  overflow-wrap: anywhere
-}
-
-.search-sort-context {
-  padding-bottom: 16px;
-  border-bottom: 1px solid var(--line)
-}
-
 #search-results-heading {
+  font: 600 26px/1.4 var(--serif);
+  margin: 0;
   scroll-margin-top: 24px
 }
 
@@ -2463,3 +2459,41 @@ main {
     transition-duration: .01ms!important
   }
 }
+
+.search-notification-content {
+  overflow-wrap: anywhere;
+  font-size: 14px;
+  line-height: 1.7
+}
+
+.search-notification-content p {
+  margin: 0 0 10px
+}
+
+.ant-notification.search-notification-list {
+  width: min(608px, 100vw);
+  padding-inline: 24px;
+}
+
+.ant-notification .search-notification {
+  box-sizing: border-box;
+  width: 100%;
+  padding: 24px 28px;
+}
+
+.search-notification .ant-notification-notice-title,
+.search-notification .ant-notification-notice-description {
+  padding-right: 20px;
+  overflow-wrap: anywhere;
+}
+
+@media(max-width:600px) {
+  .ant-notification.search-notification-list {
+    padding-inline: 16px;
+  }
+  .ant-notification .search-notification {
+    padding: 20px;
+  }
+}
+
+.paper-delete-action { flex: none; }

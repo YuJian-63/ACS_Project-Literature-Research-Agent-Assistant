@@ -1,16 +1,18 @@
 import { useState } from 'react';
 import { t, useLocale } from '../../../i18n';
-import { paperFileUrl } from '../../../api/client';
+import { Link } from 'react-router-dom';
+import { paperReaderUrl, type TaskReaderReturn } from '../../../shared/lib/paperReader';
 import type { Citation, ComparisonTable, Paper } from '../../../api/types';
 
 interface Props {
   comparison: ComparisonTable;
   papers: Paper[];
   citations: Citation[];
+  taskReturn?: TaskReaderReturn;
   onSelect: (key: string, trigger: HTMLElement) => void;
 }
 
-export default function ComparisonView({ comparison, papers, citations, onSelect }: Props) {
+export default function ComparisonView({ comparison, papers, citations, taskReturn, onSelect }: Props) {
   useLocale();
   const [paperId, setPaperId] = useState(comparison.rows[0]?.paper_id ?? '');
   const [selectedCell, setSelectedCell] = useState('');
@@ -26,8 +28,8 @@ export default function ComparisonView({ comparison, papers, citations, onSelect
   }
   return <section className="comparison-section" aria-label={t('跨论文比较')}>
     <div className="comparison-intro"><h2>{t('把差异放在同一张表里')}</h2><p>{t('选择带引用的内容，查看对应论文、页码与原文证据。')}</p></div>
-    <div className="comparison-scroll" tabIndex={0} role="region" aria-label={t('跨论文比较表，可横向滚动')}><table><thead><tr><th scope="col">{t('论文')}</th>{comparison.columns.map((column) => <th scope="col" key={column.key}>{t(column.label)}</th>)}</tr></thead><tbody>{comparison.rows.map((item, index) => <tr key={item.paper_id}><th scope="row"><a href={paperFileUrl(item.paper_id)} target="_blank" rel="noopener noreferrer">{titles.get(item.paper_id) ?? t('论文 {0}', [index + 1])}</a></th>{comparison.columns.map((column) => <td key={column.key}>{cells(item, column)}</td>)}</tr>)}</tbody></table></div>
-    <div className="mobile-comparison"><label htmlFor="comparison-paper">{t('选择要查看的论文')}</label><select id="comparison-paper" value={row?.paper_id ?? ''} onChange={(event) => setPaperId(event.target.value)}>{comparison.rows.map((item, index) => <option key={item.paper_id} value={item.paper_id}>{titles.get(item.paper_id) ?? t('论文 {0}', [index + 1])}</option>)}</select>{row && <><h3>{titles.get(row.paper_id) ?? t('论文')}</h3>{comparison.columns.map((column) => <section className="mobile-comparison-dimension" key={column.key}><h4>{t(column.label)}</h4>{cells(row, column)}</section>)}</>}</div>
+    <div className="comparison-scroll" tabIndex={0} role="region" aria-label={t('跨论文比较表，可横向滚动')}><table><thead><tr><th scope="col">{t('论文')}</th>{comparison.columns.map((column) => <th scope="col" key={column.key}>{t(column.label)}</th>)}</tr></thead><tbody>{comparison.rows.map((item, index) => <tr key={item.paper_id}><th scope="row"><Link to={paperReaderUrl(item.paper_id, { taskReturn })}>{titles.get(item.paper_id) ?? t('论文 {0}', [index + 1])}</Link></th>{comparison.columns.map((column) => <td key={column.key}>{cells(item, column)}</td>)}</tr>)}</tbody></table></div>
+    <div className="mobile-comparison"><label htmlFor="comparison-paper">{t('选择要查看的论文')}</label><select id="comparison-paper" value={row?.paper_id ?? ''} onChange={(event) => setPaperId(event.target.value)}>{comparison.rows.map((item, index) => <option key={item.paper_id} value={item.paper_id}>{titles.get(item.paper_id) ?? t('论文 {0}', [index + 1])}</option>)}</select>{row && <><h3><Link to={paperReaderUrl(row.paper_id, { taskReturn })}>{titles.get(row.paper_id) ?? t('论文')}</Link></h3>{comparison.columns.map((column) => <section className="mobile-comparison-dimension" key={column.key}><h4>{t(column.label)}</h4>{cells(row, column)}</section>)}</>}</div>
     {!comparison.rows.length && <p className="muted">{t('暂无可展示的比较内容。')}</p>}
     <p className="section-footnote">{t('“当前证据未覆盖”表示本次证据不足以支持该维度，不代表论文全文没有讨论。')}</p>
   </section>;

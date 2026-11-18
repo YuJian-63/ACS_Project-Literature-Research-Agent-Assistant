@@ -177,3 +177,11 @@ npm.cmd run verify:review 验证预算省略、提交指纹和双语进度；npm
 2026-11-14 的页面改版覆盖论文库、搜索、新建研究、研究记录和任务详情，设计规范见 ../DESIGN.md。界面保留中英文切换；已保存的研究正文、引用原文和论文标题不会因切换界面语言而自动翻译。
 
 在 frontend 目录运行 `npm.cmd run build`、`npm.cmd run verify:review`。浏览器回归位于 checks/workspace-browser.py，依赖 Python Playwright 和 Chromium。在仓库根目录运行时，可设置 `WORKSPACE_PREVIEW_URL` 指向已经启动的 Vite（脚本默认 5191）；脚本沿用 runtime/pw-browsers 浏览器目录。该检查拦截 API，不会创建真实任务或调用 arXiv/模型，覆盖引用联动、比较矩阵、执行记录、移动来源抽屉、语言持久化及五类页面的响应式布局。
+
+## 论文删除与导入状态同步
+
+论文库和阅读列表提供逐篇删除确认。只有未被任何研究任务引用的论文可删除；解析中需等待完成。删除后清除选中状态、关闭对应阅读器，并保留筛选及合理页码。删除 arXiv 论文会清理其导入映射，搜索中可再次导入。历史研究任务及引用不受影响。
+
+搜索结果重新搜索及窗口重新获得焦点时会核对服务器导入状态。正在下载和解析的记录继续每两秒刷新，单条状态读取失败不阻断其他记录。所有下载失败均显示「重新下载」，手动重试保留尝试版本和账号额度保护；下载成功但解析失败需在论文库查看原因。
+
+`checks/library-delete-browser.cjs` 使用模拟 API 覆盖删除确认/取消、任务引用保护、CSRF、选中清理、搜索同步和状态读取失败后的重试入口。需安装 Playwright 并提供 Chrome；可通过 `PLAYWRIGHT_MODULE`、`BROWSER_EXECUTABLE`、`SEARCH_PREVIEW_URL` 指定环境，默认预览端口为 5198。

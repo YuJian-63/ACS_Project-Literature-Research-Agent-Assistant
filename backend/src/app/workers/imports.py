@@ -7,7 +7,7 @@ from uuid import uuid4
 
 from sqlalchemy import func, select
 
-from app.sources.arxiv import ArxivClient, ArxivError
+from app.sources.arxiv import ArxivClient, ArxivError, ArxivPaper
 from app.sources.arxiv_transport import SupervisedArxivTransport
 from app.config import Settings
 from app.db.session import create_database_engine, create_session_factory
@@ -112,20 +112,35 @@ class ImportWorker:
                 phase_deadline = deadline
 
         staged = None
+        stage = 'metadata'
+        attempt_started = time.monotonic()
         try:
             staged = staging_path(self.settings.storage_root, job)
             staged.parent.mkdir(parents=True, exist_ok=True)
+            metadata = None
+            if job.source_metadata is not None:
+                try:
+                    metadata = ArxivPaper.model_validate(job.source_metadata)
+                except ValueError:
+                    raise ArxivError('ARXIV_INVALID_RESPONSE', '已保存的来源元数据无效', phase='response_validation') from None
+                if metadata.external_id != job.external_id:
+                    raise ArxivError('ARXIV_VERSION_MISMATCH', '来源元数据版本与请求不一致', phase='response_validation')
             if self.client_factory:
                 client = self.client_factory(job, cancelled)
-                metadata = client.fetch_metadata(job.external_id)
+                if metadata is None:
+                    metadata = client.fetch_metadata(job.external_id)
+                stage = 'pdf'
                 receipt = client.download_pdf(job.external_id, staged, deadline=deadline)
             else:
-                with prepared_client(20) as client:
-                    metadata = client.fetch_metadata(job.external_id)
+                if metadata is None:
+                    with prepared_client(20) as client:
+                        metadata = client.fetch_metadata(job.external_id)
+                stage = 'pdf'
                 with prepared_client(90) as client:
                     receipt = client.download_pdf(job.external_id, staged, deadline=phase_deadline)
             if cancelled():
                 raise ArxivError("REQUEST_CANCELLED", "导入请求已中止", retryable=True)
+            stage = 'commit'
             complete_import(self.sessions, job, metadata, receipt, root=self.settings.storage_root)
         except ImportCommitPending:
             logger.warning("Import completion deferred: import_id=%s", job.import_id)
@@ -137,6 +152,9 @@ class ImportWorker:
             if code == "REQUEST_CANCELLED":
                 code = "IMPORT_WORKER_STOPPED" if self.stopped.is_set() else "IMPORT_LEASE_EXPIRED"
                 message = "导入 Worker 已停止" if self.stopped.is_set() else "导入执行已失效"
+            logger.warning('Import failed: import_id=%s stage=%s phase=%s elapsed_ms=%d code=%s',
+                           job.import_id, stage, error.phase if isinstance(error, ArxivError) else 'unknown',
+                           round((time.monotonic() - attempt_started) * 1000), code)
             try:
                 fail_import(self.sessions, job, code, message, retryable)
             except Exception:

@@ -128,6 +128,95 @@ class OwnershipPostgresTests(unittest.TestCase):
     def task(self, paper, index=0, key="same-key"):
         return self.clients[index].post("/api/v1/tasks", json={"task_type": "summary", "question": "Summarize", "paper_ids": [paper]}, headers={"Idempotency-Key": key})
 
+    def test_delete_unused_paper_removes_file_and_is_owner_scoped(self):
+        paper = self.upload()
+        path = self.root / 'uploads' / f'{paper}.pdf'
+        self.assertEqual(self.clients[1].delete('/api/v1/papers/' + paper).status_code, 404)
+        self.assertTrue(path.exists())
+        response = self.clients[0].delete('/api/v1/papers/' + paper)
+        self.assertEqual(response.status_code, 204, response.text)
+        self.assertFalse(path.exists())
+        self.assertEqual(self.clients[0].get('/api/v1/papers/' + paper).status_code, 404)
+        self.assertEqual(self.clients[0].get('/api/v1/papers').json()['total'], 0)
+
+    def test_delete_rejects_referenced_paper(self):
+        paper = self.upload()
+        self.assertEqual(self.task(paper).status_code, 202)
+        response = self.clients[0].delete('/api/v1/papers/' + paper)
+        self.assertEqual(response.status_code, 409)
+        self.assertEqual(response.json()['error']['code'], 'PAPER_IN_USE')
+        self.assertTrue((self.root / 'uploads' / f'{paper}.pdf').exists())
+
+    def test_delete_processing_and_csrf_are_guarded(self):
+        from app.papers.lifecycle import claim_parse
+        self.upload()
+        job = claim_parse(self.sessions, uuid4())
+        self.assertEqual(self.clients[0].delete('/api/v1/papers/' + str(job)).status_code, 409)
+        self.assertEqual(self.clients[0].delete('/api/v1/papers/' + str(job), headers={'X-CSRF-Token': 'wrong'}).status_code, 403)
+
+    def test_deleted_import_can_be_imported_again_and_manual_failure_retry(self):
+        import hashlib
+        identity = '1706.03762v1'
+        submit_import(self.sessions, 'arxiv', identity, user_id=self.users[0], settings=self.settings)
+        job = claim_import(self.sessions, uuid4())
+        fail_import(self.sessions, job, 'ARXIV_NOT_FOUND', 'source temporarily missing', False)
+        retried = retry_import(self.sessions, job.import_id, 1, user_id=self.users[0], settings=self.settings)
+        self.assertEqual(retried['status'], 'queued')
+        job = claim_import(self.sessions, uuid4())
+        data = b'%PDF-delete-fixture'
+        staged = staging_path(self.root, job)
+        staged.parent.mkdir(parents=True, exist_ok=True)
+        staged.write_bytes(data)
+        source = self.arxiv_fixture().search.return_value.items[0]
+        receipt = DownloadReceipt(size_bytes=len(data), sha256=hashlib.sha256(data).hexdigest())
+        self.assertTrue(complete_import(self.sessions, job, source, receipt, root=self.root))
+        self.assertEqual(self.clients[0].delete('/api/v1/papers/' + str(job.import_id)).status_code, 204)
+        found = self.clients[0].get('/api/v1/paper-search', params={'q': 'rust'}).json()['items'][0]
+        self.assertIsNone(found['import_status'])
+        self.assertIsNone(found['paper_id'])
+        again = submit_import(self.sessions, 'arxiv', identity, user_id=self.users[0], settings=self.settings)
+        self.assertEqual(again['status'], 'queued')
+        self.assertNotEqual(again['id'], job.import_id)
+
+    def test_search_import_reuses_verified_metadata_without_second_api_request(self):
+        import hashlib
+        from unittest.mock import Mock
+        from app.workers.imports import ImportWorker
+        self.clients[0].get('/api/v1/paper-search', params={'q': 'rust'})
+        accepted = self.clients[0].post('/api/v1/paper-imports', json={'provider': 'arxiv', 'external_id': '1706.03762v1'})
+        self.assertEqual(accepted.status_code, 202)
+        identity = UUID(accepted.json()['id'])
+        with self.sessions() as session:
+            self.assertEqual(session.get(PaperImport, identity).source_metadata['external_id'], '1706.03762v1')
+        client = Mock()
+        client.fetch_metadata.side_effect = AssertionError('Search metadata must avoid duplicate API request')
+        def download(external_id, destination, **kwargs):
+            data = b'%PDF-cached-metadata-fixture'
+            destination.write_bytes(data)
+            return DownloadReceipt(size_bytes=len(data), sha256=hashlib.sha256(data).hexdigest())
+        client.download_pdf.side_effect = download
+        self.assertTrue(ImportWorker(self.sessions, self.settings, client_factory=lambda *_: client).run_once())
+        client.fetch_metadata.assert_not_called()
+        with self.sessions() as session:
+            self.assertEqual(session.get(PaperImport, identity).status, 'succeeded')
+            self.assertEqual(session.get(Paper, identity).source.external_id, '1706.03762v1')
+        # Old/direct imports without a snapshot retain exact-version metadata lookup.
+        submit_import(self.sessions, 'arxiv', '1706.03762v2', user_id=self.users[0], settings=self.settings)
+        client.fetch_metadata.side_effect = None
+        client.fetch_metadata.return_value = self.arxiv_fixture().search.return_value.items[0].model_copy(update={'external_id': '1706.03762v2'})
+        self.assertTrue(ImportWorker(self.sessions, self.settings, client_factory=lambda *_: client).run_once())
+        client.fetch_metadata.assert_called_once_with('1706.03762v2')
+
+    def test_retry_hydrates_legacy_import_from_verified_search_cache(self):
+        item = submit_import(self.sessions, 'arxiv', '1706.03762v1', user_id=self.users[0], settings=self.settings)
+        job = claim_import(self.sessions, uuid4())
+        fail_import(self.sessions, job, 'ARXIV_TIMEOUT', 'arXiv 请求超时', True)
+        self.clients[0].get('/api/v1/paper-search', params={'q': 'rust'})
+        response = self.clients[0].post('/api/v1/paper-imports/' + str(item['id']) + '/retry', json={'expected_attempt': 1})
+        self.assertEqual(response.status_code, 202)
+        with self.sessions() as session:
+            self.assertEqual(session.get(PaperImport, job.import_id).source_metadata['external_id'], '1706.03762v1')
+
     def test_single_paper_tasks_freeze_server_budget_and_replay_ignores_client_budget(self):
         from app.api.views import task_view
         from app.tasks.lifecycle import claim_task
@@ -526,7 +615,7 @@ class OwnershipPostgresTests(unittest.TestCase):
         self.assertIsNotNone(permit, "Reset must restore the shared source gate seed")
         release_source_permit(self.sessions, permit)
         with self.engine.connect() as connection:
-            self.assertEqual(connection.scalar(text("SELECT version_num FROM alembic_version")), "20261115_0005")
+            self.assertEqual(connection.scalar(text("SELECT version_num FROM alembic_version")), "20261118_0006")
             self.assertEqual(connection.scalar(text("SELECT count(*) FROM users")), 0)
             self.assertEqual(connection.scalar(text("SELECT count(*) FROM papers")), 0)
 

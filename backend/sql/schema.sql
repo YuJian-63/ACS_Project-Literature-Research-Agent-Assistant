@@ -358,4 +358,7 @@ ALTER TABLE paper_imports ADD CONSTRAINT paper_imports_paper_owner FOREIGN KEY(p
 CREATE INDEX paper_imports_owner_idx ON paper_imports (user_id);
 
 
+-- Verified search metadata reused by independent import workers (20261118_0006).
+ALTER TABLE paper_imports ADD COLUMN source_metadata JSONB;
+
 COMMIT;

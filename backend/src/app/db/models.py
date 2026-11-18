@@ -339,6 +339,7 @@ class PaperImport(UUIDPrimaryKey, CreatedAt, UpdatedAt, Base):
 
     provider: Mapped[str] = mapped_column(Text)
     external_id: Mapped[str] = mapped_column(String(80))
+    source_metadata: Mapped[dict[str, Any] | None] = mapped_column(JSONB(none_as_null=True))
     attempt: Mapped[int] = mapped_column(Integer, server_default=text("1"))
     status: Mapped[str] = mapped_column(Text, server_default="queued")
     paper_id: Mapped[UUID | None] = mapped_column(ForeignKey("papers.id", ondelete="RESTRICT"), unique=True)
