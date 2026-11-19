@@ -538,7 +538,7 @@ HTTP 错误沿用第 8 节 envelope；429 带整数秒 Retry-After 和相同 det
 
 搜索来源失败时，服务端以请求对应的 `X-Request-ID` 记录 `phase`、`elapsed_ms` 和安全错误码；阶段限定为连接、写入、连接池、响应头、响应体、总时限、共享许可、来源 HTTP 状态、响应校验或未知，不记录检索词、联系邮箱、原始异常、响应正文或凭据。该诊断仅用于服务端日志，不添加到公开错误字段；watchdog 退出明确按总时限超时处理。
 
-前端可保留当前页面上一份成功结果，必须同时标注其原关键词、页码和接收时间，并在新请求未完成时说明尚未更新，不得将旧结果冒充新结果。重试重复失败请求的原关键词/offset；旧结果翻页使用其原关键词。`ARXIV_TIMEOUT` 后有 5 秒页面级手动搜索等待，不自动重试，不影响导入/历史读取；它不替代后端共享许可，也不承诺来源恢复时间。429 的服务端冷却规则不变。结果快照不跨刷新持久化，成功空结果会替换旧结果，导入历史仍由服务器保存。
+前端在新搜索或翻页等待期间可暂留上一份成功结果；搜索请求失败后清空搜索状态和旧结果，以弹窗显示错误原因及请求编号，不再展示上次成功结果。站内切换可保留成功搜索状态和进行中的请求，但刷新、新页面或退出账号后清空。手动清除搜索会取消当前查询并忽略迟到响应。`ARXIV_TIMEOUT` 后仍有 5 秒手动搜索等待，429 仍按服务端 Retry-After 限制；清空搜索不解除冷却，也不自动重试。搜索失败不影响已经提交的导入或论文库。
 
 已接收导入的执行失败返回 status=failed/error：ARXIV_NOT_FOUND、ARXIV_VERSION_MISMATCH、ARXIV_RATE_LIMITED、ARXIV_UNAVAILABLE、ARXIV_INVALID_RESPONSE、ARXIV_TIMEOUT、UNSAFE_SOURCE_URL、FILE_TOO_LARGE、INVALID_PDF、STORAGE_WRITE_FAILED、IMPORT_TIMEOUT、IMPORT_LEASE_EXPIRED、IMPORT_WORKER_STOPPED。details.retryable 必须为 boolean：暂时网络/服务/限流/超时/存储及 Worker 中断 true；不存在/版本不符/非法响应/不安全 URL/超限/非法 PDF false。错误不回显上游正文或内部路径。
 
@@ -619,3 +619,9 @@ retrieving 阶段的事件可带 retrieval、retrieval_status、reason、paper_i
 ### 导入来源快照（2026-11-18）
 
 `paper-imports` 的新建/重试请求体保持不变，不接受客户端提供元数据。服务端可从未过期的搜索缓存查找完全相同版本的已验证元数据，并内部持久化到 `PaperImport.source_metadata`；该字段不出现在公开响应中。Worker 重新校验结构和版本后复用，缺失时回退到原有元数据 API 查询。PDF 仍独立下载、校验和落盘，不把元数据缓存当成 PDF 下载完成。
+
+### DELETE /api/v1/tasks/{task_id}（2026-11-19）
+
+需要账号会话、同源 Origin 和 X-CSRF-Token。仅可删除当前账号的研究记录，成功返回 204。不存在或属于其他账号返回 404 TASK_NOT_FOUND；运行中返回 409 TASK_RUNNING。先锁定任务行，再检查状态，防止与 Worker 领取竞争。
+
+使用既有数据库级联删除研究结果、证据引用、执行事件和 task_papers 关联，不删除原论文。论文只有在不再被任何任务引用且不处于解析中时才允许删除；同一论文仍被其他任务引用时继续返回 PAPER_IN_USE。无新增数据库迁移。

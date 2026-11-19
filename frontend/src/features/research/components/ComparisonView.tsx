@@ -15,16 +15,16 @@ interface Props {
 export default function ComparisonView({ comparison, papers, citations, taskReturn, onSelect }: Props) {
   useLocale();
   const [paperId, setPaperId] = useState(comparison.rows[0]?.paper_id ?? '');
-  const [selectedCell, setSelectedCell] = useState('');
+  const [selectedEvidence, setSelectedEvidence] = useState('');
   const titles = new Map([...citations.map((citation) => [citation.paper_id, citation.paper_title] as const), ...papers.map((paper) => [paper.id, paper.title] as const)]);
   const known = new Set(citations.map((citation) => citation.citation_key));
   const row = comparison.rows.find((item) => item.paper_id === paperId) ?? comparison.rows[0];
   function cells(item: ComparisonTable['rows'][number], column: ComparisonTable['columns'][number]) {
     const cell = item.cells[column.key];
     if (cell?.value == null) return <span className="muted">{t('当前证据未覆盖')}</span>;
-    const keys = cell.citation_keys.filter((key) => known.has(key));
+    const keys = [...new Set(cell.citation_keys.filter((key) => known.has(key)))];
     const id = item.paper_id + ':' + column.key;
-    return keys.length ? <><button className="comparison-cell-trigger" aria-pressed={selectedCell === id} onClick={(event) => { setSelectedCell(id); onSelect(keys[0], event.currentTarget); }}><span>{cell.value}</span><small>[{keys[0]}] {t('查看证据')}</small></button>{keys.slice(1).map((key) => <button key={key} className="citation-trigger" onClick={(event) => { setSelectedCell(id); onSelect(key, event.currentTarget); }} aria-label={t('查看引用 {0}', [key])}>[{key}]</button>)}</> : <span>{cell.value}</span>;
+    return <div className="comparison-cell-content"><span>{cell.value}</span>{keys.length > 0 && <div className="comparison-evidence-links">{keys.map((key) => <button type="button" key={key} className="comparison-cell-trigger" aria-pressed={selectedEvidence === id + ':' + key} onClick={(event) => { setSelectedEvidence(id + ':' + key); onSelect(key, event.currentTarget); }}>[{key}] {t('查看证据')}</button>)}</div>}</div>;
   }
   return <section className="comparison-section" aria-label={t('跨论文比较')}>
     <div className="comparison-intro"><h2>{t('把差异放在同一张表里')}</h2><p>{t('选择带引用的内容，查看对应论文、页码与原文证据。')}</p></div>

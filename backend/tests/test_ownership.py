@@ -217,6 +217,50 @@ class OwnershipPostgresTests(unittest.TestCase):
         with self.sessions() as session:
             self.assertEqual(session.get(PaperImport, job.import_id).source_metadata['external_id'], '1706.03762v1')
 
+    def test_delete_task_releases_only_its_own_paper_references(self):
+        paper = self.upload()
+        first = self.task(paper, key='first').json()['id']
+        second = self.task(paper, key='second').json()['id']
+        self.assertEqual(self.clients[1].delete('/api/v1/tasks/' + first).status_code, 404)
+        self.assertEqual(self.clients[0].delete('/api/v1/tasks/' + first, headers={'X-CSRF-Token': 'wrong'}).status_code, 403)
+        self.assertEqual(self.clients[0].delete('/api/v1/tasks/' + first).status_code, 204)
+        self.assertEqual(self.clients[0].get('/api/v1/tasks/' + first).status_code, 404)
+        self.assertEqual(self.clients[0].delete('/api/v1/papers/' + paper).status_code, 409)
+        self.assertEqual(self.clients[0].delete('/api/v1/tasks/' + second).status_code, 204)
+        self.assertTrue((self.root / 'uploads' / f'{paper}.pdf').exists())
+        self.assertEqual(self.clients[0].delete('/api/v1/papers/' + paper).status_code, 204)
+
+    def test_delete_completed_task_cascades_results_citations_and_events(self):
+        from app.db.models import Artifact, Citation, TaskEvent
+        from app.tasks.lifecycle import claim_task, advance_task, complete_mock
+        paper = self.ready_research_paper('A complete source sentence.')
+        self.settings.task_runner = 'mock'
+        task_id = UUID(self.task(str(paper)).json()['id'])
+        owner = uuid4()
+        self.assertEqual(claim_task(self.sessions, owner), task_id)
+        self.assertTrue(advance_task(self.sessions, task_id, owner))
+        self.assertTrue(complete_mock(self.sessions, task_id, owner))
+        with self.sessions.begin() as session:
+            artifact = session.scalar(select(Artifact).where(Artifact.task_id == task_id))
+            chunk = session.scalar(select(PaperChunk).where(PaperChunk.paper_id == paper))
+            session.add(Citation(artifact_id=artifact.id, task_id=task_id, citation_key='C1', paper_id=paper,
+                                 chunk_id=chunk.id, page_number=1, quote='A complete source sentence.'))
+        self.assertEqual(self.clients[0].delete('/api/v1/tasks/' + str(task_id)).status_code, 204)
+        with self.sessions() as session:
+            for model in [Task, TaskPaper, Artifact, Citation, TaskEvent]:
+                self.assertIsNone(session.scalar(select(model)))
+            self.assertIsNotNone(session.get(Paper, paper))
+        self.assertEqual(self.clients[0].delete('/api/v1/papers/' + str(paper)).status_code, 204)
+
+    def test_delete_running_task_is_rejected(self):
+        from app.tasks.lifecycle import claim_task
+        paper = self.upload()
+        task_id = self.task(paper).json()['id']
+        claim_task(self.sessions, uuid4())
+        response = self.clients[0].delete('/api/v1/tasks/' + task_id)
+        self.assertEqual(response.status_code, 409)
+        self.assertEqual(response.json()['error']['code'], 'TASK_RUNNING')
+
     def test_single_paper_tasks_freeze_server_budget_and_replay_ignores_client_budget(self):
         from app.api.views import task_view
         from app.tasks.lifecycle import claim_task

@@ -106,6 +106,7 @@ export const api = {
   },
   tasks: (parameters: { limit?: number; offset?: number; status?: TaskStatus; task_type?: TaskType }, signal: AbortSignal) =>
     request<Page<TaskSummary>>({ url: '/api/v1/tasks', params: parameters, signal }),
+  deleteTask: (id: string, signal: AbortSignal) => request<void>({ url: `/api/v1/tasks/${encodeURIComponent(id)}`, method: 'DELETE', signal }),
   task: (id: string, signal: AbortSignal) => request<Task>({ url: `/api/v1/tasks/${encodeURIComponent(id)}`, signal }),
   createTask: (data: TaskCreate, key: string, signal: AbortSignal) =>
     request<TaskAccepted>({ url: '/api/v1/tasks', method: 'POST', data, headers: { 'Idempotency-Key': key }, signal }),

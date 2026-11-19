@@ -41,7 +41,7 @@ function arxivUrl(identity: string, kind: 'abs' | 'pdf'): string | undefined {
   return /^(?:\d{4}\.\d{4,5}|[a-z][a-z-]*(?:\.[A-Z]{2})?\/\d{7})v[1-9]\d*$/.test(identity) ? `https://arxiv.org/${kind}/${identity}` : undefined;
 }
 
-export default function SearchPapersPage() {
+export default function SearchPapersPage({ active = true }: { active?: boolean }) {
   useLocale();
   const [notification, notificationHolder] = notificationApi.useNotification(searchNotificationConfig);
   const statusFailure = useRef('');
@@ -57,7 +57,6 @@ export default function SearchPapersPage() {
   const maximumPages = Math.floor(maximumOffset / resultPageSize) + 1;
   const maximumResults = maximumPages * resultPageSize;
   const [searching, setSearching] = useState(false);
-  const [searchError, setSearchError] = useState<ApiError | null>(null);
   const [cooldownUntil, setCooldownUntil] = useState(0);
   const [searchRetryUntil, setSearchRetryUntil] = useState(0);
   const [seconds, setSeconds] = useState(0);
@@ -73,13 +72,13 @@ export default function SearchPapersPage() {
   const resultsHeading = useRef<HTMLHeadingElement>(null);
 
   useEffect(() => {
-    if (!snapshot?.reveal) return;
+    if (!active || !snapshot?.reveal) return;
     const frame = requestAnimationFrame(() => {
       resultsHeading.current?.scrollIntoView({ behavior: 'instant', block: 'start' });
       resultsHeading.current?.focus({ preventScroll: true });
     });
     return () => cancelAnimationFrame(frame);
-  }, [snapshot]);
+  }, [snapshot, active]);
 
   function remember(items: PaperImport[], initiated = false) {
     const next = { ...known.current };
@@ -124,7 +123,6 @@ export default function SearchPapersPage() {
       description: <div className="search-notification-content">
         <p>{identity && <>arXiv · {identity}<br /></>}{errorText(error)}</p>
         {cooldown > 0 && <p>{t('{0} 秒后可重试', [cooldown])} · {error.code === 'ARXIV_TIMEOUT' ? t('本次搜索超时。不会自动重试；已有论文和导入记录不受影响。') : t('共享来源访问额度正在冷却。不会自动重新搜索或下载。')}</p>}
-        {kind === 'search' && snapshot && <p>{t('本次请求未完成，以下仍为上次成功的检索结果。')}</p>}
         {error.code === 'ARXIV_NOT_CONFIGURED' && <Link to="/papers">{t('手动上传 PDF')}</Link>}
         {error.requestId && <small>{t('请求编号：')}<span className="identifier">{error.requestId}</span></small>}
       </div>,
@@ -216,7 +214,6 @@ export default function SearchPapersPage() {
     setQuery(term.trim());
     setSort(ordering);
     setPageSize(limit);
-    setSearchError(null);
     notification.destroy('paper-search-search');
     try {
       const { sort_by, sort_order } = sortOptions[ordering];
@@ -235,7 +232,7 @@ export default function SearchPapersPage() {
     } catch (error) {
       if (current === sequence.current && !isCanceled(error) && !controller.signal.aborted) {
         const failure = asApiError(error);
-        setSearchError(failure);
+        clearSearch();
         notifyFailure(failure, 'search');
         if (failure.code === 'ARXIV_TIMEOUT') setSearchRetryUntil(Date.now() + 5000);
         rateLimit(failure);
@@ -244,6 +241,17 @@ export default function SearchPapersPage() {
       if (current === sequence.current && !controller.signal.aborted) setSearching(false);
     }
   }
+
+  function clearSearch() {
+    sequence.current += 1;
+    searchRequest.current?.abort();
+    searchRequest.current = null;
+    setDraft(''); setQuery(''); setSnapshot(null);
+    setSearching(false); setSort('relevance'); setPageSize(10);
+    notification.destroy('paper-search-search');
+  }
+
+  useEffect(() => { if (active) setRefresh((value) => value + 1); }, [active]);
 
   function submit(event: FormEvent) {
     event.preventDefault();
@@ -293,7 +301,7 @@ export default function SearchPapersPage() {
     <div className="search-layout"><section className="content-panel search-panel">
       <form className="arxiv-search-form" onSubmit={submit}>
         <label htmlFor="arxiv-keywords">{t("arXiv 关键词")}</label>
-        <div className="search-input-row"><Input id="arxiv-keywords" value={draft} maxLength={200} placeholder={t("例如：attention transformer")} onChange={(event) => setDraft(event.target.value)} /><Button type="primary" htmlType="submit" aria-label={t("搜索")} icon={<SearchOutlined />} loading={searching} disabled={!draft.trim() || searchSeconds > 0}>{searchSeconds > 0 ? t("{0} 秒后可重试搜索", [searchSeconds]) : t("搜索")}</Button></div>
+        <div className="search-input-row"><Input id="arxiv-keywords" value={draft} maxLength={200} placeholder={t("例如：attention transformer")} onChange={(event) => setDraft(event.target.value)} /><Button type="primary" htmlType="submit" aria-label={t("搜索")} icon={<SearchOutlined />} loading={searching} disabled={!draft.trim() || searchSeconds > 0}>{searchSeconds > 0 ? t("{0} 秒后可重试搜索", [searchSeconds]) : t("搜索")}</Button><Button htmlType="button" onClick={clearSearch} disabled={!draft && !query && !snapshot && !searching}>{t("清除搜索")}</Button></div>
         <p>{t('多个词按 AND 匹配；输入关键词后提交搜索。不支持输入网址或高级检索语法。')}</p>
         <div className="search-options"><div className="search-option-field"><label htmlFor="search-sort">{t('结果排序')}</label><select id="search-sort" value={sort} disabled={searching || searchSeconds > 0} onChange={(event) => {
           const ordering = event.target.value as SearchSort;
@@ -308,7 +316,7 @@ export default function SearchPapersPage() {
         </div>
       </form>
       {searching && <div className="search-loading" role="status"><Spin size="small" />{t("正在查询 arXiv…")}</div>}
-      {snapshot && result && <div aria-busy={searching} data-stale={searching || Boolean(searchError)}>
+      {snapshot && result && <div aria-busy={searching} data-stale={searching}>
         <div className="search-result-heading"><h2 id="search-results-heading" ref={resultsHeading} tabIndex={-1}>{t("检索结果")}</h2><span role="status">{t("共 {0} 篇 · 第 {1} 页", [result.total, Math.floor(result.offset / resultPageSize) + 1])}</span></div>
         {result.items.length === 0 && <Empty description={t("没有找到匹配论文")} />}
         <div className="search-results" key={snapshot.query + ':' + result.offset + ':' + result.limit + ':' + snapshot.sort}>{result.items.map((paper) => {

@@ -56,6 +56,8 @@ const assert = require('node:assert/strict');
  await page.waitForTimeout(4500);
  assert.equal(await notices.count(),0,'Notification closes automatically after five seconds');
  mode = 'imports';
+ // A failed search now resets its input; start the next search explicitly.
+ await page.locator('#arxiv-keywords').fill('attention');
  await page.locator('button[type=submit]').click();
  await page.locator('.search-paper').last().waitFor();
  for (let i=0;i<4;i++) await page.locator('.search-paper').nth(i).getByRole('button',{name:'导入 PDF',exact:true}).click();
