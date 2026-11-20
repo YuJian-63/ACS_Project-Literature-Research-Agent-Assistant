@@ -1,9 +1,10 @@
 import { t, useLocale } from '../../../i18n';
 import { useCallback, useEffect, useRef, useState, type Key } from 'react';
-import { App, Button, Input, Select, Skeleton } from 'antd';
+import { notification as notificationApi, App, Button, Input, Select, Skeleton } from 'antd';
 import { ArrowLeftOutlined, ArrowRightOutlined, ReloadOutlined } from '@ant-design/icons';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
-import { api } from '../../../api/client';
+import { errorText } from '../../../i18n/diagnostics';
+import { api, asApiError, isCanceled } from '../../../api/client';
 import type { Paper, PaperStatus } from '../../../api/types';
 import { ErrorNotice } from '../../../shared/components/ErrorNotice';
 import { PageHeader } from '../../../shared/components/PageHeader';
@@ -17,9 +18,13 @@ import { useResource } from '../../../shared/hooks/useResource';
 import { paperStatusLabels } from '../../../shared/lib/format';
 import { taskReaderReturnUrl } from '../../../shared/lib/paperReader';
 
+const deletionNotificationConfig = { placement: 'top', duration: 5, maxCount: 3, stack: false, classNames: { list: 'search-notification-list' } } as const;
+
 export default function PapersPage() {
   useLocale();
-  const { message } = App.useApp();
+  const { message, modal } = App.useApp();
+  const [notification, notificationHolder] = notificationApi.useNotification(deletionNotificationConfig);
+  useEffect(() => () => notification.destroy(), [notification]);
   const [readerParameters, setReaderParameters] = useSearchParams();
   const navigate = useNavigate();
   const returnToTask = taskReaderReturnUrl(readerParameters);
@@ -30,6 +35,9 @@ export default function PapersPage() {
   const [status, setStatus] = useState<PaperStatus>();
   const [page, setPage] = useState(1);
   const [expanded, setExpanded] = useState(false);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
+  const deleteRequest = useRef<AbortController | null>(null);
+  useEffect(() => () => deleteRequest.current?.abort(), []);
   const libraryPanel = useRef<HTMLElement>(null);
   const libraryHeading = useRef<HTMLHeadingElement>(null);
   const closedPaperId = useRef<string | null>(null);
@@ -44,6 +52,8 @@ export default function PapersPage() {
   const parameters = new URLSearchParams();
   selected.forEach((id) => parameters.append('paper_id', id));
   const papers = resource.data?.items || [];
+  const latestLibrary = useRef({ parameters: readerParameters, page, papers, query, status });
+  latestLibrary.current = { parameters: readerParameters, page, papers, query, status };
   const emptyMessage = query || status ? t('没有匹配的论文，请调整筛选条件') : t('还没有论文，上传第一篇 PDF 开始研究');
   useEffect(() => {
     if (readingPaperId || closedPaperId.current === null) return;
@@ -77,7 +87,113 @@ export default function PapersPage() {
     setExpanded(false);
   }
 
+  function showDeleteFailure(errors: string[], count?: number, requestId?: string | null) {
+    notification.error({
+      key: 'paper-delete-failure', className: 'search-notification', closable: true,
+      title: count === undefined ? t('删除失败') : t('{0} 篇论文未删除，已保留选择', [count]),
+      description: <div className="search-notification-content"><ul>{[...new Set(errors)].map((error) => <li key={error}>{error}</li>)}</ul>{requestId && <small>{t('请求编号：')}<span className="identifier">{requestId}</span></small>}</div>,
+    });
+  }
+
+  async function deletePapers(ids: string[], batch = false) {
+    if (deleteRequest.current || !ids.length) return;
+    const controller = new AbortController();
+    deleteRequest.current = controller;
+    setDeletingId(batch ? 'batch' : ids[0]);
+    notification.destroy('paper-delete-failure');
+    const removed = new Set<string>();
+    const errors: string[] = [];
+    try {
+      for (const id of [...new Set(ids)]) {
+        if (controller.signal.aborted) break;
+        try {
+          await api.deletePaper(id, controller.signal);
+          removed.add(id);
+        } catch (error) {
+          if (isCanceled(error) || controller.signal.aborted) break;
+          const failure = asApiError(error);
+          if (failure.status === 404) removed.add(id);
+          else errors.push(errorText(failure));
+        }
+      }
+      if (controller.signal.aborted) return;
+      const current = latestLibrary.current;
+      const next = new URLSearchParams(current.parameters);
+      const remaining = next.getAll('selected_paper_id').filter((id) => !removed.has(id.toLowerCase()));
+      next.delete('selected_paper_id');
+      remaining.forEach((id) => next.append('selected_paper_id', id));
+      if (removed.has(next.get('paper_id')?.toLowerCase() || '')) {
+        next.delete('paper_id'); next.delete('pdf_page');
+        setExpanded(false);
+      }
+      if (removed.size) void message.success(batch ? t('已删除 {0} 篇论文', [removed.size]) : t('论文已删除'));
+      setReaderParameters(next, { replace: true });
+      if (errors.length) showDeleteFailure(errors, errors.length);
+      if (removed.size) {
+        // Requery the current filter to find a valid page after cross-page deletion.
+        const fresh = await api.papers({ q: current.query || undefined, status: current.status, limit: 1, offset: 0 }, controller.signal);
+        if (controller.signal.aborted) return;
+        setPage((value) => Math.min(value, Math.max(1, Math.ceil(fresh.total / 20))));
+        resource.reload();
+
+      }
+    } catch (error) {
+      if (!isCanceled(error) && !controller.signal.aborted) {
+        resource.reload();
+        const failure = asApiError(error);
+        showDeleteFailure([errorText(failure)], undefined, failure.requestId);
+      }
+    } finally {
+      if (deleteRequest.current === controller) deleteRequest.current = null;
+      if (!controller.signal.aborted) setDeletingId(null);
+    }
+  }
+
+  async function deletePaper(paper: Paper) {
+    if (deleteRequest.current) return;
+    const controller = new AbortController();
+    deleteRequest.current = controller;
+    setDeletingId(paper.id);
+    notification.destroy('paper-delete-failure');
+    try {
+      await api.deletePaper(paper.id, controller.signal);
+      if (controller.signal.aborted) return;
+      const current = latestLibrary.current;
+      const next = new URLSearchParams(current.parameters);
+      const remaining = next.getAll('selected_paper_id').filter((id) => id.toLowerCase() !== paper.id);
+      next.delete('selected_paper_id');
+      remaining.forEach((id) => next.append('selected_paper_id', id));
+      if (next.get('paper_id')?.toLowerCase() === paper.id) {
+        next.delete('paper_id'); next.delete('pdf_page');
+        setExpanded(false);
+      }
+      setReaderParameters(next, { replace: true });
+      if (current.papers.length === 1 && current.papers[0].id === paper.id && current.page > 1) setPage(current.page - 1);
+      else resource.reload();
+      void message.success(t('论文已删除'));
+    } catch (error) {
+      if (!isCanceled(error) && !controller.signal.aborted) {
+        const failure = asApiError(error);
+        showDeleteFailure([errorText(failure)], undefined, failure.requestId);
+      }
+    } finally {
+      if (deleteRequest.current === controller) deleteRequest.current = null;
+      if (!controller.signal.aborted) setDeletingId(null);
+    }
+  }
+
+  function confirmBulkDelete() {
+    const ids = [...selected];
+    modal.confirm({
+      title: t('删除选中的 {0} 篇论文？', [ids.length]),
+      content: t('将删除选中论文的 PDF 和解析内容。已被研究任务引用或正在解析的论文会保留，其他论文继续删除。'),
+      okText: t('确认删除'), cancelText: t('取消'), okButtonProps: { danger: true },
+      onOk: () => deletePapers(ids, true),
+    });
+  }
+
   return <>
+    {notificationHolder}
     <PageHeader title={t("论文库")} description={t("让每一次研究，从可信的原始资料开始。")} action={<Link to={`/tasks/new${selected.length ? `?${parameters}` : ''}`}><Button type="primary" icon={<ArrowRightOutlined />} iconPlacement="end">{t("新建研究")}</Button></Link>} />
     {readingPaperId && !readingPaper && <section className="content-panel">{returnToTask && <Button type="primary" className="reader-task-return" icon={<ArrowLeftOutlined aria-hidden="true" />} onClick={() => navigate(returnToTask)}>{t('返回任务')}</Button>}{readerResource.error ? <><ErrorNotice error={readerResource.error} retry={readerResource.reload} /><Button onClick={closeReader}>{t('返回论文库')}</Button></> : <Skeleton active paragraph={{ rows: 3 }} />}</section>}
     <div hidden={Boolean(readingPaperId)}><PaperUpload onUploaded={() => { setQuery(''); setDraft(''); setStatus(undefined); setPage(1); resource.reload(); }} /></div>
@@ -88,18 +204,18 @@ export default function PapersPage() {
         <Input.Search value={draft} placeholder={t("搜索标题或文件名")} aria-label={t("搜索论文")} maxLength={200} allowClear onChange={(event) => { setDraft(event.target.value); if (!event.target.value) { setQuery(''); setPage(1); } }} onSearch={(value) => { setQuery(value); setPage(1); }} />
         <Select<PaperStatus> value={status} onChange={(value) => { setStatus(value); setPage(1); }} allowClear placeholder={t("全部状态")} aria-label={t("筛选论文状态")} options={Object.entries(paperStatusLabels()).map(([value, label]) => ({ value: value as PaperStatus, label }))} />
       </div>
-      {selected.length > 0 && <div className="selection-notice"><span>{t("已选择")}<strong>{selected.length}</strong>{t("篇论文，可跨页继续选择")}</span><Button type="link" onClick={() => changeSelection([])}>{t("清空选择")}</Button></div>}
+      {selected.length > 0 && <div className="selection-notice"><span>{t("已选择")}<strong>{selected.length}</strong>{t("篇论文，可跨页继续选择")}</span><div className="selection-actions"><Button danger onClick={confirmBulkDelete} disabled={Boolean(deletingId)} loading={deletingId === 'batch'}>{t("删除已选论文")}</Button><Button type="link" disabled={Boolean(deletingId)} onClick={() => changeSelection([])}>{t("清空选择")}</Button></div></div>}
       {resource.error && <ErrorNotice error={resource.error} retry={resource.reload} />}
-      {readingPaper ? <PaperReadingList papers={papers} activeId={readingPaper.id} selectedIds={selected} loading={resource.loading} emptyMessage={emptyMessage} onRead={openReader} onSelect={(paper, checked) => {
+      {readingPaper ? <PaperReadingList onDelete={deletePaper} deletingId={deletingId} papers={papers} activeId={readingPaper.id} selectedIds={selected} loading={resource.loading} emptyMessage={emptyMessage} onRead={openReader} onSelect={(paper, checked) => {
         changeSelection(checked ? [...selected, paper.id] : selected.filter((id) => id !== paper.id));
-      }} /> : <PaperTable papers={papers} loading={resource.loading} emptyMessage={emptyMessage} onOpenPaper={openReader} selection={{
+      }} /> : <PaperTable onDelete={deletePaper} deletingId={deletingId} papers={papers} loading={resource.loading} emptyMessage={emptyMessage} onOpenPaper={openReader} selection={{
         selectedRowKeys: selected, preserveSelectedRowKeys: true,
         onChange: changeSelection,
         getCheckboxProps: (paper) => ({ disabled: !canSelectPaper(paper) || (selected.length >= 20 && !selected.includes(paper.id)), 'aria-label': t("选择论文 {0}", [paper.title]) }),
       }} />}
       {resource.data && <PaginationBar total={resource.data.total} page={page} onChange={setPage} />}
     </section>
-    {readingPaper && <PaperReader key={readingPaper.id} page={readingPage} returnToTask={returnToTask} paper={papers.find((paper) => paper.id === readingPaper.id) || readingPaper} papers={papers} expanded={expanded} onRead={openReader} onExpand={() => setExpanded((value) => !value)} onClose={closeReader} />}
+    {readingPaper && <PaperReader onDelete={deletePaper} deletingId={deletingId} key={readingPaper.id} page={readingPage} returnToTask={returnToTask} paper={papers.find((paper) => paper.id === readingPaper.id) || readingPaper} papers={papers} expanded={expanded} onRead={openReader} onExpand={() => setExpanded((value) => !value)} onClose={closeReader} />}
     </div>
     {!readingPaper && <div className="page-tip"><strong>{t("关于资料与分析")}</strong><span>{t("启动解析 Worker 后会自动提取文本，扫描件暂不支持。解析就绪不代表已完成研究分析；重复上传会生成独立记录。")}</span></div>}
   </>;

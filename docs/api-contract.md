@@ -164,6 +164,12 @@ Content-Type 为 multipart/form-data，仅包含一个必填的 file 字段。
 
 200 返回完整 Paper，用于查询解析状态；不存在返回 `404 PAPER_NOT_FOUND`；UUID 格式错误返回 422。
 
+### DELETE /api/v1/papers/{paper_id}
+
+需要当前账号、同源 Origin 和 X-CSRF-Token。成功返回 204，无响应体。锁定论文后检查任意 TaskPaper 引用；有引用返回 409 PAPER_IN_USE，解析中返回 409 PAPER_PROCESSING。其他账号或不存在的论文返回 404 PAPER_NOT_FOUND。
+
+删除事务清理该论文的导入映射、来源、解析片段及论文记录；提交后清理受控 PDF 文件。研究任务和历史引用不删除。arXiv 搜索的来源元数据缓存不受影响，每次搜索仍实时叠加当前账号的导入状态；删除后返回未导入，可再次导入新记录。
+
 ### GET /api/v1/papers/{paper_id}/file
 
 200 返回 PDF 字节；Content-Type 为 application/pdf，Content-Disposition 使用 inline 及安全编码的原文件名，设置 X-Content-Type-Options: nosniff。首版不承诺 HTTP Range 支持。
@@ -509,9 +515,9 @@ limit 默认 20/范围 1—100，offset 默认 0/非负，可选 status。返回
 
 请求 `{"expected_attempt":1}`，必须严格正整数，不接受 bool/额外字段。
 
-- failed、attempt 匹配且 error.details.retryable=true：原子 attempt+1，清除旧执行信息回 queued，202。
+- failed、attempt 匹配：原子 attempt+1，清除旧执行信息回 queued，202。
 - 已是 expected_attempt+1：重放当前记录，queued/running 为 202、终态为 200；即使已再次失败也不重入队。
-- 其他冲突 409 IMPORT_RETRY_CONFLICT；非可重试失败 409 IMPORT_NOT_RETRYABLE；不存在 404。
+- 其他冲突 409 IMPORT_RETRY_CONFLICT；不存在 404。所有下载失败均允许用户手动重试，仍受账号导入额度和 expected_attempt 约束。
 - 不修改研究 Task 重试规则；Worker 不自动重试网络或失效执行。
 
 ### 10.2 配置、错误与轮询
@@ -532,11 +538,11 @@ HTTP 错误沿用第 8 节 envelope；429 带整数秒 Retry-After 和相同 det
 
 搜索来源失败时，服务端以请求对应的 `X-Request-ID` 记录 `phase`、`elapsed_ms` 和安全错误码；阶段限定为连接、写入、连接池、响应头、响应体、总时限、共享许可、来源 HTTP 状态、响应校验或未知，不记录检索词、联系邮箱、原始异常、响应正文或凭据。该诊断仅用于服务端日志，不添加到公开错误字段；watchdog 退出明确按总时限超时处理。
 
-前端可保留当前页面上一份成功结果，必须同时标注其原关键词、页码和接收时间，并在新请求未完成时说明尚未更新，不得将旧结果冒充新结果。重试重复失败请求的原关键词/offset；旧结果翻页使用其原关键词。`ARXIV_TIMEOUT` 后有 5 秒页面级手动搜索等待，不自动重试，不影响导入/历史读取；它不替代后端共享许可，也不承诺来源恢复时间。429 的服务端冷却规则不变。结果快照不跨刷新持久化，成功空结果会替换旧结果，导入历史仍由服务器保存。
+前端在新搜索或翻页等待期间可暂留上一份成功结果；搜索请求失败后清空搜索状态和旧结果，以弹窗显示错误原因及请求编号，不再展示上次成功结果。站内切换可保留成功搜索状态和进行中的请求，但刷新、新页面或退出账号后清空。手动清除搜索会取消当前查询并忽略迟到响应。`ARXIV_TIMEOUT` 后仍有 5 秒手动搜索等待，429 仍按服务端 Retry-After 限制；清空搜索不解除冷却，也不自动重试。搜索失败不影响已经提交的导入或论文库。
 
 已接收导入的执行失败返回 status=failed/error：ARXIV_NOT_FOUND、ARXIV_VERSION_MISMATCH、ARXIV_RATE_LIMITED、ARXIV_UNAVAILABLE、ARXIV_INVALID_RESPONSE、ARXIV_TIMEOUT、UNSAFE_SOURCE_URL、FILE_TOO_LARGE、INVALID_PDF、STORAGE_WRITE_FAILED、IMPORT_TIMEOUT、IMPORT_LEASE_EXPIRED、IMPORT_WORKER_STOPPED。details.retryable 必须为 boolean：暂时网络/服务/限流/超时/存储及 Worker 中断 true；不存在/版本不符/非法响应/不安全 URL/超限/非法 PDF false。错误不回显上游正文或内部路径。
 
-前端对 queued/running 每 2 秒轮询，终态停止；成功后跟踪 Paper 解析。失败仅 retryable=true 可重试。元数据作为纯文本显示，真正 ready 才允许真实研究任务。
+前端对 queued/running 每 2 秒轮询，终态停止；成功后跟踪 Paper 解析。失败记录均提供手动重新下载；details.retryable 仅记录错误分类，不再作为手动重试门禁。元数据作为纯文本显示，真正 ready 才允许真实研究任务。
 
 ## 11. 账号、会话与资源归属（2026-11-14）
 
@@ -609,3 +615,13 @@ Worker 对含中文的问题最多调用一次查询扩展：1—3 个英文表�
 retrieving 阶段的事件可带 retrieval、retrieval_status、reason、paper_id、new_chunks、evidence_status 等诊断字段。前端必须区分无解析文本、当前证据不足、部分可回答；比较表 null 显示“当前证据未覆盖”，不能据此断言论文未报告。输出仍使用原 Artifact / Citation 结构，引用 ID 由后端解析为冻结原文及物理页码。
 
 新工作流使用与综述相同的租约和持久化调用预留。租约过期可重新排队，保留原 started_at 和截止时间；已完成查询、选证据、分析和输出检查点复用。未知模型调用按预留用量保守保留；查询扩展未知结果不重复发起，生成可在有剩余额度时恢复。迁移 20261115_0005 只扩展 tasks_lifecycle 约束，不删除数据。
+
+### 导入来源快照（2026-11-18）
+
+`paper-imports` 的新建/重试请求体保持不变，不接受客户端提供元数据。服务端可从未过期的搜索缓存查找完全相同版本的已验证元数据，并内部持久化到 `PaperImport.source_metadata`；该字段不出现在公开响应中。Worker 重新校验结构和版本后复用，缺失时回退到原有元数据 API 查询。PDF 仍独立下载、校验和落盘，不把元数据缓存当成 PDF 下载完成。
+
+### DELETE /api/v1/tasks/{task_id}（2026-11-19）
+
+需要账号会话、同源 Origin 和 X-CSRF-Token。仅可删除当前账号的研究记录，成功返回 204。不存在或属于其他账号返回 404 TASK_NOT_FOUND；运行中返回 409 TASK_RUNNING。先锁定任务行，再检查状态，防止与 Worker 领取竞争。
+
+使用既有数据库级联删除研究结果、证据引用、执行事件和 task_papers 关联，不删除原论文。论文只有在不再被任何任务引用且不处于解析中时才允许删除；同一论文仍被其他任务引用时继续返回 PAPER_IN_USE。无新增数据库迁移。

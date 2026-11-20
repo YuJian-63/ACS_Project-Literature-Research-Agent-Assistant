@@ -1,15 +1,14 @@
 import { useEffect, useRef, useState } from 'react';
 import { api, asApiError, isCanceled, type ApiError } from '../../../api/client';
-import type { Artifact, Task, TaskEvent } from '../../../api/types';
+import type { Artifact, Task } from '../../../api/types';
 import { isTerminal } from '../../../shared/lib/format';
 
 export function useTask(taskId: string) {
   const [task, setTask] = useState<Task>();
-  const [events, setEvents] = useState<TaskEvent[]>([]);
   const [artifacts, setArtifacts] = useState<Artifact[]>();
   const [queryError, setQueryError] = useState<ApiError>();
-  const [eventError, setEventError] = useState<ApiError>();
   const [artifactError, setArtifactError] = useState<ApiError>();
+  const [checkedAt, setCheckedAt] = useState<number>();
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [revision, setRevision] = useState(0);
@@ -18,34 +17,15 @@ export function useTask(taskId: string) {
   useEffect(() => {
     const controller = new AbortController();
     let timer: ReturnType<typeof setTimeout> | undefined;
-    let cursor = 0;
-    setEvents([]);
-
-    async function readEvents() {
-      try {
-        let hasMore = true;
-        while (hasMore && !controller.signal.aborted) {
-          const page = await api.events(taskId, cursor, controller.signal);
-          if (controller.signal.aborted) return;
-          cursor = page.next_after_seq;
-          setEvents((previous) => [...new Map([...previous, ...page.items].map((event) => [event.seq, event])).values()].sort((first, second) => first.seq - second.seq));
-          hasMore = page.has_more;
-        }
-        if (!controller.signal.aborted) setEventError(undefined);
-      } catch (error) {
-        if (!controller.signal.aborted && !isCanceled(error)) setEventError(asApiError(error));
-      }
-    }
-
     async function poll() {
       setRefreshing(true);
-      const eventRequest = readEvents();
       let stop = false;
       try {
         const result = await api.task(taskId, controller.signal);
         if (controller.signal.aborted) return;
         latestTask.current = result;
         setTask(result);
+        setCheckedAt(Date.now());
         setQueryError(undefined);
         stop = isTerminal(result.status);
         if (result.status === 'succeeded') {
@@ -64,8 +44,6 @@ export function useTask(taskId: string) {
         setQueryError(failure);
         stop = failure.status === 404 || failure.status === 422 || Boolean(latestTask.current?.id === taskId && isTerminal(latestTask.current.status));
       } finally {
-        await eventRequest;
-        if (!controller.signal.aborted && stop && latestTask.current?.id === taskId && cursor < latestTask.current.last_event_seq) await readEvents();
         if (!controller.signal.aborted) {
           setLoading(false);
           setRefreshing(false);
@@ -81,5 +59,5 @@ export function useTask(taskId: string) {
     };
   }, [taskId, revision]);
 
-  return { task, events, artifacts, queryError, eventError, artifactError, loading, refreshing, refresh: () => setRevision((value) => value + 1) };
+  return { task, checkedAt, artifacts, queryError, artifactError, loading, refreshing, refresh: () => setRevision((value) => value + 1) };
 }

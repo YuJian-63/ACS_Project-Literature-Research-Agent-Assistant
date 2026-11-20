@@ -60,7 +60,7 @@ export default function ArtifactView({ artifact, papers = [], view = 'read' }: {
   return <article className="artifact artifact-prose" aria-label={t('研究结果')}>
     {artifact.is_mock && <div className="artifact-heading"><MockTag /><p>{t('模拟结果不提供引用，也不代表论文结论。')}</p></div>}
     <div className="artifact-layout"><div className="artifact-main">
-      {view === 'compare' && artifact.comparison_table ? <ComparisonView comparison={artifact.comparison_table} papers={papers} citations={artifact.citations} onSelect={select} /> : <>
+      {view === 'compare' && artifact.comparison_table ? <ComparisonView taskReturn={{ taskId: artifact.task_id, artifactId: artifact.id, view }} comparison={artifact.comparison_table} papers={papers} citations={artifact.citations} onSelect={select} /> : <>
         {outline.length > 0 && <nav className="result-outline" aria-label={t('正文目录')}><span>{t('本页内容')}</span>{outline.map((heading) => <a key={heading.id} href={'#' + heading.id}>{heading.title}</a>)}</nav>}
         <div className="markdown" ref={manuscript}><ReactMarkdown remarkPlugins={plugins} skipHtml components={markdownComponents}>{artifact.content_markdown}</ReactMarkdown></div>
         <div className="manuscript-footer"><BookOutlined /><span>{t('研究结论需要真实来源与证据支持')}</span></div>

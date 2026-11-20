@@ -32,6 +32,7 @@ class ImportJob:
     worker_id: UUID
     started_at: datetime
     deadline: datetime
+    source_metadata: dict | None = None
 
 
 class ImportCommitPending(Exception):
@@ -63,7 +64,7 @@ def claim_import(sessions: sessionmaker[Session], worker_id: UUID) -> ImportJob 
         item.worker_id = worker_id
         item.started_at = item.updated_at = now
         item.lease_expires_at = now + timedelta(seconds=LEASE_SECONDS)
-        return ImportJob(item.id, item.provider, item.external_id, item.attempt, worker_id, now, now + timedelta(seconds=ATTEMPT_SECONDS))
+        return ImportJob(item.id, item.provider, item.external_id, item.attempt, worker_id, now, now + timedelta(seconds=ATTEMPT_SECONDS), item.source_metadata)
 
 
 def heartbeat_import(sessions: sessionmaker[Session], job: ImportJob) -> bool:
@@ -219,19 +220,24 @@ def get_import(sessions: sessionmaker[Session], import_id: UUID, *, user_id: UUI
         return import_view(session, item)
 
 
-def submit_import(sessions: sessionmaker[Session], provider: str, external_id: str, *, user_id: UUID, settings: Settings) -> dict:
+def submit_import(sessions: sessionmaker[Session], provider: str, external_id: str, *, user_id: UUID, settings: Settings, source_metadata: ArxivPaper | None = None) -> dict:
     if provider != "arxiv":
         raise ValueError("Unsupported provider")
     external_id = normalize_arxiv_id(external_id)
+    if source_metadata is not None and source_metadata.external_id != external_id:
+        raise ValueError('Metadata must match the requested version')
+    snapshot = source_metadata.model_dump(mode='json') if source_metadata is not None else None
     try:
         with sessions.begin() as session:
             lock_active_user(session, user_id)
             existing = session.scalar(select(PaperImport).where(PaperImport.user_id == user_id, PaperImport.provider == provider, PaperImport.external_id == external_id))
             if existing is not None:
+                if existing.source_metadata is None and snapshot is not None:
+                    existing.source_metadata = snapshot
                 return import_view(session, existing)
             check_import_capacity(session, user_id, settings.user_active_imports)
             now = session.scalar(select(func.clock_timestamp()))
-            item = PaperImport(id=uuid4(), user_id=user_id, provider=provider, external_id=external_id, created_at=now, updated_at=now)
+            item = PaperImport(id=uuid4(), user_id=user_id, provider=provider, external_id=external_id, source_metadata=snapshot, created_at=now, updated_at=now)
             session.add(item)
             session.flush()
             result = import_view(session, item)
@@ -244,7 +250,7 @@ def submit_import(sessions: sessionmaker[Session], provider: str, external_id: s
             return import_view(session, existing)
 
 
-def retry_import(sessions: sessionmaker[Session], import_id: UUID, expected_attempt: int, *, user_id: UUID, settings: Settings) -> dict:
+def retry_import(sessions: sessionmaker[Session], import_id: UUID, expected_attempt: int, *, user_id: UUID, settings: Settings, source_metadata: ArxivPaper | None = None) -> dict:
     if type(expected_attempt) is not int or expected_attempt < 1:
         raise ValueError("Invalid expected attempt")
     with sessions.begin() as session:
@@ -252,12 +258,15 @@ def retry_import(sessions: sessionmaker[Session], import_id: UUID, expected_atte
         item = session.scalar(select(PaperImport).where(PaperImport.id == import_id, PaperImport.user_id == user_id).with_for_update())
         if item is None:
             raise APIError(404, "PAPER_IMPORT_NOT_FOUND", "导入记录不存在")
+        if source_metadata is not None:
+            if source_metadata.external_id != item.external_id:
+                raise ValueError('Metadata must match the requested version')
+            if item.source_metadata is None:
+                item.source_metadata = source_metadata.model_dump(mode='json')
         if item.attempt == expected_attempt + 1:
             return import_view(session, item)
         if item.attempt != expected_attempt or item.status != "failed":
             raise APIError(409, "IMPORT_RETRY_CONFLICT", "导入状态或尝试版本已变化，请刷新")
-        if not item.error_details or item.error_details.get("retryable") is not True:
-            raise APIError(409, "IMPORT_NOT_RETRYABLE", "此次失败不支持重新下载")
         check_import_capacity(session, user_id, settings.user_active_imports)
         item.attempt += 1
         item.status = "queued"

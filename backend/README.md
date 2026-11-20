@@ -458,3 +458,11 @@ uv run --locked python -B tests/test_ownership.py --postgres
 第一条运行离线测试；数据库用例默认跳过。第二条在本机 PostgreSQL 新建随机 ownership_tests 数据库并在结束时删除自己的测试库，不清理实际业务库。浏览器诊断用例为 frontend/checks/retrieval-browser.py，测试全部拦截 API，不访问真实模型或邮箱。
 
 验收应使用新建任务：中文询问英文论文目标/方法/结论、具体实验指标、论文未覆盖的问题，以及六篇英文论文中文比较。每项检查回答内容、逐字引用、PDF 页码、缺失维度说明、执行记录及刷新恢复。自动测试只证明代码路径和约束，真实模型回答质量需另外人工核验。
+
+## 2026-11-18 导入元数据复用
+
+更新后先执行 `uv run --locked alembic upgrade head`（新增可空 `paper_imports.source_metadata`，不改写历史记录），再重启 Import Worker。API 如未开启热重载也需重启。
+
+搜索页新建导入或重试时，服务端优先使用未过期搜索缓存里完全相同版本的已验证元数据，并保存到导入记录。独立 Worker 可跳过重复的 exact-version 元数据 API 请求，直接按受控 URL 下载 PDF。没有快照的历史或直接接口导入仍走原有元数据查询。缓存过期时可重新搜索后手动重试；不会自动重试失败下载。
+
+下载仍受 20 MiB 文件限制、TLS/URL 验证、共享访问额度和超时保护。失败日志增加 `stage=metadata/pdf/commit`、`phase`、`elapsed_ms` 和安全错误码，帮助区分来源元数据超时与 PDF 下载超时，不记录密钥或响应正文。

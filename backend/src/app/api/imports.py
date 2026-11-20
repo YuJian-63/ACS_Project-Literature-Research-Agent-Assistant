@@ -107,7 +107,7 @@ def search_papers(
 @router.post("/api/v1/paper-imports", response_model=ImportResponse)
 def create_import(request: Request, body: ImportCreate, response: Response, user: CurrentUser) -> dict:
     require_arxiv(request)
-    return accepted(response, submit_import(request.app.state.sessions, body.provider, body.external_id, user_id=user.id, settings=request.app.state.settings))
+    return accepted(response, submit_import(request.app.state.sessions, body.provider, body.external_id, user_id=user.id, settings=request.app.state.settings, source_metadata=request.app.state.arxiv_cache.find_paper(body.external_id)))
 
 
 @router.get("/api/v1/paper-imports", response_model=Page[ImportResponse])
@@ -132,4 +132,6 @@ def import_detail(request: Request, import_id: UUID, user: CurrentUser) -> dict:
 @router.post("/api/v1/paper-imports/{import_id}/retry", response_model=ImportResponse)
 def retry(request: Request, import_id: UUID, body: ImportRetry, response: Response, user: CurrentUser) -> dict:
     require_arxiv(request)
-    return accepted(response, retry_import(request.app.state.sessions, import_id, body.expected_attempt, user_id=user.id, settings=request.app.state.settings))
+    item = get_import(request.app.state.sessions, import_id, user_id=user.id)
+    metadata = request.app.state.arxiv_cache.find_paper(item['external_id'])
+    return accepted(response, retry_import(request.app.state.sessions, import_id, body.expected_attempt, user_id=user.id, settings=request.app.state.settings, source_metadata=metadata))

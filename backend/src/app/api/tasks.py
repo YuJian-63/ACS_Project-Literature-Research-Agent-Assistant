@@ -66,6 +66,19 @@ def task_detail(request: Request, task_id: UUID, user: CurrentUser) -> dict:
         return task_view(task, selected_papers(session, [task_id])[task_id])
 
 
+@router.delete("/api/v1/tasks/{task_id}", status_code=204)
+def delete_task(request: Request, task_id: UUID, user: CurrentUser) -> None:
+    with request.app.state.sessions.begin() as session:
+        task = session.scalar(select(Task).where(Task.id == task_id, Task.user_id == user.id).with_for_update())
+        if task is None:
+            raise APIError(404, "TASK_NOT_FOUND", "研究记录不存在")
+        if task.status == "running":
+            raise APIError(409, "TASK_RUNNING", "研究正在执行，请等待完成后再删除")
+        # Existing cascades remove artifacts, citations, events and task-paper references.
+        # Original papers remain and may still be referenced by other tasks.
+        session.delete(task)
+
+
 @router.get("/api/v1/tasks/{task_id}/events", response_model=EventPage)
 def task_events(
     request: Request, task_id: UUID, user: CurrentUser, after_seq: Annotated[int, Query(ge=0)] = 0,
