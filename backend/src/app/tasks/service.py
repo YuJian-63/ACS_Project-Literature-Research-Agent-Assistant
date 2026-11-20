@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session, sessionmaker
 from app.api.schemas import TaskCreate
 from app.api.views import accepted_view
 from app.config import Settings
-from app.db.models import Paper, PaperChunk, Task, TaskEvent, TaskPaper
+from app.db.models import AgentRun, Paper, PaperChunk, Task, TaskEvent, TaskPaper
 from app.db.ownership import check_task_capacity, lock_active_user
 from app.errors import APIError
 from app.research.retrieval import EvidenceChunk
@@ -153,6 +153,19 @@ def submit_task(
                 if existing is not None:
                     return replay(existing, request_hash(request, automatic=automatic_budget(existing)))
         raise
+
+
+def ensure_task_deletable(session: Session, task: Task) -> None:
+    if task.status == "running" or (
+        task.runner_type == "agent" and task.status == "queued" and task.started_at is not None
+    ):
+        raise APIError(409, "TASK_RUNNING", "研究正在执行，请等待完成后再删除")
+    if (task.runner_type == "agent" and task.status == "failed"
+        and task.run_config.get("transport") in {"local-process-v1", "tacc-ssh-slurm-v1"}
+        and not task.run_config.get("agent_cancel_confirmed")):
+        run = session.get(AgentRun, task.id)
+        if run is not None and run.result is None:
+            raise APIError(409, "AGENT_STOP_PENDING", "Agent 作业尚未确认停止，请稍后再删除")
 
 
 def get_task(session: Session, task_id: UUID, user_id: UUID) -> Task:

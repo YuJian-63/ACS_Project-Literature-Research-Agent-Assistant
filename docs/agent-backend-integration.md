@@ -1,6 +1,10 @@
 # 后端与独立 Agent 对接
 
-更新：2026-11-19。本文件描述后端适配、Agent 本地 PDF、独立作业入口及第 3.1–3.3 阶段本地/TACC 传输、恢复和清理。离线测试与真实集群验收分开记录；真实 TACC 部署和模型验收由操作者统一执行。
+更新：2026-11-20。本文件描述后端适配、Agent 本地 PDF、独立作业入口及第 3.1–3.3 阶段本地/TACC 传输、恢复和清理。离线测试与真实集群验收分开记录；真实 TACC 部署和模型验收由操作者统一执行。
+
+V3 增量：`/api/v1/agent-research` 复用本文的派发和结果路径，无需新增迁移。支持 0—20 篇已选 PDF，允许只提问、由 Agent 自主检索；allow_search=false 时仍要求指定论文。详细请求/响应、服务端预算及会话变化见 [API 第 13 节](api-contract.md#13-v3-统一研究接口2026-11-20)。旧 `/tasks` 保持指定来源且关闭搜索的契约。
+
+V3 外部来源阅读：Agent 原生结果继续保留 arXiv 标识和明确版本，不伪造本地 UUID。前端让用户确认导入该版本，待后端下载及解析完成后再进入本地 PDF 阅读器，并保留原引用页码与返回研究位置。仅 Agent 可搜索仍不足以完成导入；后端须配置 arXiv 并运行 Import/Parser Worker。无明确版本的来源提示先确认版本，不自动下载最新版本。
 
 ## 1. 本轮边界
 
@@ -107,7 +111,11 @@ papers/<paper_uuid>.pdf
 
 结果先写到同一 inbox 目录下的临时文件，再原子重命名为 `result.json`；后端不会等待修复一个已发布的损坏 JSON。默认最大 16 MiB。未知版本、重复 JSON 键、非有限数、任务不匹配、其他 dispatch 或输入摘要、越权来源和非法页码均拒绝。结果目录只应由受信任的本地传输桥接写入，输入摘要用于关联，不能代替身份认证。
 
-引用的 source_id 必须等于清单里的 source_id；paper_id 可为该 source_id 或后端 paper UUID。Agent 的不透明 chunk_id 原样保存，页面展示映射为 C1/C2；正文与 Markdown 表格中的对应标记同步替换，原始 Agent 结果不修改。页码始终指原始本地 PDF 的物理页，不能使用重新排版后的 PDF。后端不再执行旧逐字片段内容或检索相关性算法。
+本地引用的 source_id 必须等于清单里的 source_id；paper_id 可为该 source_id 或后端 paper UUID。Agent 的不透明 chunk_id 原样保存；旧产物视图仅把本地引用映射为 C1/C2，原始 Agent 结果不修改。页码指原始 PDF 的物理页，不能使用重新排版后的 PDF。后端不再执行旧逐字片段内容或检索相关性算法。
+
+V3 开启 allow_search 后，额外来源仅接受规范的 arXiv 标识：版本化或带 PDF 哈希前缀的 source_id、匹配的 paper_id、canonical abs URL，以及相同来源/页号的 chunk_id。外部引用必须在 result.sources 中登记；所选加检索论文总数不能超过 task.max_papers。外部证据保留在 AgentRun 原生 JSON 中，不创建虚假的本地 Paper/Citation 外键。本地越权、外链伪造、重复和空引用检查仍生效。
+
+仅搜索的 ZIP 只有 manifest.json、task.json、sources.json 三个成员，sources 为 []；混合来源继续携带授权 PDF。清单仍绑定 task.sources 和 PDF SHA-256；不得因为允许外部搜索就允许读取其他本地文件。后端和 local/TACC 上的 Agent 包装器必须一起升级；Agent 研究核心不变。
 
 completed 和 partial 保存可阅读 artifact；partial 的 task.stage 为 partial，保留停止原因与 unresolved，并写入 warning 事件。其他 stop_reason 写入明确的 `AGENT_<STOP_REASON>` 错误，不创建成功 artifact，但原生结果仍可查询。已失去租约、超时或已终结的任务不会被迟到结果覆盖。
 

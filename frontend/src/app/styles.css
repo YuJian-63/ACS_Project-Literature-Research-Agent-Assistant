@@ -2502,3 +2502,11 @@ main {
   .is-sidebar-collapsed .sidebar-footer { justify-content: center; }
 }
 @media(max-width:760px) { .sidebar-toggle { display: none; } }
+
+.task-paper-links { display: flex; flex-direction: column; gap: 8px; min-width: 180px; }
+.task-paper-links a { white-space: normal; overflow-wrap: anywhere; line-height: 1.6; }
+
+.research-records-table .ant-table-cell { vertical-align: middle; }
+.research-records-table .ant-table-thead > tr > th { text-align: center; }
+.research-records-table .task-name, .research-records-table .task-paper-links { text-align: left; }
+.research-records-table .selection-actions { justify-content: flex-start; }

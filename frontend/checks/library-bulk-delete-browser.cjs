@@ -1,7 +1,7 @@
-const { chromium } = require(process.env.PLAYWRIGHT_MODULE || 'playwright');
+const { launchBrowser } = require('./browser.cjs');
 const assert = require('node:assert/strict');
 (async()=>{
- const browser=await chromium.launch({executablePath:process.env.BROWSER_EXECUTABLE || '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',headless:true});
+ const browser=await launchBrowser();
  try {
  const page=await browser.newPage({reducedMotion:'reduce'});page.setDefaultTimeout(7000);
  const ids=[1,2,21].map(n=>'11111111-1111-4111-8111-'+String(n).padStart(12,'0'));

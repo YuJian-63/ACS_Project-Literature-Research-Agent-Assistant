@@ -1,203 +1,140 @@
 # 前端研究工作台
 
-React + TypeScript + Vite 单页应用，使用 Ant Design、Axios、React Router 和 React Markdown，对接 `../docs/api-contract.md`。工作台通过已验证邮箱的用户名/密码账号访问，包含个人论文库、PDF 上传/解析状态、新建任务、任务列表和详情；后端默认 Mock，也可通过服务端配置启用真实摘要、问答及跨论文综述 Runner。
+React + TypeScript + Vite 单页应用，使用 Ant Design、Axios、React Router 和 React Markdown。当前页面使用统一研究接口 `/api/v1/agent-research`，由后端派发给 Agent；旧摘要、问答、综述专用页面已被统一研究流程替代。
 
-## 代码目录
+## 目录
 
-前端按业务模块组织，页面、专用组件和业务逻辑就近存放：
-
-~~~text
+```text
 src/
-├── main.tsx                     # 启动入口与 Provider 装配
-├── app/                         # 顶层路由、工作台布局与全局样式
-│   ├── App.tsx
-│   └── styles.css
-├── api/                         # HTTP 客户端、接口类型、账号 API 与会话请求控制
+├── main.tsx
+├── app/                         # 路由、工作台布局、全局样式
+├── api/                         # HTTP、账号、论文及统一研究接口
 ├── features/
-│   ├── auth/                    # 登录、注册、密码恢复与会话上下文
-│   │   ├── AuthProvider.tsx
-│   │   ├── components/          # 账号布局、访问门禁、账号菜单及对应样式
-│   │   ├── pages/               # AuthPage
-│   │   └── lib/                 # 邮件链接和安全返回地址处理
-│   ├── papers/                  # 论文库与 PDF 阅读
-│   │   ├── components/          # 论文表格、选择、上传、阅读器及对应样式
-│   │   ├── pages/               # PapersPage
-│   │   └── lib/                 # 论文选择规则和 PDF 上传校验
-│   ├── search/                  # arXiv 搜索与导入入口
-│   │   ├── components/          # 摘要展开与收起
-│   │   └── pages/               # SearchPapersPage
-│   └── research/                # 摘要、问答、跨论文综述
-│       ├── components/          # 研究正文、比较表、证据面板与覆盖提示
-│       ├── pages/               # 新建任务、任务列表和任务详情
-│       ├── hooks/               # 任务状态与事件轮询
-│       └── lib/                 # 提交规范化、幂等签名与 Markdown 引用处理
+│   ├── auth/                    # 注册、登录、找回密码、会话和账号设置
+│   ├── papers/                  # 论文库、上传、选择和页内 PDF 阅读
+│   ├── search/                  # arXiv 搜索和导入
+│   └── agentResearch/           # 新建研究、历史、结果和来源导入
 ├── shared/
-│   ├── components/              # 页头、错误提示、状态、分页及语言切换
-│   ├── hooks/                   # 通用资源请求、响应式视口订阅
-│   └── lib/                     # 格式化与论文阅读导航参数
-├── i18n/                        # 中英文词条、语言状态与诊断翻译
+│   ├── components/              # 页头、错误、分页、语言和状态
+│   ├── hooks/                   # 通用资源请求和响应式视口
+│   └── lib/                     # 阅读导航、UUID、账号研究草稿
+├── i18n/                        # 中英文文案和语言状态
 └── assets/                      # 本地字体和许可证
-~~~
-
-新增功能优先放入对应 features 模块；只有跨模块复用的组件、Hook 和工具才放入 shared。共享层不依赖业务页面，API 层不导入业务组件。论文上传校验与论文选择规则属于 papers，研究提交逻辑属于 research。单个共享组件使用独立文件并直接导入，避免重新堆入 Common.tsx 或统一导出所有业务模块。
-
-组件专用样式与组件放在一起，全局主题、字体和工作台样式位于 app/styles.css。路由仍使用按页面懒加载；目录调整不修改页面 URL、接口路径、存储键或查询参数。
-
-checks/ 保留稳定的脚本入口：search-browser.py 检查论文搜索体验，retrieval-browser.py 检查检索证据提示，library-reader-browser.py 和 evidence-reader-browser.py 检查 PDF 阅读与任务引用往返，auth-browser.py 检查账号流程，review.mjs 检查提交规范与诊断翻译。运行方式见本文验收说明。
-
-## 1. 本地启动
-
-需要 Node.js `^20.19.0 || >=22.12.0` 和 npm。先按 `../backend/README.md` 启动 PostgreSQL、完成迁移，并在两个终端分别运行 API 和 Worker。然后在项目根目录新开终端：
-
-```powershell
-cd frontend
-npm.cmd ci
-npm.cmd run dev
+checks/                          # 当前接口对应的离线检查与真实联调浏览器流程
 ```
 
-访问 `http://127.0.0.1:5173`。Windows PowerShell 使用 `npm.cmd`，避免本机执行策略拦截 `npm.ps1`；Linux/macOS 使用 `npm`。
+组件和业务逻辑优先放在对应 feature，跨模块工具放入 shared。共享层不导入业务组件。页面按路由懒加载，搜索页在站内切换时保留状态。
 
-前端不会自动启动后端或生成演示数据。只启动 API 而未启动 Worker 时，任务保持排队；后端不可用时显示查询错误，不伪造任务失败或结果。
+## 启动
 
-## 2. API 配置
+要求 Node.js `^20.19.0 || >=22.12.0`。所有命令均从仓库根目录运行。
 
-默认请求同源 `/api/v1/...`，Vite 将 `/api`、`/health`、`/ready` 代理到 `http://127.0.0.1:8000`。默认开发不需要配置文件。如需修改，在 `frontend` 目录首次执行 `Copy-Item .env.example .env.local`，已有文件不要覆盖。
+Windows PowerShell：
 
-| 变量 | 用途 |
+```powershell
+npm.cmd --prefix frontend ci
+npm.cmd --prefix frontend run dev
+```
+
+macOS / Linux：
+
+```bash
+npm --prefix frontend ci
+npm --prefix frontend run dev
+```
+
+打开 `http://127.0.0.1:5173`。后端、数据库、Parser Worker 和 Agent Worker 的启动步骤见 `../docs/terminal-operations.md`、`../backend/README.md`。前端不会启动后端或生成示例结果。只有 API 没有 Worker 时，任务可能一直排队。
+
+默认代理 `/api`、`/health`、`/ready` 到 `http://127.0.0.1:8000`，可用 `API_PROXY_TARGET` 修改。跨域部署还需配置 `VITE_API_BASE_URL`、后端允许的 CORS Origin、`FRONTEND_PUBLIC_URL` 和 Cookie 设置；不得将模型、邮件或数据库密钥写入前端环境变量。
+
+## 账号和接口
+
+账号通过邮箱验证后，以用户名和密码登录；支持找回密码和修改密码。私有请求携带 Cookie，写请求自动附带 `X-CSRF-Token`。退出或会话失效会取消旧请求并清理当前标签页研究草稿；其他标签页收到账号事件后也会清理。
+
+| 页面或操作 | API |
 | --- | --- |
-| API_PROXY_TARGET | Vite 开发/预览代理目标；默认 `http://127.0.0.1:8000`，只在开发服务器中使用 |
-| VITE_API_BASE_URL | 浏览器使用的 API 基地址；账号版本保持留空，使用同源 `/api` 代理和会话 Cookie |
+| 注册、验证、登录、找回和改密 | `/api/v1/auth/*` |
+| 论文列表、上传 | `GET/POST /api/v1/papers` |
+| 论文详情、删除 | `GET/DELETE /api/v1/papers/{id}` |
+| 下载 PDF | `GET /api/v1/papers/{id}/file` |
+| 搜索论文 | `GET /api/v1/paper-search` |
+| 创建及查看导入、失败重试 | `/api/v1/paper-imports`、`/{id}`、`/{id}/retry` |
+| 新建研究、研究记录 | `POST/GET /api/v1/agent-research` |
+| 研究详情、删除记录 | `GET/DELETE /api/v1/agent-research/{task_id}` |
 
-修改配置后重启 Vite。账号版本支持同源代理，后端账号配置需允许前端的精确 Origin；前后端统一使用 localhost 或统一使用 127.0.0.1。所有 `VITE_` 变量都会进入浏览器构建，禁止放入密码、模型密钥或其他秘密。
+字段和错误码以 `../docs/api-contract.md` 为准。V3 页面不请求旧 `/tasks`、artifacts 或 events 来展示统一研究结果。
 
-## 3. 使用流程
+## 研究提交和草稿
 
-首次使用先创建账号并填写邮箱，使用邮件链接和注册原密码验证邮箱，再以用户名和密码登录。账号菜单可以修改密码或退出；忘记密码时从登录页申请重置邮件。邮件由后端发送，前端不接触 QQ SMTP 凭据。
+研究问题必填，可指定最多 20 篇论文；也可不选论文，由 Agent 查找资料。前端只提交 `question`、`paper_ids`、`allow_search`，不提供预算设置，也不将界面语言写入任务。回答语言由后端根据问题内容确定。
 
-1. 在论文库上传单个 PDF，最大 **20 MiB**。客户端检查文件名、大小与 PDF 文件头；后端仍独立校验。Parser Worker 运行时可提取文本；未运行时保留“已上传”。扫描件不支持 OCR。
-2. 论文状态会在每轮结束后等待 2 秒查询。解析成功后显示页数/解析器版本；失败时可展开查看错误并重新上传。重新上传创建独立记录，不覆盖原论文。
-3. 可搜索、按状态筛选并跨页选择论文。摘要和问答选择一篇，综述选择 2—20 篇；问答和综述必须填写研究问题。是否使用真实 Runner 由后端配置决定；真实任务要求论文解析就绪。
-4. 新建任务仅开放 Baseline；摘要、问答和跨论文综述均由后端自动安排步骤、Token 与执行期限，前端不显示预算输入，也不携带 budget。Mock 同样由后端分配两步预算。
-5. 任务详情每轮请求结束后等待 2 秒继续查询，避免请求重叠；按事件序号增量读取，终态补齐最后事件后停止轮询。查询故障保留上次任务状态，可手动重试。
-6. 任务 ID 保留在 URL 中，刷新或重新打开详情可从后端恢复结果。终态任务可“重新创建任务”，预填原输入，确认提交后创建新任务，不修改原记录。
+每次研究提交携带随机 `Idempotency-Key`。同一输入在响应丢失、失败重试或刷新后复用未确认提交的键；问题、论文选择或搜索设置改变后，下一次提交使用新键。成功取得任务 ID 后清理该次草稿和键，之后主动创建同样的问题属于新任务。
 
-### arXiv 搜索失败时
+问题、所选论文 ID、预选参数来源和未确认提交保存在当前标签页的 `sessionStorage`，以账号 ID 隔离。打开 PDF 后返回、刷新或站内跳转可恢复。恢复时重新请求论文详情，已删除或不再可用的草稿论文会被移除并提示。明确的新预选参数可替换草稿选择，同一入口返回时保留用户后来修改的选择。成功提交、退出和会话失效清理草稿；存储被禁用时页面仍可使用，同一页面内的重试仍复用键，但不能保证刷新恢复。
 
-- 新搜索或翻页等待期间可保留上一份成功结果；搜索请求失败后清空旧结果、输入、排序及分页，回到未搜索状态，并以弹窗显示失败原因和请求编号。不再提示或展示「上次成功结果」。冷却限制保持生效，用户可在冷却后重新填写关键词搜索。
-- 搜索关键词、排序、分页和成功结果暂存在当前工作台内存中，站内切换后返回可继续查看，进行中的搜索也会继续；刷新、关闭后重新打开或退出账号后清空。「清除搜索」主动清空结果及输入并取消当前搜索，不改变服务端冷却限制或已提交的导入。
-- `ARXIV_TIMEOUT` 后等待 5 秒再手动搜索或翻页；等待结束不会自动发请求。这是页面操作保护，不代表来源会在 5 秒后恢复，也不影响导入及历史刷新。429 仍按服务端 `Retry-After` 共同限制搜索和导入；搜索提交处理函数也检查截止时间，回车不会绕过等待。
-- 来源查询成功后，导入状态补查失败单独以弹窗显示，不把成功搜索误标为失败。较早请求的返回或错误不会覆盖最新请求。
-- 上述容错不代表真实 arXiv 搜索已恢复；来源持续失败时仍保留错误和请求编号。
+## 阅读、搜索和研究结果
 
-**幂等范围：** 同一新建表单内，相同规范化输入的失败提交重试复用幂等键，连续点击也不会并行提交；修改输入会使用新键。离开或刷新新建表单后，不保留草稿和原幂等键。提交超时且准备离开页面时，请先检查任务列表，避免重新新建重复任务。论文上传不使用任务幂等键，重复上传可能产生独立论文记录。
+- 论文标题在当前页面打开 PDF，支持切换、专注阅读、错误重试和新标签页备用入口。关闭及切换文件会释放旧 Blob URL。
+- 搜索支持排序、每页 10/25/50 篇、页码跳转、翻页后回到结果顶部和摘要展开。搜索失败显示通知并清空当前搜索，用户可重新输入后提交；不会自动反复请求 arXiv。
+- 导入状态和 PDF 解析状态分别展示；下载成功不等于解析完成。重试导入携带 `expected_attempt`，避免并发重复重试。
+- 研究详情轮询统一研究接口，显示排队、执行、失败和结果。部分完成保留已有正文、比较、引用和待解决问题。查询失败可手动重连。
+- 点击引用打开证据抽屉，跳转 PDF 时保留引用页码和返回任务信息；返回后恢复该条引用。
+- 外部 arXiv 来源先确认导入，等待下载、解析完成后再进入本地 UUID 阅读器。仅导入来源明确指定的版本；缺少版本、摘要/版本不匹配或页码越界会提示，不擅自使用最新版本。停止等待不取消后台导入。
+- 论文和研究记录支持单条、跨页批量删除，后端执行用户归属、任务引用和运行状态保护。部分删除失败会汇总原因并保留失败项勾选。
 
-## 4. 结果与安全边界
+## 中英文界面
 
-- 页面仅在 Mock 任务显示模拟提示；Mock 产物不是研究结论，不调用模型且不提供虚构引用。真实产物展示已校验的论文标题、物理页码和原文引用。
-- 真实综述在「综述正文 / 论文比较 / 执行记录」中分别展示阅读内容、比较矩阵和执行信息。点击正文引用或表格中的带引用内容，会联动右侧证据面板；手机使用来源抽屉和逐篇比较。论文和证据面板可打开本地 PDF 对应页。未报告项显示“未报告”，无引用时显示明确的空状态。
-- 未报告的 Token/调用统计显示“—”，不把 `null` 当成 0。
-- Markdown 禁止原始 HTML 和内嵌图片，链接仅允许 HTTP(S) 或安全的同源相对地址；外链新窗口带 `noopener noreferrer`。有实际引用时支持原 PDF 页码跳转。
-- 私有工作台等待服务端会话确认，业务接口、PDF 与任务的实际权限由后端强制校验；前端不传可信 user_id。生产使用 HTTPS、同源代理和服务端 HttpOnly/Secure 会话 Cookie。
+右上角切换中文和 English，偏好键为 `literature-v3-ui-locale`。界面切换不改写问题、论文原文或模型结果，也不改变未确认提交的幂等键。新增文案需同步维护 `src/i18n/messages.ts`。
 
-## 5. 构建与部署
+## 类型检查和单元检查
+
+Windows 使用 `npm.cmd`，macOS / Linux 使用 `npm`：
 
 ```powershell
-npm.cmd run typecheck
-npm.cmd run build
-npm.cmd run preview
+npm.cmd --prefix frontend run build
+npm.cmd --prefix frontend run verify:unit
 ```
 
-构建输出为 `dist/`，预览默认在 `http://127.0.0.1:4173`，仅用于本机检查。正式部署需要静态文件服务器为 `/login`、`/verify-email`、`/reset-password`、`/account/password`、`/papers`、`/tasks/*` 等前端路由回退到 `index.html`，并优先将同源 `/api` 反向代理到后端，不能将 API 请求回退到 HTML。Vite 代理不会随 `dist/` 发布；生产会话需要 HTTPS 与匹配的后端 Origin/Cookie 配置。
+`build` 包含 TypeScript 检查。`verify:unit` 覆盖 UUID、来源版本/页码约束、提交标识、草稿隔离、异常存储和定向清理。
 
-## 6. 验收说明
+## 离线浏览器回归
 
-2026-11-11 开发验收包括类型检查与生产构建、输入规范化/选择数量/精确 20 MiB 边界校验，以及 Chromium 桌面和 390px 移动端检查。浏览器故障注入覆盖连续点击、同键重试、查询 503 后状态保留、事件游标与终态补齐、结果查询重试、终态刷新失败停止轮询，以及不安全 Markdown 抑制。
+首次准备 Python Playwright 环境。Windows PowerShell：
 
-另通过真实浏览器、Vite 代理、独立 FastAPI 与 Worker 进程完成 PDF 上传、摘要执行、持久化详情刷新、事件和产物读取、原 PDF 下载、重新创建任务及预算失败展示。该联调使用 PGlite 的 PostgreSQL 兼容 socket；它不是原生 PostgreSQL 多连接事务验收，真实双 Worker、并发幂等竞争和锁行为仍需 PostgreSQL 17+ 环境验证。
+```powershell
+uv venv runtime/browser-venv --python 3.12
+uv pip install --python runtime/browser-venv/Scripts/python.exe playwright
+$env:PLAYWRIGHT_BROWSERS_PATH = Join-Path (Get-Location) 'runtime/pw-browsers'
+& runtime/browser-venv/Scripts/python.exe -m playwright install chromium
+& runtime/browser-venv/Scripts/python.exe -B frontend/checks/run-browser-checks.py
+```
 
-MVP-1A 增量校验覆盖 pypdf 解析核心、可终止子进程、页码与分页证据、损坏/加密/无文本/文件变化/文件缺失、租约回收、旧 Worker 拒写、事务回滚、超时/停止终止、真实 Parser Worker 与前端 ready/failure 状态。Parser Worker 启动命令和资源限制见 `../backend/README.md`。16 MiB 页内容流限制发生在 PDF 解码后，不是 RAM 上限；公网部署前需要 OS/容器层沙箱。
+macOS / Linux：
 
-当前没有新增发布测试框架；临时验收脚本、截图、日志、浏览器和测试存储位于 Git 忽略的 `../runtime/`，不是运行依赖。后续应将关键场景迁入可重复执行的正式测试与 CI。
+```bash
+uv venv runtime/browser-venv --python 3.12
+uv pip install --python runtime/browser-venv/bin/python playwright
+export PLAYWRIGHT_BROWSERS_PATH="$(pwd)/runtime/pw-browsers"
+runtime/browser-venv/bin/python -m playwright install chromium
+runtime/browser-venv/bin/python -B frontend/checks/run-browser-checks.py
+```
 
-## 7. arXiv 搜索与导入（MVP-3）
+已有环境时直接运行最后一行。入口自动启动独立 Vite，执行当前所有离线检查并关闭自己启动的服务；日志位于 `runtime/frontend-checks/`。可传 `--url http://127.0.0.1:5173` 复用已有 Vite，或用 `--only research-draft-browser.py` 仅检查指定脚本。
 
-从导航打开 `/papers/search`，输入关键词后提交搜索；输入时不会自动请求来源。每页 10 篇，支持上一页/下一页。关键词作为普通文字 AND 匹配，不接受任意下载网址。
+所有离线 API 都由夹具拦截，不连接数据库、arXiv、邮件或真实模型。Python 与 Node 检查默认使用 Playwright Chromium，不再硬编码 macOS Chrome 路径。Node 检查的 Playwright 模块位置由统一入口自动提供；可通过 `PLAYWRIGHT_MODULE` 覆盖。
 
-- 点击「导入 PDF」会保存指定 `vN` 版本的导入记录；重复点击/重复提交同一来源版本复用同一记录，不覆盖手动上传。
-- 导入记录保存在后端，刷新页面后恢复；排队、下载和解析中的记录每轮结束后 2 秒查询，离开页面时取消请求。
-- 「已导入」表示 PDF 和来源已保存，只有「可用于研究」时提供任务预选入口。解析失败应去论文库查看原因，不显示重新下载按钮。
-- 仅可重试的导入失败显示「重新下载」。同一次不确定提交保留原 `expected_attempt`，避免响应丢失后触发额外尝试；重新下载不是解析重试。
-- 429 显示服务端冷却倒计时，不自动重试搜索或下载。来源关闭/缺少邮箱时显示配置提示，但导入历史仍可读取、手动上传不受影响。
-- 来源元数据按文本渲染；来源链接由经过验证的版本 ID 生成，只允许官方 HTTPS 页面，不直接信任元数据中的 URL。
+| 脚本 | 覆盖范围 |
+| --- | --- |
+| `agent-integration-browser.py` | 当前研究 API、原生结果、语言、部分完成、引用往返和 HTTP 登录 |
+| `research-draft-browser.py` | 幂等重试、刷新、PDF 往返、预选参数、账号隔离和草稿清理 |
+| `research-source-import-browser.py` | 外部来源导入、复用、重试、解析等待和版本/页码保护 |
+| `agent-*-browser.cjs` | 新建研究、可选论文、记录页面和移动端 |
+| `library-reader-browser.py` | 阅读器、文件重试、跨页选择、焦点、失效会话和双语布局 |
+| `library-*-browser.cjs` | 单条、批量删除及部分失败 |
+| `search-browser.py` | 搜索、排序、分页、摘要展开和双语布局 |
+| `search-*-browser.cjs` | 搜索状态保持、通知、错误恢复和导入 |
+| `sidebar-browser.cjs` | 侧栏切换、持久化及键盘和移动端操作 |
 
-2026-11-12 离线 Chromium 验证覆盖显式搜索、分页、过期响应抑制、空结果/关闭/429、双击抑制、重试重放、刷新恢复、导入/解析分态及桌面/390px 布局。另以真实前后端和独立 Import/Parser/Mock Worker 验证「搜索→导入→解析就绪→选择论文→任务结果」；来源为测试夹具、数据库为 PGlite，不等同于真实 arXiv/原生 PostgreSQL 验收。
+真实浏览器/API/Agent 联调与这些离线检查分开执行，不能用离线通过代替真实模型或 ECS/TACC 互通验收。
 
-2026-11-13 用户在原生 PostgreSQL 17.6 和真实 arXiv 单版本导入后，人工确认导入历史及刷新恢复、论文库来源/9 页解析信息、本地 PDF 打开、用于研究入口自动预选，以及 Mock 任务成功、模拟标识、结果/执行记录与刷新恢复均正常。任务 ID 为 `92bada43-5467-4f54-982b-8844c5ecc1f1`。这是用户反馈的人工验收，未由代理独立重跑；真实模型生成质量不在本次范围，完整记录见 `../docs/superpowers/plans/2026-11-12-mvp-3-arxiv-search-import.md`。
-
-随后真实摘要任务 `e12f73c7-6f45-45da-a784-75807081101d` 通过独立 Runner 调用 DeepSeek 完成。用户确认非模拟标识与正文、5 条引用原文/页码及对应结论支持、刷新恢复均正常；任务/产物元数据另由代理只读 API 核对。此为一次单篇摘要验收，不覆盖真实问答、综述或普遍生成质量；详见 `../docs/superpowers/plans/2026-11-13-model-thinking-mode.md`。
-
-后续单篇问答任务 `27da56a0-a3aa-4f0b-b1d7-9aa04cde0231` 与双论文综述任务 `3cd9c072-c9f5-4b03-9d91-af2abd358570` 也获用户人工确认全部正常。综述检查覆盖真实运行信息、两篇论文正文及比较表、引用来源与 PDF 物理页码、刷新恢复；该任务未由代理独立重跑或核对实际用量。仅记录这一次端到端验收，不代表所有生成结果都可靠，也不代表 arXiv 搜索超时已解决。详见 `../docs/superpowers/plans/2026-11-13-real-review-acceptance.md`。
-
-
-## 8. 中文 / English 界面
-
-右上角的语言选择器可即时切换 **中文 / English**，桌面和移动端均可使用。首次默认简体中文；选择后保存在当前浏览器的 `localStorage`（键为 `literature-ui-locale`），刷新或重新打开页面会恢复。存储不可用时仍可切换，关闭页面后不保留选择。
-
-导航、表单及校验、空状态、上传/导入状态、任务状态、系统错误提示、日期和 Ant Design 组件随语言切换。切换时保留当前页面、已选论文、搜索条件、问题草稿与预算，也不会提交任务或改变重试使用的幂等键。
-
-论文标题/摘要、用户问题、引用原文、模型生成的正文和比较表保留原文。界面语言不改变研究结果的生成语言；若需要英文研究结果，请在研究问题中明确要求。
-
-翻译入口位于 `src/i18n/`：`messages.ts` 集中维护中文源文案和英文译文，`store.ts` 管理语言与参数替换，`LocaleProvider.tsx` 同步组件语言和网页元数据。组件通过 `useLocale()` 订阅变化，渲染时调用 `t()`；工具函数可从 `i18n/store` 引用纯函数。新增文案时同步补齐英文，参数使用 `{0}`、`{1}` 等占位符。系统诊断通过 `diagnostics.ts` 在展示时翻译，未知中文诊断根据错误代码提供英文回退。
-
-
-2026-11-13 双语增量验收通过类型检查/生产构建、语言存储与词条参数检查、隔离 Chromium 中英文切换，以及现有前端和搜索/导入回归。覆盖草稿、选择、预算、提交幂等键、轮询保留、系统错误/表单校验即时换语言、刷新恢复、存储不可用和 360px/390px 移动端。检查使用离线夹具，没有调用真实模型；完整证据见 `../docs/superpowers/plans/2026-11-13-frontend-language-switch.md`。
-
-## 9. 全任务自动执行
-
-所有新建任务均只需选择任务类型、论文和研究问题（摘要关注方向可选），不显示步骤/Token/超时输入。summary/qa/review 提交均省略 budget，复制历史任务也不复制其预算。后端返回 budget_mode=automatic，任务页展示只读自动分配；综述另展示逐篇分析和分章综合进度。摘要和问答按证据与问题规模动态计算，历史手动预算任务保持可读。缺少完整综述 usage 时显示估算说明。
-
-切换语言不改变研究输入、提交幂等键或生成正文；新增进度和预算说明支持中英文。创建请求失败且结果不确定时仍保留原幂等键。
-
-npm.cmd run verify:review 验证预算省略、提交指纹和双语进度；npm.cmd run build 执行类型检查及构建。checks/review-browser.py 使用 Playwright 拦截 API，覆盖六篇论文创建、进度、刷新、估算用量与 390px 布局，不请求真实模型。可通过 webapp-testing 的 with_server.py 启动专用 Vite 端口后执行。
-
-## 账号、验证与恢复
-
-账号入口为 /login、/register、/verify-email、/forgot-password、/reset-password；/account/password 和研究工作台均等待 /api/v1/auth/me 确认会话后显示。会话响应统一为 {user:{id,username,email},csrf_token}；账号菜单展示真实用户名，提供修改密码和退出。浏览器使用 HttpOnly 会话 Cookie，Axios 设置 withCredentials；已认证的 POST 请求附加当前会话的 X-CSRF-Token。公开账号请求使用 JSON，Origin 由浏览器自动生成。前后端必须同源（开发时通过 Vite /api 代理），不要混用 localhost 与 127.0.0.1。
-
-用户名为 3–32 个 ASCII 字母、数字或下划线，密码为 15–128 个 Unicode 字符；密码不去除空格。注册包含邮箱和确认密码。邮件链接形如 /verify-email#token=... 或 /reset-password#token=...：令牌仅暂存在内存，应用启动时立即清除地址栏，不写入存储、查询参数或第三方请求。刷新后需重新打开邮件链接。验证还必须输入注册时的原密码，打开链接不会自动激活；重置后需重新登录。重新发送验证邮件和密码恢复采用统一受理文案，不保证 SMTP 已送达。QQ 邮箱仅作为后端发信服务，用户邮箱不限 QQ。
-
-退出、业务接口 401 和跨标签页账号事件会取消会话代次内的请求，并按代次重挂载私有工作台，清除论文选择、草稿、上传、轮询、来源面板和提交幂等键。界面语言独立保留。跨标签页只广播随机变更事件，不存储账号资料、密码、邮件令牌或 CSRF。业务输入不包含 user_id。
-
-隔离验收：在 frontend 目录启动 npm.cmd run dev -- --host 127.0.0.1 --port 5193 --strictPort；在仓库根运行 runtime/browser-venv/Scripts/python.exe frontend/checks/auth-browser.py。也可用 AUTH_PREVIEW_URL 指定专用本地预览端口。脚本拦截全部 /api/v1 请求，覆盖匿名私有路由、注册校验、验证原密码、fragment 清理、错误登录不跳转、Cookie/CSRF、退出/改密、跨标签页账号切换、旧数据清理及恢复流程；不连接后端、不发送邮件、不调用模型。
-
-既有 workspace-browser.py、review-browser.py 使用匿名夹具；启用账号后，运行这些旧脚本需在独立浏览器上下文额外模拟 /api/v1/auth/me 为已登录响应。账号隔离检查由 auth-browser.py 执行。
-
-## 工作台设计与回归
-
-2026-11-14 的页面改版覆盖论文库、搜索、新建研究、研究记录和任务详情，设计规范见 ../DESIGN.md。界面保留中英文切换；已保存的研究正文、引用原文和论文标题不会因切换界面语言而自动翻译。
-
-在 frontend 目录运行 `npm.cmd run build`、`npm.cmd run verify:review`。浏览器回归位于 checks/workspace-browser.py，依赖 Python Playwright 和 Chromium。在仓库根目录运行时，可设置 `WORKSPACE_PREVIEW_URL` 指向已经启动的 Vite（脚本默认 5191）；脚本沿用 runtime/pw-browsers 浏览器目录。该检查拦截 API，不会创建真实任务或调用 arXiv/模型，覆盖引用联动、比较矩阵、执行记录、移动来源抽屉、语言持久化及五类页面的响应式布局。
-
-## 论文删除与导入状态同步
-
-论文库和阅读列表提供逐篇删除确认。只有未被任何研究任务引用的论文可删除；解析中需等待完成。删除后清除选中状态、关闭对应阅读器，并保留筛选及合理页码。删除 arXiv 论文会清理其导入映射，搜索中可再次导入。历史研究任务及引用不受影响。
-
-搜索结果重新搜索及窗口重新获得焦点时会核对服务器导入状态。正在下载和解析的记录继续每两秒刷新，单条状态读取失败不阻断其他记录。所有下载失败均显示「重新下载」，手动重试保留尝试版本和账号额度保护；下载成功但解析失败需在论文库查看原因。
-
-`checks/library-delete-browser.cjs` 使用模拟 API 覆盖删除确认/取消、任务引用保护、CSRF、选中清理、搜索同步和状态读取失败后的重试入口。需安装 Playwright 并提供 Chrome；可通过 `PLAYWRIGHT_MODULE`、`BROWSER_EXECUTABLE`、`SEARCH_PREVIEW_URL` 指定环境，默认预览端口为 5198。
-
-论文库勾选论文后可使用「删除已选论文」批量删除，支持跨页选择。确认后逐篇调用已有删除接口；受任务引用或解析状态保护的论文不会删除，失败项目保留选择并通过顶部居中弹窗汇总原因。单篇删除失败同样使用弹窗，可手动关闭或 5 秒后自动关闭。`checks/library-bulk-delete-browser.cjs` 使用模拟接口验证确认/取消、跨页删除、部分失败和移动端布局。
-
-`checks/search-session-browser.cjs` 使用模拟接口验证站内切换保留搜索、后台请求完成、手动清空及迟到响应隔离、刷新和新页面重置。环境参数与其他 Node 浏览器检查相同。
-
-证据面板提供阅读显示与原始摘录：阅读显示仅合并排版空白、软连字符断行和可识别的首尾残句，不生成或补写内容。英文句子以句首大写等特征及终止标点进行保守识别，中英文混排、缩写和 PDF 提取异常仍可能需要查看原文；没有可确认完整句子时明确提示打开 PDF。展开「查看原始摘录」可核对完整保存的 quote。服务端引用校验、数据库保存内容及 PDF 页码保持原样。
-
-## 研究详情的用户进度提示
-
-结果页只保留研究正文、可用时的论文比较以及证据来源，不展示执行记录、实际运行统计、研究输入、预算或工作流版本。页面不再请求 events 接口，状态轮询只依赖任务状态与结果接口。
-
-排队和执行中显示不带百分比的动态进度条、当前状态和最近成功确认状态的时间。该动画不是完成比例或剩余时长估计；查询失败会暂停动画并提示重新连接。完成后自动切换结果，失败时显示原因，终态停止轮询。`checks/task-progress-browser.cjs` 使用模拟状态检查这些行为，且省略预算/统计/版本字段验证页面不会依赖它们。
-
-研究记录支持逐条和跨页勾选批量删除，统一确认后调用已有会话保护的 DELETE 接口。运行中记录不可删除；部分失败会以可关闭、5 秒自动关闭的通知汇总，保留未删除项的勾选。删除研究不会删除原论文，但会解除该研究的论文引用；只有最后一条引用研究也被删除后，论文才能删除。`checks/task-delete-browser.cjs` 验证列表交互，`backend/tests/test_ownership.py` 验证真实数据库中的关联清理规则。
-
-桌面顶栏提供侧栏展开/收起按钮；收起时保留带名称提示的图标导航，侧栏宽度为 72px，主内容相应增宽。偏好保存为 `literature-sidebar-collapsed`，存储不可用时仍可切换。手机保留原有横向导航。`checks/sidebar-browser.cjs` 验证宽度、导航、刷新恢复及键盘和移动端交互。
+真实联调入口和最新结果见 `../docs/frontend-backend-acceptance.md`。本地验收脚本使用独立数据库、临时账号及合成 PDF，实际执行 Parser、Agent Worker 和配置的模型。

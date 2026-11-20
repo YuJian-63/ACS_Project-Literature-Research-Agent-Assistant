@@ -11,7 +11,7 @@ from uuid import uuid4
 
 from alembic import command
 from alembic.config import Config
-from app.agent_bridge.contracts import DispatchManifest, ResultEnvelope
+from app.agent_bridge.contracts import AgentEvidence, DispatchManifest, ResultEnvelope
 from app.agent_bridge.store import complete_delivery, record_job
 from app.api.schemas import TaskCreate
 from app.config import Settings
@@ -80,6 +80,145 @@ class AgentPostgresTests(unittest.TestCase):
         with self.sessions() as session:
             run = session.get(AgentRun, task_id)
             return task_id, DispatchManifest.model_validate(run.manifest), run.input_sha256
+
+    def research_client(self, user_id=None):
+        from types import SimpleNamespace
+        from fastapi.testclient import TestClient
+        from app.auth.dependencies import require_user
+        from app.main import create_app
+
+        app = create_app(self.settings)
+        app.state.sessions = self.sessions
+        app.dependency_overrides[require_user] = lambda: SimpleNamespace(id=user_id or self.user_id)
+        client = TestClient(app)
+        self.addCleanup(client.close)
+        return client
+
+    def test_research_create_list_detail_and_delete_use_frontend_shapes(self):
+        client = self.research_client()
+        second_id = uuid4()
+        with self.sessions.begin() as session:
+            session.add(Paper(id=second_id, user_id=self.user_id, title="Second paper",
+                original_filename="second.pdf", storage_key=f"uploads/{second_id}.pdf",
+                size_bytes=12, sha256="b" * 64, status="ready", page_count=1, parser_version="test-v1"))
+        body = {"question": "比较研究方法", "paper_ids": [str(second_id), str(self.paper_id)], "allow_search": True}
+        response = client.post("/api/v1/agent-research", json=body,
+            headers={"Idempotency-Key": "research-key"})
+        self.assertEqual(response.status_code, 202, response.text)
+        task_id = response.json()["task_id"]
+        self.assertEqual(response.headers["location"], f"/api/v1/agent-research/{task_id}")
+        replay = client.post("/api/v1/agent-research", json=body, headers={"Idempotency-Key": "research-key"})
+        self.assertEqual(replay.json()["task_id"], task_id)
+        self.assertEqual(replay.headers["idempotency-replayed"], "true")
+        conflict = client.post("/api/v1/agent-research", json={**body, "question": "Different"},
+            headers={"Idempotency-Key": "research-key"})
+        self.assertEqual(conflict.status_code, 409)
+        records = client.get("/api/v1/agent-research?status=queued&limit=10&offset=0").json()
+        self.assertEqual(records["total"], 1)
+        self.assertEqual(records["items"][0]["papers"], [
+            {"id": str(second_id), "title": "Second paper"}, {"id": str(self.paper_id), "title": "Uploaded PDF"}])
+        detail = client.get(f"/api/v1/agent-research/{task_id}").json()
+        self.assertEqual(detail["paper_ids"], body["paper_ids"])
+        self.assertEqual(detail["question"], body["question"])
+        self.assertIsNone(detail["result"])
+        self.assertEqual(client.delete(f"/api/v1/agent-research/{task_id}").status_code, 204)
+        self.assertEqual(client.get(f"/api/v1/agent-research/{task_id}").status_code, 404)
+        with self.sessions() as session:
+            self.assertIsNotNone(session.get(Paper, self.paper_id))
+
+    def test_research_isolates_users_and_legacy_tasks(self):
+        client = self.research_client()
+        record = client.post("/api/v1/agent-research", json={"question": "Explain"}).json()
+        task_id = record["task_id"]
+        foreign = self.research_client(self.other_user)
+        self.assertEqual(foreign.get("/api/v1/agent-research").json()["total"], 0)
+        for response in (foreign.get(f"/api/v1/agent-research/{task_id}"),
+            foreign.delete(f"/api/v1/agent-research/{task_id}"),
+            foreign.post("/api/v1/agent-research", json={"question": "Explain", "paper_ids": [str(self.paper_id)]})):
+            self.assertEqual(response.status_code, 404)
+        legacy, _ = submit_task(self.sessions, self.settings, self.request, "legacy", user_id=self.user_id)
+        self.assertEqual(client.get("/api/v1/agent-research").json()["total"], 1)
+        self.assertEqual(client.get(f"/api/v1/agent-research/{legacy['id']}").status_code, 404)
+        self.assertEqual(client.delete(f"/api/v1/agent-research/{legacy['id']}").status_code, 404)
+
+    def test_research_requires_session_origin_and_csrf(self):
+        from app.auth.security import cookie_name, csrf_token, new_token, token_hash
+        from app.db.models import AuthSession
+
+        client = self.research_client()
+        client.app.dependency_overrides.clear()
+        self.assertEqual(client.get("/api/v1/agent-research").status_code, 401)
+        raw = new_token()
+        with self.sessions.begin() as session:
+            session.add(AuthSession(id=uuid4(), user_id=self.user_id, token_hash=token_hash(raw),
+                auth_version=1, expires_at=datetime.now(timezone.utc) + timedelta(hours=1)))
+        client.cookies.set(cookie_name(self.settings), raw)
+        self.assertEqual(client.get("/api/v1/agent-research").status_code, 200)
+        body = {"question": "Explain"}
+        self.assertEqual(client.post("/api/v1/agent-research", json=body).status_code, 403)
+        headers = {"Origin": self.settings.frontend_public_url}
+        self.assertEqual(client.post("/api/v1/agent-research", json=body, headers=headers).status_code, 403)
+        headers["X-CSRF-Token"] = csrf_token(self.settings, raw)
+        self.assertEqual(client.post("/api/v1/agent-research", json=body, headers=headers).status_code, 202)
+
+    def test_research_enforces_server_runner_quotas_and_shared_idempotency(self):
+        client = self.research_client()
+        self.settings.agent_dispatch_enabled = False
+        self.assertEqual(client.post("/api/v1/agent-research", json={"question": "Explain"}).status_code, 503)
+        self.settings.agent_dispatch_enabled = True
+        self.settings.task_runner = "mock"
+        self.assertEqual(client.post("/api/v1/agent-research", json={"question": "Explain"}).status_code, 503)
+        self.settings.task_runner = "agent"
+        submit_task(self.sessions, self.settings, self.request, "legacy", user_id=self.user_id)
+        self.assertEqual(client.post("/api/v1/agent-research", json={"question": "Explain"},
+            headers={"Idempotency-Key": "legacy"}).status_code, 409)
+        self.settings.user_active_tasks = 1
+        response = client.post("/api/v1/agent-research", json={"question": "Explain"})
+        self.assertEqual(response.status_code, 429, response.text)
+
+    def test_research_running_and_recovered_jobs_cannot_be_deleted(self):
+        client = self.research_client()
+        accepted = client.post("/api/v1/agent-research", json={"question": "Explain"}).json()
+        task_id = claim_task(self.sessions, self.owner, "agent")
+        self.assertEqual(str(task_id), accepted["task_id"])
+        path = f"/api/v1/agent-research/{task_id}"
+        self.assertEqual(client.delete(path).status_code, 409)
+        with self.sessions.begin() as session:
+            task = session.get(Task, task_id)
+            task.status, task.stage = "queued", "queued"
+            task.worker_id, task.lease_expires_at = None, None
+        self.assertEqual(client.delete(path).status_code, 409)
+
+    def test_research_preserves_search_results_partial_and_failed_outcomes(self):
+        from uuid import UUID
+
+        client = self.research_client()
+        for reason in ("completed", "partial", "model_error"):
+            accepted = client.post("/api/v1/agent-research", json={"question": "Explain methods"}).json()
+            task_id = UUID(accepted["task_id"])
+            self.assertEqual(claim_task(self.sessions, self.owner, "agent"), task_id)
+            self.assertTrue(set_task_stage(self.sessions, task_id, self.owner,
+                "agent_packaging", "agent_waiting", "waiting"))
+            with self.sessions() as session:
+                run = session.get(AgentRun, task_id)
+                manifest = DispatchManifest.model_validate(run.manifest)
+                envelope = self.envelope(manifest, run.input_sha256, reason)
+            source_id = "arxiv:1706.03762v7"
+            metadata = {"source_id": source_id, "paper_id": "arxiv:1706.03762", "title": "External",
+                "url": "https://arxiv.org/abs/1706.03762v7"}
+            envelope.result.sources = [metadata]
+            envelope.result.citations = [AgentEvidence(**metadata, page=1, source_text="Evidence",
+                chunk_id=source_id + ":p1:c1")]
+            self.assertTrue(complete_delivery(self.sessions, task_id, self.owner, manifest, envelope))
+            detail = client.get(f"/api/v1/agent-research/{task_id}")
+            self.assertEqual(detail.status_code, 200, detail.text)
+            record = detail.json()
+            self.assertEqual(record["result"], envelope.result.model_dump(mode="json"))
+            self.assertEqual(record["status"], "failed" if reason == "model_error" else "succeeded")
+            self.assertEqual(record["result"]["stop_reason"], reason)
+            with self.sessions() as session:
+                self.assertEqual(list(session.scalars(select(Citation).where(Citation.task_id == task_id))), [])
+            self.assertEqual(client.delete(f"/api/v1/agent-research/{task_id}").status_code, 204)
 
     def envelope(self, manifest, digest, reason="completed"):
         return ResultEnvelope.model_validate({"schema_version": "agent-result-v1",

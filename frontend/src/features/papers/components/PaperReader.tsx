@@ -11,11 +11,11 @@ import PaperDeleteButton from './PaperDeleteButton';
 
 type DocumentState = { kind: 'loading' } | { kind: 'ready'; url: string } | { kind: 'error'; error: ApiError };
 
-export default function PaperReader({ paper, papers, page = 1, returnToTask, expanded, onRead, onExpand, onClose, onDelete, deletingId }: {
+export default function PaperReader({ paper, papers, page = 1, returnToResearch, expanded, onRead, onExpand, onClose, onDelete, deletingId }: {
   paper: Paper;
   papers: Paper[];
   page?: number;
-  returnToTask?: string;
+  returnToResearch?: string;
   expanded: boolean;
   onRead: (paper: Paper) => void;
   onExpand: () => void;
@@ -70,7 +70,7 @@ export default function PaperReader({ paper, papers, page = 1, returnToTask, exp
       </div></div>
       <div className="paper-reader-actions">
         {onDelete && <PaperDeleteButton paper={paper} onDelete={onDelete} deletingId={deletingId} />}
-        {returnToTask && <Button type="primary" className="reader-task-return" icon={<ArrowLeftOutlined aria-hidden="true" />} onClick={() => navigate(returnToTask)}>{t('返回任务')}</Button>}
+        {returnToResearch && <Button type="primary" className="reader-task-return" icon={<ArrowLeftOutlined aria-hidden="true" />} onClick={() => navigate(returnToResearch)}>{t('返回研究')}</Button>}
         <Button className="reader-expand" icon={expanded ? <FullscreenExitOutlined aria-hidden="true" /> : <FullscreenOutlined aria-hidden="true" />} onClick={onExpand}>{expanded ? t('显示论文列表') : t('专注阅读')}</Button>
         <Button href={paperFileUrl(paper.id, page)} target="_blank" rel="noopener noreferrer" icon={<SelectOutlined aria-hidden="true" />}>{t('在新标签页打开')}</Button>
         <Button icon={<CloseOutlined aria-hidden="true" />} aria-label={t('关闭阅读')} title={t('返回论文库')} onClick={onClose} />

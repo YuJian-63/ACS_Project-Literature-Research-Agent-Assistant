@@ -35,6 +35,7 @@ class Settings(BaseSettings):
     agent_transport_timeout_seconds: float = Field(default=30, ge=1, le=300, allow_inf_nan=False)
     agent_retention_seconds: int = Field(default=604800, ge=86400, le=31536000)
     agent_max_steps: int = Field(default=100, ge=1, le=100)
+    agent_search_max_papers: int = Field(default=5, ge=1, le=20)
     agent_timeout_seconds: int = Field(default=1800, ge=60, le=1800)
     agent_output_tokens: int = Field(default=8192, ge=1024, le=32768)
     agent_context_tokens: int = Field(default=32000, ge=4096, le=1000000)
