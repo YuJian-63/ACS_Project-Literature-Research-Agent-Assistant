@@ -12,7 +12,7 @@ from app.api.schemas import (
 from app.api.views import summary_view, task_view
 from app.db.models import Artifact, Citation, Paper, Task, TaskEvent
 from app.errors import APIError
-from app.tasks.service import get_task, selected_papers, submit_task
+from app.tasks.service import get_task, selected_papers, selected_paper_titles, submit_task
 
 from app.auth.dependencies import require_user
 from app.db.models import User
@@ -53,8 +53,9 @@ def list_tasks(
             select(Task).where(*conditions).order_by(Task.created_at.desc(), Task.id.desc()).offset(offset).limit(limit)
         ))
         papers = selected_papers(session, [task.id for task in tasks])
+        titles = selected_paper_titles(session, [task.id for task in tasks])
         return {
-            "items": [summary_view(task, papers[task.id]) for task in tasks],
+            "items": [{**summary_view(task, papers[task.id]), "papers": titles[task.id]} for task in tasks],
             "total": total, "limit": limit, "offset": offset,
         }
 

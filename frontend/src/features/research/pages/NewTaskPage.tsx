@@ -16,7 +16,7 @@ interface TaskForm {
   question?: string;
 }
 
-const selectionNotificationConfig = { placement: 'top', duration: 5, maxCount: 3, stack: false, classNames: { list: 'search-notification-list' } } as const;
+const selectionNotificationConfig = { placement: 'top', duration: 3, maxCount: 3, stack: false, classNames: { list: 'search-notification-list' } } as const;
 
 export default function NewTaskPage() {
   const [notification, notificationHolder] = notificationApi.useNotification(selectionNotificationConfig);

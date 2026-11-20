@@ -113,9 +113,15 @@ class TaskAccepted(BaseModel):
     created_at: datetime
 
 
+class TaskPaperTitle(BaseModel):
+    id: UUID
+    title: str
+
+
 class TaskSummary(TaskAccepted):
     question: str | None
     paper_ids: list[UUID]
+    papers: list[TaskPaperTitle] = Field(default_factory=list)
     error: Error | None
     updated_at: datetime
     started_at: datetime | None

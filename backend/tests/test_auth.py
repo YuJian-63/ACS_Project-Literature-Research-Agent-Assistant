@@ -428,16 +428,24 @@ class AuthBehaviorTests(unittest.TestCase):
             self.auth.verify_email(old, self.password, "127.0.0.1")
         self.auth.verify_email(new, self.password, "127.0.0.1")
 
-    def test_change_password_checks_current_and_revokes_session(self):
+    def test_change_password_preserves_current_session_and_revokes_others(self):
         from app.errors import APIError
         self.activate()
         user, raw = self.auth.login("alice", self.password, "127.0.0.1")
-        with self.assertRaises(APIError):
+        _, other = self.auth.login("alice", self.password, "127.0.0.1")
+        with self.assertRaises(APIError) as failure:
             self.auth.change_password(user.id, raw, "incorrect", "a different long password", "127.0.0.1")
+        self.assertEqual(failure.exception.status_code, 400)
+        self.assertEqual(failure.exception.error["code"], "CURRENT_PASSWORD_INCORRECT")
         self.auth.authenticate(raw)
+        self.auth.authenticate(other)
         self.auth.change_password(user.id, raw, self.password, "a different long password", "127.0.0.1")
+        self.auth.authenticate(raw)
         with self.assertRaises(APIError):
-            self.auth.authenticate(raw)
+            self.auth.authenticate(other)
+        with self.assertRaises(APIError):
+            self.auth.login("alice", self.password, "127.0.0.1")
+        self.auth.login("alice", "a different long password", "127.0.0.1")
 
     def test_expiry_auth_version_disable_and_logout(self):
         from app.auth.service import db_now

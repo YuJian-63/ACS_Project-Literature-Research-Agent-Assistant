@@ -142,6 +142,19 @@ def get_task(session: Session, task_id: UUID, user_id: UUID) -> Task:
     return task
 
 
+def selected_paper_titles(session: Session, task_ids: list[UUID]) -> dict[UUID, list[dict]]:
+    result = {task_id: [] for task_id in task_ids}
+    if task_ids:
+        rows = session.execute(
+            select(TaskPaper.task_id, Paper.id, Paper.title)
+            .join(Paper, (Paper.id == TaskPaper.paper_id) & (Paper.user_id == TaskPaper.user_id))
+            .where(TaskPaper.task_id.in_(task_ids)).order_by(TaskPaper.task_id, TaskPaper.selection_order)
+        )
+        for task_id, paper_id, title in rows:
+            result[task_id].append({"id": paper_id, "title": title})
+    return result
+
+
 def selected_papers(session: Session, task_ids: list[UUID]) -> dict[UUID, list[UUID]]:
     result = {task_id: [] for task_id in task_ids}
     if task_ids:

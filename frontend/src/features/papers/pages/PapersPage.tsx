@@ -18,7 +18,7 @@ import { useResource } from '../../../shared/hooks/useResource';
 import { paperStatusLabels } from '../../../shared/lib/format';
 import { taskReaderReturnUrl } from '../../../shared/lib/paperReader';
 
-const deletionNotificationConfig = { placement: 'top', duration: 5, maxCount: 3, stack: false, classNames: { list: 'search-notification-list' } } as const;
+const deletionNotificationConfig = { placement: 'top', duration: 3, maxCount: 3, stack: false, classNames: { list: 'search-notification-list' } } as const;
 
 export default function PapersPage() {
   useLocale();

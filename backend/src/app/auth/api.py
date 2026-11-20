@@ -157,5 +157,4 @@ def change(data: ChangeInput, request: Request, response: Response, user: User =
     settings = request.app.state.settings
     auth_service(request).change_password(user.id, request.cookies[cookie_name(settings)], data.current_password,
                                           data.password, client_ip(request))
-    clear_cookie(response, settings)
     return {"ok": True}

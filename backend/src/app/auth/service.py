@@ -224,6 +224,12 @@ class AuthService:
         encoded = hash_password(password)
         with self.sessions.begin() as session:
             user, current = self.session_user(session, raw, lock=True)
-            if user.id != user_id or not verify_password(user.password_hash, current_password):
-                raise invalid_credentials()
+            if user.id != user_id:
+                raise unauthorized()
+            if not verify_password(user.password_hash, current_password):
+                raise APIError(400, "CURRENT_PASSWORD_INCORRECT", "当前密码不正确，请重新输入。")
             self.replace_password(session, user, encoded, db_now(session))
+            # Keep this authenticated session; other sessions remain revoked.
+            session.execute(update(AuthSession).where(AuthSession.id == current.id).values(
+                revoked_at=None, auth_version=user.auth_version,
+            ))

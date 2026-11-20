@@ -102,6 +102,7 @@ export interface TaskAccepted {
 }
 
 export interface TaskSummary extends TaskAccepted {
+  papers?: { id: string; title: string }[];
   question: string | null;
   paper_ids: string[];
   error: ResourceError | null;

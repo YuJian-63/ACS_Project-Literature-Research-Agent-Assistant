@@ -1,4 +1,11 @@
 export const english: Record<string, string> = {
+  "密码修改成功": "Password changed",
+  "密码修改失败": "Password change failed",
+  "新密码已生效。": "Your new password is now active.",
+  "当前密码不正确，请重新输入。": "Your current password is incorrect. Please try again.",
+  "请求验证失败，请刷新页面后重试。": "Request verification failed. Refresh the page and try again.",
+  "密码未能更新，请检查输入后重试。": "Your password could not be updated. Check your input and try again.",
+  "研究论文": "Research papers",
   "展开侧栏": "Expand sidebar",
   "收起侧栏": "Collapse sidebar",
   "研究记录不存在": "Research record not found",

@@ -49,6 +49,10 @@ def main():
                 if path.endswith('/logout') and state['hold_logout']:
                     logouts.append(route)
                     return
+                if path.endswith('/change-password'):
+                    if data['current_password'] != PASSWORD:
+                        return route.fulfill(status=400, json={'error': {'code': 'CURRENT_PASSWORD_INCORRECT'}})
+                    return route.fulfill(json={'ok': True})
                 state['user'] = None
                 return route.fulfill(status=204)
             if path.startswith('/api/v1/auth/'):
@@ -238,17 +242,20 @@ def main():
         page.get_by_label('Password', exact=True).fill(PASSWORD)
         page.get_by_role('button', name='Log in', exact=True).click()
         page.goto(BASE + '/account/password')
-        page.get_by_label('Current password', exact=True).fill(PASSWORD)
+        page.get_by_label('Current password', exact=True).fill('incorrect')
         page.get_by_label('New password', exact=True).fill('654321')
         page.get_by_label('Confirm password', exact=True).fill('654321')
         page.get_by_role('button', name='Change password', exact=True).click()
-        expect(page.get_by_role('heading', name='Log in', exact=True)).to_be_visible()
-        change = next(call for call in calls if call[0].endswith('/change-password'))
+        expect(page.get_by_text('Your current password is incorrect. Please try again.', exact=True)).to_be_visible()
+        expect(page).to_have_url(BASE + '/account/password')
+        expect(page.get_by_role('button', name=USER['username'], exact=True)).to_be_visible()
+        page.get_by_label('Current password', exact=True).fill(PASSWORD)
+        page.get_by_role('button', name='Change password', exact=True).click()
+        expect(page).to_have_url(BASE + '/papers')
+        expect(page.get_by_text('Password changed', exact=True)).to_be_visible()
+        change = [call for call in calls if call[0].endswith('/change-password')][-1]
         assert change[1]['current_password'] == PASSWORD and change[1]['password'] == '654321'
         assert change[2].get('x-csrf-token')
-        page.get_by_label('Username', exact=True).fill(USER['username'])
-        page.get_by_label('Password', exact=True).fill(PASSWORD)
-        page.get_by_role('button', name='Log in', exact=True).click()
         expect(page.get_by_role('button', name=USER['username'], exact=True)).to_be_visible()
         task_call_offset = len(calls)
         state['user_papers'] = 2
