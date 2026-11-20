@@ -61,8 +61,8 @@ export default function ArtifactView({ artifact, papers = [], view = 'read' }: {
     {artifact.is_mock && <div className="artifact-heading"><MockTag /><p>{t('模拟结果不提供引用，也不代表论文结论。')}</p></div>}
     <div className="artifact-layout"><div className="artifact-main">
       {view === 'compare' && artifact.comparison_table ? <ComparisonView taskReturn={{ taskId: artifact.task_id, artifactId: artifact.id, view }} comparison={artifact.comparison_table} papers={papers} citations={artifact.citations} onSelect={select} /> : <>
-        {outline.length > 0 && <nav className="result-outline" aria-label={t('正文目录')}><span>{t('本页内容')}</span>{outline.map((heading) => <a key={heading.id} href={'#' + heading.id}>{heading.title}</a>)}</nav>}
-        <div className="markdown" ref={manuscript}><ReactMarkdown remarkPlugins={plugins} skipHtml components={markdownComponents}>{artifact.content_markdown}</ReactMarkdown></div>
+        {view === 'read' && outline.length > 0 && <nav className="result-outline" aria-label={t('正文目录')}><span>{t('本页内容')}</span>{outline.map((heading) => <a key={heading.id} href={'#' + heading.id}>{heading.title}</a>)}</nav>}
+        <div className="markdown" ref={manuscript}><ReactMarkdown remarkPlugins={plugins} skipHtml components={markdownComponents}>{view === 'compare' && artifact.comparison_markdown?.trim() ? artifact.comparison_markdown : artifact.content_markdown}</ReactMarkdown></div>
         <div className="manuscript-footer"><BookOutlined /><span>{t('研究结论需要真实来源与证据支持')}</span></div>
       </>}
       {compact && <button className="mobile-evidence-button" onClick={(event) => { lastTrigger.current = event.currentTarget; setEvidenceTab('current'); setOpen(true); }}><BookOutlined />{t('证据与来源')}<span>{artifact.citations.length}</span></button>}

@@ -227,6 +227,9 @@ def build_messages(
                 "每条引用至少在正文或表格中使用一次。仅可用提供的论文身份与片段，不得自报 citation_keys 或 C 编号。"
             )
         data["selected_papers"] = selected_papers
+    from app.tasks.language import answer_language_instruction
+
+    system += " " + answer_language_instruction(question)
     import json
 
     return [

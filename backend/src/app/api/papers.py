@@ -1,5 +1,5 @@
 import os
-from typing import Annotated
+from typing import Annotated, Literal
 from urllib.parse import quote
 from uuid import UUID
 
@@ -109,14 +109,22 @@ def delete_paper(request: Request, paper_id: UUID, user: CurrentUser) -> None:
 @router.get("/api/v1/papers/{paper_id}/file", response_class=StreamingResponse, responses={200: {"content": {"application/pdf": {}}}})
 def paper_file(request: Request, paper_id: UUID, user: CurrentUser) -> StreamingResponse:
     with request.app.state.sessions() as session:
-        paper = get_paper(session, paper_id, user.id)
-        try:
-            path = controlled_path(request.app.state.settings.storage_root, paper_id, paper.storage_key)
-            source = path.open("rb")
-            size = os.fstat(source.fileno()).st_size
-        except (OSError, ValueError):
-            raise APIError(500, "FILE_UNAVAILABLE", "论文文件不可用") from None
-        filename = paper.original_filename
+        return stream_paper_file(request, get_paper(session, paper_id, user.id))
+
+
+def stream_paper_file(
+    request: Request, paper: Paper, *, disposition: Literal["inline", "attachment"] = "inline",
+) -> StreamingResponse:
+    source = None
+    try:
+        path = controlled_path(request.app.state.settings.storage_root, paper.id, paper.storage_key)
+        source = path.open("rb")
+        size = os.fstat(source.fileno()).st_size
+    except (OSError, ValueError):
+        if source is not None:
+            source.close()
+        raise APIError(500, "FILE_UNAVAILABLE", "论文文件不可用") from None
+    filename = quote(paper.original_filename, safe="")
 
     def chunks():
         try:
@@ -128,7 +136,7 @@ def paper_file(request: Request, paper_id: UUID, user: CurrentUser) -> Streaming
     return StreamingResponse(
         chunks(), media_type="application/pdf", background=BackgroundTask(source.close),
         headers={
-            "Content-Disposition": f"inline; filename*=utf-8''{quote(filename, safe='')}",
+            "Content-Disposition": f"{disposition}; filename*=utf-8''{filename}",
             "Content-Length": str(size), "X-Content-Type-Options": "nosniff",
         },
     )

@@ -1,4 +1,10 @@
 export const english: Record<string, string> = {
+  "部分完成": "Partially completed",
+  "研究已部分完成，请结合未解决问题阅读结果。": "This research is partially completed. Read the results alongside the unresolved questions.",
+  "研究结果仍有未解决问题，请结合引用阅读。": "The results have unresolved questions. Read them alongside the cited evidence.",
+  "已保存可用结果，但尚未完成全部研究要求。": "Available results have been saved, but some research requirements remain incomplete.",
+  "Agent 作业尚未确认停止，请稍后再删除": "The Agent job has not been confirmed stopped. Please try deleting it again shortly.",
+  "回答语言跟随提问语言，与界面语言无关。未填写关注方向时，摘要默认使用中文。": "Answers follow the language of your question, independently of the interface language. Summaries default to Chinese when no focus is provided.",
   "展开侧栏": "Expand sidebar",
   "收起侧栏": "Collapse sidebar",
   "研究记录不存在": "Research record not found",

@@ -27,7 +27,7 @@ function TaskDetail({ taskId }: { taskId: string }) {
   const ids = task?.status === 'succeeded' ? task.paper_ids.join(',') : '';
   const loadPapers = useCallback((signal: AbortSignal) => Promise.all(ids.split(',').filter(Boolean).map((id) => api.paper(id, signal))), [ids]);
   const inputs = useResource(loadPapers);
-  const hasComparison = state.artifacts?.some((artifact) => artifact.comparison_table);
+  const hasComparison = state.artifacts?.some((artifact) => artifact.comparison_table || artifact.comparison_markdown?.trim());
   const complete = task?.status === 'succeeded';
   function result(resultView: 'read' | 'compare') {
     return <section className="result-panel">
@@ -39,7 +39,7 @@ function TaskDetail({ taskId }: { taskId: string }) {
     <PageHeader title={task ? t(state.artifacts?.[0]?.title ?? taskTypeLabels()[task.task_type]) : t('任务详情')} description={t('查看任务状态、资料来源与已保存的研究结果。')} action={<div className="detail-actions">{task && isTerminal(task.status) && <Link to={'/tasks/new?from_task=' + task.id}><Button>{t('重新创建任务')}</Button></Link>}<Button icon={<ReloadOutlined />} onClick={state.refresh} loading={state.refreshing}>{t('刷新')}</Button></div>} />
     {state.queryError && <ErrorNotice error={state.queryError} retry={state.refresh} title={task ? t('查询失败，保留上次成功查询的任务状态') : t('任务查询失败')} />}
     {!task ? state.loading && <section className="content-panel"><Skeleton active paragraph={{ rows: 6 }} /></section> : <>
-      <section className="task-overview" aria-label={t('任务状态')}><div className="task-overview-main"><StatusBadge status={task.status} />{task.is_mock && <MockTag />}</div><div className="task-overview-meta"><span><BookOutlined /> {t('{0} 篇', [task.paper_ids.length])}</span><span>{t('创建于 {0}', [dateTime(task.created_at)])}</span></div></section>
+      <section className="task-overview" aria-label={t('任务状态')}><div className="task-overview-main"><StatusBadge status={task.status} stage={task.stage} />{task.is_mock && <MockTag />}</div><div className="task-overview-meta"><span><BookOutlined /> {t('{0} 篇', [task.paper_ids.length])}</span><span>{t('创建于 {0}', [dateTime(task.created_at)])}</span></div></section>
       {task.question && <div className="result-question"><span>{t('研究问题')}</span><p>{task.question}</p></div>}
       {task.is_mock && <Alert className="inline-alert" type="warning" showIcon title={t('模拟运行与模拟结果')} description={t('尚未解析或分析论文，未调用模型。以下内容用于验证流程，不应作为研究结论或模型效果指标。')} />}
       {task.status === 'failed' && task.error && <Alert type="error" showIcon className="inline-alert" title={t('任务执行失败 · {0}', [task.error.code])} description={t('{0}。可重新创建任务，原任务记录会保留。', [errorText(task.error)])} />}

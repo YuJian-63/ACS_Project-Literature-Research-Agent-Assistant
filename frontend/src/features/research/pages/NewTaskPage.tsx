@@ -7,6 +7,7 @@ import { api, asApiError, isCanceled, type ApiError } from '../../../api/client'
 import type { Paper, TaskType } from '../../../api/types';
 import { ErrorNotice } from '../../../shared/components/ErrorNotice';
 import { PageHeader } from '../../../shared/components/PageHeader';
+import { createUuid } from '../../../shared/lib/uuid';
 import { canSelectPaper } from '../../papers/lib/selection';
 import { PaperPicker } from '../../papers/components/PaperPicker';
 import { normalizeSubmission, selectionError, submissionSignature } from '../lib/submission';
@@ -120,7 +121,7 @@ export default function NewTaskPage() {
     if (unavailable) return;
     const body = normalizeSubmission(values.task_type, values.question, papers.map((paper) => paper.id));
     const signature = submissionSignature(body);
-    if (lastAttempt.current?.signature !== signature) lastAttempt.current = { signature, key: crypto.randomUUID() };
+    if (lastAttempt.current?.signature !== signature) lastAttempt.current = { signature, key: createUuid() };
     const pending = new AbortController();
     controller.current = pending;
     inFlight.current = true;
@@ -147,7 +148,7 @@ export default function NewTaskPage() {
       <div className="creation-layout"><div className="creation-main">
         <section className="content-panel form-section"><h2>{t("你想研究什么？")}</h2>
           <Form.Item name="task_type" label={t("任务类型")} rules={[{ required: true }]}><Radio.Group className="task-type-options" optionType="button" buttonStyle="solid" options={[{ value: 'summary', label: t("论文摘要") }, { value: 'qa', label: t("论文问答") }, { value: 'review', label: t("跨论文综述") }]} /></Form.Item>
-          <Form.Item name="question" label={taskType === 'summary' ? t("关注方向（可选）") : t("研究问题")} dependencies={['task_type']} rules={[{ validator: async (_rule, value: string | undefined) => {
+          <Form.Item name="question" label={taskType === 'summary' ? t("关注方向（可选）") : t("研究问题")} extra={t('回答语言跟随提问语言，与界面语言无关。未填写关注方向时，摘要默认使用中文。')} dependencies={['task_type']} rules={[{ validator: async (_rule, value: string | undefined) => {
             if (form.getFieldValue('task_type') !== 'summary' && !value?.trim()) throw new Error(t("请输入研究问题，不能仅包含空白。"));
             if ((value?.trim().length || 0) > 8000 || value?.includes('\u0000')) throw new Error(t("问题最多 8000 字符，且不能含空字节。"));
           } }]}><Input.TextArea rows={4} maxLength={8000} showCount placeholder={taskType === 'summary' ? t("例如：重点关注方法设计和研究局限") : t("例如：这些论文采用的方法有哪些差异，实验结论是否可比较？")} /></Form.Item>

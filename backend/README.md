@@ -1,5 +1,7 @@
 # 后端开发
 
+> 2026-11-18：新增可选 `TASK_RUNNER=agent` 的独立 Agent 后端适配。该模式绕过本文原有真实 Runner 的检索和生成流程，详见 [Agent 对接协议](../docs/agent-backend-integration.md)。TACC 传输桥接与 Agent 本地 PDF 来源支持仍待下一阶段；启用开关默认关闭，不自动迁移现有数据库。
+
 当前已实现 MVP-0 API/Mock Worker、MVP-1A 文本 PDF Parser Worker、MVP-1B 真实摘要/问答 Runner、MVP-2 多论文综述与比较表，以及 MVP-3 arXiv 搜索和指定版本 PDF 导入。真实 Runner 使用可替换的模型接口和证据引用校验；尚未实现 OCR。arXiv 默认关闭，真实来源和模型服务需单独配置，不代表本地已完成外部服务验收。接口规范见 `../docs/api-contract.md`。2026-11-14 账号、配置校验、Cookie/CSRF、私有资源归属和所有权迁移已实现；真实 QQ SMTP 配置与投递验收待完成。首次启动前先阅读第 10 节。
 
 ## 1. 首次启动
@@ -460,6 +462,8 @@ uv run --locked python -B tests/test_ownership.py --postgres
 验收应使用新建任务：中文询问英文论文目标/方法/结论、具体实验指标、论文未覆盖的问题，以及六篇英文论文中文比较。每项检查回答内容、逐字引用、PDF 页码、缺失维度说明、执行记录及刷新恢复。自动测试只证明代码路径和约束，真实模型回答质量需另外人工核验。
 
 ## 2026-11-18 导入元数据复用
+
+2026-11-20 合并 main 后，唯一迁移 head 为 `20261120_0007`：保留 main 的元数据迁移，并兼容原 backend-dev-v2 已升级过 Agent 的数据库。仍使用 `alembic upgrade head` / `alembic check`，无需清库或手工 stamp。部署说明见 [后端与 Agent 对接](../docs/agent-backend-integration.md)。
 
 更新后先执行 `uv run --locked alembic upgrade head`（新增可空 `paper_imports.source_metadata`，不改写历史记录），再重启 Import Worker。API 如未开启热重载也需重启。
 

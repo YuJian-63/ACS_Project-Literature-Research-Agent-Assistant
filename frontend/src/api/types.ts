@@ -111,6 +111,14 @@ export interface TaskSummary extends TaskAccepted {
 }
 
 export interface Task extends TaskSummary {
+  agent?: {
+    dispatch_id: string;
+    transport: 'file-exchange-v1' | 'local-process-v1' | 'tacc-ssh-slurm-v1';
+    remote_job_id: string | null;
+    stop_reason: AgentStopReason | null;
+    unresolved: string[];
+    limits: Record<string, number>;
+  } | null;
   retrieval?: {
     status: string;
     expansion_degraded: boolean;
@@ -164,6 +172,7 @@ export interface Citation {
   paper_id: string;
   paper_title: string;
   chunk_id: string;
+  agent_source_id?: string | null;
   page_number: number;
   quote: string;
 }
@@ -176,6 +185,9 @@ export interface ComparisonTable {
   }[];
 }
 
+export type AgentStopReason = 'completed' | 'partial' | 'step_limit' | 'time_limit' | 'context_limit'
+  | 'model_error' | 'invalid_tool_call' | 'output_truncated' | 'invalid_output' | 'invalid_citations' | 'insufficient_evidence';
+
 export interface Artifact {
   id: string;
   task_id: string;
@@ -185,6 +197,9 @@ export interface Artifact {
   title: string;
   content_markdown: string;
   comparison_table: ComparisonTable | null;
+  comparison_markdown?: string | null;
+  agent_stop_reason?: AgentStopReason | null;
+  unresolved?: string[];
   citations: Citation[];
   created_at: string;
 }

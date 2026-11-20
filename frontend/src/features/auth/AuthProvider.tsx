@@ -2,6 +2,7 @@ import { createContext, useCallback, useContext, useEffect, useRef, useState, ty
 import { asApiError, isCanceled } from '../../api/client';
 import { authPost, readSession, type AuthSession, type User } from '../../api/auth';
 import { invalidateSession, registerUnauthorized, sessionSnapshot, setCsrfToken } from '../../api/session';
+import { createUuid } from '../../shared/lib/uuid';
 
 interface AuthState { user: User | null; status: 'loading' | 'ready' | 'error'; generation: number; logoutFailed?: boolean }
 interface AuthContextValue extends AuthState {
@@ -18,7 +19,7 @@ export default function AuthProvider({ children }: { children: ReactNode }) {
   const channel = useRef<BroadcastChannel | null>(null);
   const pending = useRef<AbortController | null>(null);
   const notify = useCallback(() => {
-    const eventId = crypto.randomUUID();
+    const eventId = createUuid();
     channel.current?.postMessage(eventId);
     try { localStorage.setItem(channelName, eventId); } catch {}
   }, []);

@@ -646,7 +646,7 @@ main {
   color: #a33b36
 }
 
-.status-queued,.status-uploaded {
+.status-queued,.status-uploaded,.status-partial {
   background: #f5f1e7;
   color: #795c25
 }

@@ -59,6 +59,9 @@ def task_view(task: Task, paper_ids: list) -> dict:
     total_tokens = None
     if task.input_tokens is not None and task.output_tokens is not None:
         total_tokens = task.input_tokens + task.output_tokens
+    agent_outcome = (task.review_state or {}).get("agent_outcome", {})
+    if task.runner_type == "agent":
+        total_tokens = agent_outcome.get("total_tokens")
     search = (task.review_state or {}).get("search", {})
     selection = search.get("selection", {}).get("diagnostic", {})
     outcome = search.get("outcome", {})
@@ -84,7 +87,7 @@ def task_view(task: Task, paper_ids: list) -> dict:
             "model_id", "workflow_version", "prompt_version", "dataset_version"
         )},
         "stats": {
-            "usage_estimated": bool((task.review_state or {}).get("usage_estimated", False)),
+            "usage_estimated": bool((task.review_state or {}).get("usage_estimated", False)) or (task.runner_type == "agent" and not agent_outcome.get("usage_complete", True)),
             "queue_ms": elapsed_ms(task.created_at, task.started_at),
             "execution_ms": elapsed_ms(task.started_at, task.finished_at),
             "end_to_end_ms": elapsed_ms(task.created_at, task.finished_at),

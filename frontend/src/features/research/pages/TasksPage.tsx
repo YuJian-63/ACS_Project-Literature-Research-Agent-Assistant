@@ -17,7 +17,7 @@ import { dateTime, taskStatusLabels, taskTypeLabels } from '../../../shared/lib/
 
 const columns = (onDelete: (task: TaskSummary) => void, deleting: boolean): TableColumnsType<TaskSummary> => [
   { title: t("研究任务"), key: 'task', render: (_value, task) => <div className="task-name"><Link to={`/tasks/${task.id}`}>{taskTypeLabels()[task.task_type]}</Link><span className="task-question">{task.question || t("提炼论文的研究问题、方法与主要发现")}</span><span className="task-identifier">{task.id.slice(0, 8)}</span></div> },
-  { title: t("状态"), dataIndex: 'status', width: 124, render: (status: TaskStatus) => <StatusBadge status={status} /> },
+  { title: t("状态"), dataIndex: 'status', width: 124, render: (status: TaskStatus, task) => <StatusBadge status={status} stage={task.stage} /> },
   { title: t("资料"), dataIndex: 'paper_ids', width: 84, render: (ids: string[]) => t("{0} 篇", [ids.length]) },
   { title: t("执行方式"), key: 'mode', width: 120, render: (_value, task) => task.is_mock ? <MockTag /> : t("真实运行") },
   { title: t("创建时间"), dataIndex: 'created_at', width: 144, render: dateTime },

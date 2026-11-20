@@ -1,6 +1,6 @@
 # 本地启动、测试与验收操作手册
 
-适用环境：Windows PowerShell、macOS Terminal（zsh/bash）、当前仓库。更新日期：2026-11-18。第 0 节提供两种系统从新建数据库到完整启动的命令及预期结果；第 1 节起保留原有 Windows 日常操作、测试和验收说明。
+适用环境：Windows PowerShell、macOS Terminal（zsh/bash）、当前仓库。更新日期：2026-11-19。第 0 节提供两种系统从新建数据库到完整启动的命令及预期结果；第 1 节起保留原有 Windows 日常操作、测试和验收说明。
 
 **首次安装或需要一套全新的数据库，从第 0 节按顺序执行。** 第 2.1 节是此前本机验收库的历史配置，新环境不要照搬该项目名。本文只提供操作者执行的步骤，不表示这些命令已经在你的机器上运行。
 
@@ -919,3 +919,330 @@ npm.cmd run build
 ~~~
 
 PostgreSQL 回归会创建并清理本次随机测试库，保留业务库。浏览器诊断测试需本地已有 Playwright 环境；脚本 frontend/checks/retrieval-browser.py 默认访问 127.0.0.1:5194，全部 API 为本地夹具。
+
+## 独立 Agent 后端适配（2026-11-18）
+
+本节是新增模式，不替换上文现有服务的启动步骤。完整协议见 [Agent 对接](agent-backend-integration.md)。第 1/2 阶段历史测试命令保留；第 3.1–3.3 阶段的本地与 TACC 自动派发、恢复及统一验收见本文件末尾。部署与模型配置完成前不要切换真实演示环境。
+
+以下命令从项目根目录开始；离线测试不要求启动数据库、模型或 TACC。Windows PowerShell：
+
+~~~powershell
+Push-Location .\backend
+uv run --locked python -B -m unittest discover -s tests -p "test_agent_bridge.py" -v
+Pop-Location
+~~~
+
+macOS：
+
+~~~bash
+(cd backend && uv run --locked python -B -m unittest discover -s tests -p "test_agent_bridge.py" -v)
+~~~
+
+预期：后端协议、PDF 输入包、来源映射与结果校验用例通过。这组测试只验证后端；Agent 本地来源测试见下文，TACC 端到端验收仍待完成。
+
+### Agent 第 1 阶段离线测试
+
+以下命令从项目根目录执行，不启动服务、不调用真实模型或搜索、不访问数据库。首次执行 sync 会安装锁定的 Agent Python 3.12 与开发依赖。现有 Agent 使用 `--frozen` 安装锁文件；不要为运行本阶段测试自动更新锁文件。
+
+Windows PowerShell：
+
+```powershell
+uv sync --project .\agent --frozen --group dev
+uv run --project .\agent --frozen python -B -c "import os; os.environ.pop('AGT_TEST_DATABASE', None); os.chdir('agent'); import pytest; raise SystemExit(pytest.main(['-q']))"
+```
+
+macOS：
+
+```bash
+uv sync --project ./agent --frozen --group dev
+uv run --project ./agent --frozen python -B -c "import os; os.environ.pop('AGT_TEST_DATABASE', None); os.chdir('agent'); import pytest; raise SystemExit(pytest.main(['-q']))"
+```
+
+预期：离线测试通过；数据库实测跳过，不能创建符号链接的系统还会跳过对应测试。覆盖原始 PDF 解析、物理页码、授权清单、文件摘要、缓存复核、本地阅读/摘要/引用和原有 arXiv 行为。测试使用临时合成 PDF 与脚本模型，不代表真实研究质量或 TACC 已验收。本地真实执行入口见 [Agent README](../agent/README.md#授权本地-pdf)，当前无需为此启动新服务。
+
+后续进入数据库联调时，先停止 API 和研究 Worker，再执行新增迁移。Windows：
+
+~~~powershell
+Push-Location .\backend
+uv run --locked alembic upgrade head
+uv run --locked alembic current
+uv run --locked alembic check
+Pop-Location
+~~~
+
+macOS：
+
+~~~bash
+(cd backend && uv run --locked alembic upgrade head)
+(cd backend && uv run --locked alembic current)
+(cd backend && uv run --locked alembic check)
+~~~
+
+预期 head 为 `20261120_0007`，check 无新增操作。迁移兼容 main 元数据旧库和历史 Agent 旧库，不清除历史数据；不要手工 stamp 或删表。
+
+完成末尾 local 或 tacc 传输配置后，在 backend/.env 配置 TASK_RUNNER=agent、AGENT_DISPATCH_ENABLED=true。研究 Worker 仍使用同一个入口；每个命令在独立终端中从根目录执行：
+
+~~~powershell
+Push-Location .\backend
+uv run --locked python -m app.runner_worker
+Pop-Location
+~~~
+
+~~~bash
+(cd backend && uv run --locked python -m app.runner_worker)
+~~~
+
+它不调用旧后端模型逻辑。manual 模式需要外部投递；local/tacc 由适配器调度。后台任务进入 running 仅表示派发 Worker 已领取，不能据此判断 TACC 作业已经运行。
+
+原生 PostgreSQL 测试位于 backend/tests/test_agent_postgres.py，默认跳过。只可对事先创建的、库名为 agent_bridge_tests 或 agent_bridge_tests_<32位小写十六进制> 的本机专用空库设置 AGENT_TEST_DATABASE_URL。测试会迁移并清空该库中的业务表，禁止使用开发库、验收库或生产库；当前未替你创建或运行该测试库。
+
+
+### Agent 第 2 阶段：远程作业入口
+
+本节命令全部从项目根目录开始。先运行离线测试即可，不需要开启新服务、修改 backend/.env 或迁移数据库。
+
+Windows PowerShell：
+
+~~~powershell
+uv sync --project .\agent --frozen --group dev
+uv run --project .\agent --frozen python -B -c "import os; os.environ.pop('AGT_TEST_DATABASE', None); os.chdir('agent'); import pytest; raise SystemExit(pytest.main(['tests/test_dispatch_bundle.py', 'tests/test_dispatch_job.py', '-q']))"
+uv run --project .\agent --frozen python agent/run_dispatch.py --help
+~~~
+
+macOS：
+
+~~~bash
+uv sync --project ./agent --frozen --group dev
+uv run --project ./agent --frozen python -B -c "import os; os.environ.pop('AGT_TEST_DATABASE', None); os.chdir('agent'); import pytest; raise SystemExit(pytest.main(['tests/test_dispatch_bundle.py', 'tests/test_dispatch_job.py', '-q']))"
+uv run --project ./agent --frozen python agent/run_dispatch.py --help
+~~~
+
+预期：65 个入口/协议用例通过，帮助信息列出 --input、--dispatch-id、--input-sha256、--work-root、--output-dir 等参数。测试使用合成 PDF 和脚本模型，不访问真实模型、搜索、数据库或 TACC；macOS 命令按平台语法提供，当前仅在 Windows 上实测。
+
+**以下是真实作业运行模板，当前无需执行。** 等远程部署或明确开展本地真实 Agent 联调时使用。先在 Agent 环境配置模型，并把后端生成的 input.zip 放到 `runtime/agent-input/<dispatch_id>/input.zip`。dispatch_id 与 input_sha256 从可信后端派发记录获取；不要仅计算未知 ZIP 自带 manifest 的摘要后就将其视为可信。此入口会调用真实模型，可能产生费用。
+
+Windows PowerShell（替换尖括号占位值）：
+
+~~~powershell
+$dispatchId = "<后端返回的 dispatch_id>"
+$inputSha256 = "<后端返回的 input_sha256>"
+$inputBundle = ".\runtime\agent-input\$dispatchId\input.zip"
+$outputDirectory = ".\runtime\agent-output\$dispatchId"
+uv run --project .\agent --frozen python agent/run_dispatch.py --input "$inputBundle" --dispatch-id "$dispatchId" --input-sha256 "$inputSha256" --work-root .\runtime\agent-work --output-dir "$outputDirectory"
+$jobExitCode = $LASTEXITCODE
+"Agent exit code: $jobExitCode"
+Get-Content "$outputDirectory\status.json" -Raw -Encoding UTF8 | ConvertFrom-Json | Select-Object state, stop_reason, error
+~~~
+
+macOS（替换尖括号占位值）：
+
+~~~bash
+dispatch_id="<后端返回的 dispatch_id>"
+input_sha256="<后端返回的 input_sha256>"
+input_bundle="./runtime/agent-input/$dispatch_id/input.zip"
+output_directory="./runtime/agent-output/$dispatch_id"
+uv run --project ./agent --frozen python agent/run_dispatch.py --input "$input_bundle" --dispatch-id "$dispatch_id" --input-sha256 "$input_sha256" --work-root ./runtime/agent-work --output-dir "$output_directory"
+job_exit_code=$?
+printf 'Agent exit code: %s\n' "$job_exit_code"
+python3 -c 'import json,sys; s=json.load(open(sys.argv[1],encoding="utf-8")); print({k:s.get(k) for k in ("state","stop_reason","error")})' "$output_directory/status.json"
+~~~
+
+预期：status.json 保留，state 只新写 running/succeeded/failed。退出码 0 时研究 completed/partial，存在完整 result.json 和 state=succeeded 的状态文件；partial 仍保留未解决项。退出码 1 时 state=failed，仍有完整研究结果，具体原因看 stop_reason。退出码 2 表示包装器或本次调用错误，通常只有脱敏失败状态；路径无效或锁冲突时可能无法创建新状态文件，此时看终端安全错误代码，BUSY 等调用错误不会覆盖已有作业状态。旧 finished 状态在已有结果通过校验后修正，不会重新调用模型。后端显示“已完成”还需等待结果回收、校验和保存。
+
+结果必须由可信桥接下载并原子发布到后端 inbox/<dispatch_id>/result.json；status.json 不能代替结果。第 3 阶段已接入状态失败映射与自动适配器。重复运行相同已完成输入会复用结果；遇到 BUSY、INCOMPLETE、PREVIOUS_FAILURE 或 OUTPUT_CONFLICT 时先排查，不要删除锁或覆盖结果强行重跑，需要重新执行时显式新建任务。
+
+## Agent 第 3.1–3.3 阶段：统一启动与验收
+
+所有本机命令从项目根目录执行；远程命令会明确标注。配置写进 backend/.env 或 Agent 所在环境的 .env，避免每次开终端重复设置。2026-11-20 合并 main 后，数据库须按上文升级到唯一 head `20261120_0007`。下列真实部署、服务启动、数据库与清理命令由操作者在统一验收时执行，开发过程不会自动替你执行。
+
+### 1. 先完成离线自动检查
+
+Windows PowerShell：
+
+~~~powershell
+uv sync --project .\agent --frozen --group dev
+uv sync --project .\backend --locked
+uv run --project .\backend --locked python -B -c "import os,unittest; [os.environ.pop(k,None) for k in ['OWNERSHIP_TEST_DATABASE_URL','AUTH_TEST_DATABASE_URL','STAGED_REVIEW_TEST_URL','AGENT_TEST_DATABASE_URL']]; s=unittest.defaultTestLoader.discover('backend/tests'); r=unittest.TextTestRunner(verbosity=1).run(s); raise SystemExit(not r.wasSuccessful())"
+uv run --project .\agent --frozen python -B -c "import os; os.environ.pop('AGT_TEST_DATABASE',None); os.chdir('agent'); import pytest; raise SystemExit(pytest.main(['-q']))"
+~~~
+
+macOS：
+
+~~~bash
+uv sync --project ./agent --frozen --group dev
+uv sync --project ./backend --locked
+uv run --project ./backend --locked python -B -c "import os,unittest; [os.environ.pop(k,None) for k in ['OWNERSHIP_TEST_DATABASE_URL','AUTH_TEST_DATABASE_URL','STAGED_REVIEW_TEST_URL','AGENT_TEST_DATABASE_URL']]; s=unittest.defaultTestLoader.discover('backend/tests'); r=unittest.TextTestRunner(verbosity=1).run(s); raise SystemExit(not r.wasSuccessful())"
+uv run --project ./agent --frozen python -B -c "import os; os.environ.pop('AGT_TEST_DATABASE',None); os.chdir('agent'); import pytest; raise SystemExit(pytest.main(['-q']))"
+~~~
+
+预期：离线测试通过，隔离数据库用例跳过。test_agent_roundtrip.py 自动选择 agent/.venv 的 Python，创建合成三页 PDF，运行脚本模型，验证 local 进程及模拟 SSH/Slurm 的真实 JSON/文件往返；不连接网络，不使用真实模型、账号或数据库。未安装 Agent 环境时该跨环境用例会跳过，此时不能算完整离线闭环验证。
+
+### 2. 先配置 local 模式
+
+在 backend/.env 设置：
+
+~~~dotenv
+TASK_RUNNER=agent
+AGENT_DISPATCH_ENABLED=true
+AGENT_TRANSPORT=local
+AGENT_LOCAL_ROOT=../agent
+AGENT_LOCAL_PYTHON=../agent/.venv/Scripts/python.exe
+~~~
+
+macOS 将最后一行改为 AGENT_LOCAL_PYTHON=../agent/.venv/bin/python。这些相对路径从 backend/ 解析，终端命令仍从根目录启动。
+
+在 agent/.env 配置该 Agent 支持的模型参数：MODEL_PROVIDER、MODEL_BASE_URL、MODEL_NAME，以及对应提供方的密钥。MODEL_PROVIDER=tacc 时读取 MODEL_API_KEY（无鉴权的私有模型可用其默认值）；bailian 时读取 BAILIAN_API_KEY。使用实际服务端支持的模型 ID，不直接照抄其他 Runner 的 LLM_*。派发任务不使用 Agent 数据库，不需要为 persist 配置数据库；输入包不包含密钥。
+
+按前文启动数据库、API、前端及需要的 Parser/Import/Mail Worker；研究 Worker 使用下面入口。API 与 Worker 必须读取同一 backend/.env，并先停止旧的研究 Worker。
+
+Windows（每个长期服务使用独立终端）：
+
+~~~powershell
+Push-Location .\backend
+uv run --locked uvicorn app.main:create_app --factory --host 127.0.0.1 --port 8000
+Pop-Location
+~~~
+
+~~~powershell
+Push-Location .\backend
+uv run --locked python -m app.runner_worker
+Pop-Location
+~~~
+
+macOS：
+
+~~~bash
+(cd backend && uv run --locked uvicorn app.main:create_app --factory --host 127.0.0.1 --port 8000)
+~~~
+
+~~~bash
+(cd backend && uv run --locked python -m app.runner_worker)
+~~~
+
+预期：新任务 agent.transport=local-process-v1，remote_job_id 为 local:<dispatch_id>；无需手动搬运 ZIP 或启动单次 Agent。completed/partial 校验入库后为 succeeded；部分证据警告和原生 stop_reason 保留。关闭研究 Worker 不会取消独立 Agent；重启后跟踪原 dispatch，原执行超时不重置。
+
+### 3. 准备 TACC SSH 与共享环境
+
+先由平台管理员确认 SSH 登录入口、端口、用户名、主机密钥指纹、CPU 分区/账户，以及登录节点和计算节点共同可见的存储路径。官方参考为 turingaicloud/quickstart；当前适配器使用其底层 SSH/Slurm 能力，不要求后端安装旧版 tcloud。若账号只开放网页或 SDK 网关、无法通过系统 OpenSSH 访问登录节点，应先取得平台允许的 SSH/跳板配置，不能假设任意平台域名都能直连。
+
+在 Windows 的 $HOME/.ssh/config 或 macOS 的 ~/.ssh/config 建立 tacc-research 别名。填写真实值，保留主机密钥校验；有跳板时配置 ProxyJump。首次人工连接前向管理员核对指纹，不使用 StrictHostKeyChecking=no。
+
+~~~sshconfig
+Host tacc-research
+    HostName <平台SSH登录主机>
+    User <平台用户名>
+    Port <平台SSH端口>
+    IdentityFile ~/.ssh/id_ed25519
+    ServerAliveInterval 30
+    StrictHostKeyChecking yes
+~~~
+
+Windows/macOS 均可从根目录执行以下只读检查（需先完成可信主机记录与密钥认证）：
+
+~~~text
+ssh -o BatchMode=yes tacc-research "command -v python3; command -v sbatch; command -v squeue; command -v sacct; command -v scancel"
+~~~
+
+预期：五个程序均存在，SSH 无需交互密码。桥接解释器需 Python 3.11+；若登录节点系统 python3 较旧，可将 AGENT_TACC_PYTHON 配置为远程 Agent 的 .venv/bin/python（3.12）。sacct 必须允许查询本人作业，以便已离开队列的任务和提交结果不明时恢复。登录 shell 需要能找到这些 Slurm 命令；仅交互 shell 的 alias 不生效。
+
+### 4. 打包、上传并部署 Agent
+
+本机从根目录生成白名单部署包，包含当前工作区的运行代码和锁文件，排除 .env、虚拟环境、数据、测试及密钥；不会上传整个仓库。Windows：
+
+~~~powershell
+uv run --project .\backend --locked python -m app.agent_bridge.deploy --output .\runtime\agent-runtime.tar.gz
+scp .\runtime\agent-runtime.tar.gz tacc-research:agent-runtime.tar.gz
+ssh tacc-research
+~~~
+
+macOS：
+
+~~~bash
+uv run --project ./backend --locked python -m app.agent_bridge.deploy --output ./runtime/agent-runtime.tar.gz
+scp ./runtime/agent-runtime.tar.gz tacc-research:agent-runtime.tar.gz
+ssh tacc-research
+~~~
+
+进入远程 Linux 终端后执行，第一行必须替换为平台确认的共享绝对目录；以下变量仅用于一次部署：
+
+~~~bash
+export AGENT_REMOTE_BASE="<登录节点和计算节点共享的绝对目录>"
+mkdir -p "$AGENT_REMOTE_BASE/acs-agent" "$AGENT_REMOTE_BASE/acs-agent-jobs"
+tar -xzf "$HOME/agent-runtime.tar.gz" -C "$AGENT_REMOTE_BASE/acs-agent"
+cd "$AGENT_REMOTE_BASE/acs-agent"
+uv sync --frozen --no-dev
+cp .env.example .env
+cp tacc.example.json tacc.local.json
+chmod 600 .env tacc.local.json
+~~~
+
+在远程 .env 填写模型配置；确保计算节点能够访问该地址，不能把登录节点的 127.0.0.1 误作计算节点可访问的模型地址。配置 tacc.local.json：workspace_root 为共享的 acs-agent-jobs，agent_root 为共享的 acs-agent，python 为其 .venv/bin/python；partition/account/qos 按平台授权填写，不需要时保留 null。cpus/memory_mb 是 CPU Agent 客户端进程资源，本桥接不启动 GPU 模型服务。模型服务需事先独立部署。
+
+检查路径及入口（不调用模型或提交作业）：
+
+~~~bash
+.venv/bin/python -B -c 'import json,pathlib; c=json.load(open("tacc.local.json")); print("Agent:", pathlib.Path(c["agent_root"]).is_dir()); print("Python:", pathlib.Path(c["python"]).is_file()); print("Workspace:", pathlib.Path(c["workspace_root"]).is_dir())'
+.venv/bin/python -B run_dispatch.py --help
+.venv/bin/python -B tacc_bridge.py --help
+pwd
+~~~
+
+预期三个检查均为 True，两个入口显示帮助。保存 pwd 输出，供本机 backend/.env 填写远程绝对路径；这属于远程配置，不能写成本机项目相对路径。
+
+### 5. 本机切换 TACC 模式
+
+在 backend/.env 设置实际值：
+
+~~~dotenv
+TASK_RUNNER=agent
+AGENT_DISPATCH_ENABLED=true
+AGENT_TRANSPORT=tacc
+AGENT_TACC_HOST=tacc-research
+AGENT_TACC_HELPER=<远程agent绝对目录>/tacc_bridge.py
+AGENT_TACC_CONFIG=<远程agent绝对目录>/tacc.local.json
+AGENT_TACC_PYTHON=<远程agent绝对目录>/.venv/bin/python
+AGENT_TRANSPORT_TIMEOUT_SECONDS=30
+AGENT_RETENTION_SECONDS=604800
+~~~
+
+不在本机配置远程模型密钥。停止并重启 API 与研究 Worker，其他服务按已有说明保留。不要在有未完成任务时切换传输类型；旧任务冻结的类型与 Worker 不一致会明确失败，不会悄悄迁移到另一个执行环境。
+
+新建任务后预期 agent.transport=tacc-ssh-slurm-v1，remote_job_id 为 Slurm 数字 ID；远程目录为 workspace_root/<dispatch_id>/。调度排队仍占用原任务总时限；若集群拥堵，按后端上限配置 AGENT_TIMEOUT_SECONDS，超过时限将失败并补偿取消，不无限等待。本地监督进程与远程计算作业都会校验首次领取时确定的绝对截止时间；排队后已过期的作业不再启动 Agent。请确保数据库、本机和集群系统时钟同步。
+
+### 6. 恢复、补偿取消与保留清理
+
+SSH 短暂中断会退避重试；不要再次点击提交来“恢复”原任务。重启 Worker 跟踪同一 dispatch，提交响应丢失时先核对原作业。AGENT_SUBMISSION_UNCERTAIN 或 AGENT_DUPLICATE_JOBS 应保存任务 ID/dispatch ID，请管理员核对完整作业名，不能删除提交标记强行重跑。
+
+Worker 自带维护循环，处理失败/超时且未交付的作业。需要在服务停机后单独补偿一次时，从本机根目录执行，Windows：
+
+~~~powershell
+uv run --project .\backend --locked python -m app.agent_bridge.maintenance
+~~~
+
+macOS：
+
+~~~bash
+uv run --project ./backend --locked python -m app.agent_bridge.maintenance
+~~~
+
+该命令不会主动终止仍为 queued/running 的业务任务。取消暂未确认时继续保留文件并等待下一轮补偿；远程不可达时不能声称已取消，平台自身 walltime 仍是最终执行上限。
+
+先预览超过保留期的终态任务，再决定删除。Windows：
+
+~~~powershell
+uv run --project .\backend --locked python -m app.agent_bridge.maintenance --cleanup
+# 核对预览后才执行下一条
+uv run --project .\backend --locked python -m app.agent_bridge.maintenance --cleanup --apply
+~~~
+
+macOS：
+
+~~~bash
+uv run --project ./backend --locked python -m app.agent_bridge.maintenance --cleanup
+# 核对预览后才执行下一条
+uv run --project ./backend --locked python -m app.agent_bridge.maintenance --cleanup --apply
+~~~
+
+预期：预览保留文件；apply 仅清理终态且超过本地和远程保留时间的受控任务目录。失败且取消尚未确认的任务不会删除。业务数据库中的结果、原始上传 PDF、其他用户或其他 dispatch 目录不受影响。小型身份清理凭据会保留，用于阻止旧 dispatch 再次执行。清理命令需要读取相应服务的数据库与传输配置，属于维护操作，不是离线测试。
+
+最后按 [统一验收清单](agent-transport-acceptance.md) 一次检查 local、TACC、恢复、失败和清理。离线模拟通过不等于真实集群及模型质量验收通过。

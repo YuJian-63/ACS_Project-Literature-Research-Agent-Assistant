@@ -1,5 +1,7 @@
 # 后端数据库设计
 
+> 2026-11-20 合并迁移：main 的 `20261118_0006` 保持导入来源元数据字段；Agent 扩展后移至 `20261120_0007`，新增 agent_runs（任务一对一、稳定 dispatch_id、输入清单及摘要、完整 Agent 结果、远程作业 ID、停止原因），tasks 允许 agent Runner，citations 支持原生字符串片段标识并保留旧片段外键。兼容历史上同编号的 Agent 旧库并保留数据。以 Alembic 与 ORM 为准，详细契约见 [Agent 对接](agent-backend-integration.md)。
+
 版本：v1 · 更新日期：2026-11-14。账号增量与当前验收边界见第 11 节；以下 MVP-3 原生数据库证据属于账号迁移之前的历史记录。需求依据：`docs/Proposal.md`；接口对应 `docs/api-contract.md`；当前参考 DDL：`backend/sql/schema.sql`。第 9 节 MVP-3 增量 ORM、迁移和 head DDL 已落地并通过隔离 PGlite 等价检查；2026-11-13 用户在独立原生 PostgreSQL 17.6 验收库完成 head 迁移、无结构漂移检查和八组并发/恢复/共享许可专项验收。该历史专项当时未对现有业务数据库执行迁移；本次实际配置库的 0004 升级/无漂移及空数据状态已验证，见第 11 节。原生专项范围及用户输出记录见 `docs/superpowers/plans/2026-11-12-mvp-3-arxiv-search-import.md`。
 
 本文记录数据设计；应用通过 backend/alembic 的版本迁移建库，backend/sql/schema.sql 保留作结构对照。模型和迁移已落地，操作说明见 backend/README.md；本次实施已验证实际配置库 head=20261114_0004、无结构漂移，详见第 11 节。

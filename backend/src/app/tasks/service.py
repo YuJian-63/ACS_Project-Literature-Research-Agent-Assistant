@@ -6,15 +6,19 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, sessionmaker
 
+from app.api.schemas import TaskCreate
+from app.api.views import accepted_view
 from app.config import Settings
 from app.db.models import Paper, PaperChunk, Task, TaskEvent, TaskPaper
 from app.db.ownership import check_task_capacity, lock_active_user
-from app.research.retrieval import EvidenceChunk
-from app.research.task_policy import automatic_budget
-from app.research.search_policy import WORKFLOW_VERSION, build_search_plan, source_snapshot
 from app.errors import APIError
-from app.api.schemas import TaskCreate
-from app.api.views import accepted_view
+from app.research.retrieval import EvidenceChunk
+from app.research.search_policy import (
+    WORKFLOW_VERSION,
+    build_search_plan,
+    source_snapshot,
+)
+from app.research.task_policy import automatic_budget
 
 
 def request_hash(request: TaskCreate, *, automatic_review: bool = False, automatic: bool = False) -> str:
@@ -54,6 +58,15 @@ def submit_task(
             if request.workflow_type != "baseline":
                 raise APIError(422, "WORKFLOW_NOT_AVAILABLE", "当前阶段仅开放 baseline 工作流")
             runner_type = settings.task_runner
+            if runner_type == "agent" and not settings.agent_dispatch_enabled:
+                raise APIError(503, "RUNNER_NOT_CONFIGURED", "Agent 派发尚未启用，请先完成传输配置")
+            if runner_type == "agent":
+                from app.agent_bridge.transport import create_transport
+
+                try:
+                    create_transport(settings)
+                except ValueError:
+                    raise APIError(503, "RUNNER_NOT_CONFIGURED", "Agent 传输配置不完整，请检查部署配置") from None
             if runner_type == "langgraph":
                 if not settings.real_runner_configured:
                     raise APIError(503, "RUNNER_NOT_CONFIGURED", "真实研究模型尚未配置")
@@ -66,8 +79,15 @@ def submit_task(
                     "missing_paper_ids": [str(paper_id) for paper_id in missing]
                 })
             allowed_statuses = {"ready"} if runner_type == "langgraph" else {"uploaded", "ready"}
+            if runner_type == "agent":
+                allowed_statuses.add("processing")
             if any(paper.status not in allowed_statuses for paper in papers):
                 raise APIError(409, "PAPER_NOT_READY", "选定论文尚不可用于执行任务")
+            if runner_type == "agent":
+                from app.agent_bridge.submission import create_agent_task
+
+                return create_agent_task(session, settings, request, papers, user_id=user_id, key=key,
+                    digest=request_hash(request, automatic=True)), False
             run_config = {"mock_step_delay_seconds": settings.mock_step_delay_seconds}
             budget = {"max_steps": 2, "max_tokens": 1,
                       "timeout_seconds": max(30, int(settings.mock_step_delay_seconds * 2) + 15)}

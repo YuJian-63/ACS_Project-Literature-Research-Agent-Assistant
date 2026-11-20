@@ -125,6 +125,163 @@ class OwnershipPostgresTests(unittest.TestCase):
         self.assertEqual(response.status_code, 201, response.text)
         return response.json()["id"]
 
+    def test_agent_search_and_download_only_the_authenticated_library(self):
+        import hashlib
+
+        pdf = b"%PDF-agent-library-fixture"
+        paper_ids = []
+        for index, name in ((0, "Research % draft.pdf"), (0, "Research other.pdf"),
+                            (1, "Research % private.pdf")):
+            upload = self.clients[index].post("/api/v1/papers", files={"file": (name, pdf, "application/pdf")})
+            self.assertEqual(upload.status_code, 201, upload.text)
+            paper_ids.append(upload.json()["id"])
+
+        browser = self.clients[0]
+        grant = browser.post("/api/v1/agent/library-token")
+        self.assertEqual(grant.status_code, 200, grant.text)
+        self.assertEqual(grant.headers["cache-control"], "no-store")
+        headers = {"Authorization": f"Bearer {grant.json()['access_token']}"}
+        with TestClient(browser.app) as agent:
+            base = "/api/v1/agent/papers"
+            self.assertEqual(browser.get(base).status_code, 401)
+            self.assertEqual(agent.get(base, headers=headers, params={"q": "\x00"}).status_code, 422)
+            first = agent.get(base, headers=headers, params={"q": "research", "limit": 1}).json()
+            second = agent.get(base, headers=headers, params={"q": "research", "limit": 1, "offset": 1}).json()
+            self.assertEqual(first["total"], 2)
+            self.assertEqual({first["items"][0]["id"], second["items"][0]["id"]}, set(paper_ids[:2]))
+            response = agent.get(base, headers=headers, params={"q": "%", "status": "uploaded"})
+            self.assertEqual(response.status_code, 200, response.text)
+            self.assertEqual(response.json()["total"], 1)
+            paper = response.json()["items"][0]
+            self.assertEqual(paper["id"], paper_ids[0])
+            self.assertEqual(paper["title"], "Research % draft")
+            self.assertEqual(paper["sha256"], hashlib.sha256(pdf).hexdigest())
+            self.assertEqual(paper["size_bytes"], len(pdf))
+            download = agent.get(paper["download_url"], headers=headers)
+            self.assertEqual(download.content, pdf)
+            self.assertEqual(download.headers["content-type"], "application/pdf")
+            self.assertTrue(download.headers["content-disposition"].startswith("attachment;"))
+            self.assertEqual(agent.get(paper["download_url"]).status_code, 401)
+            self.assertEqual(agent.get(f"{base}/{paper_ids[2]}/pdf", headers=headers).status_code, 404)
+            self.assertEqual(agent.get(f"/api/v1/papers/{paper_ids[0]}/file", headers=headers).status_code, 401)
+            self.assertEqual(agent.post("/api/v1/agent/library-token", headers=headers).status_code, 401)
+            (self.root / "uploads" / f"{paper_ids[0]}.pdf").unlink()
+            missing = agent.get(paper["download_url"], headers=headers)
+            self.assertEqual(missing.status_code, 500)
+            self.assertEqual(missing.json()["error"]["code"], "FILE_UNAVAILABLE")
+
+    def test_agent_library_matches_all_keywords_across_title_and_filename(self):
+        paper_ids = []
+        fixtures = (
+            (0, "rust_methods.pdf", "Rust Methods"),
+            (0, "agent_notes.pdf", "Rust benchmarks"),
+            (0, "rust_agent.pdf", "Repository tools"),
+            (1, "rust_agent_private.pdf", "Rust Agent private"),
+        )
+        for index, filename, title in fixtures:
+            response = self.clients[index].post(
+                "/api/v1/papers", files={"file": (filename, b"%PDF-fixture", "application/pdf")},
+            )
+            self.assertEqual(response.status_code, 201, response.text)
+            paper_id = response.json()["id"]
+            paper_ids.append(paper_id)
+            with self.sessions.begin() as session:
+                session.get(Paper, UUID(paper_id)).title = title
+
+        browser = self.clients[0]
+        grant = browser.post("/api/v1/agent/library-token")
+        self.assertEqual(grant.status_code, 200, grant.text)
+        headers = {"Authorization": f"Bearer {grant.json()['access_token']}"}
+        with TestClient(browser.app) as agent:
+            base = "/api/v1/agent/papers"
+            for query in ("rust agent", "AGENT RUST", "  Rust\t agent\n", "rust agent rust"):
+                with self.subTest(query=query):
+                    response = agent.get(base, headers=headers, params={"q": query})
+                    self.assertEqual(response.status_code, 200, response.text)
+                    result = response.json()
+                    self.assertEqual(result["total"], 2)
+                    self.assertEqual({paper["id"] for paper in result["items"]}, set(paper_ids[1:3]))
+            for offset in (0, 1):
+                result = agent.get(base, headers=headers, params={"q": "rust agent", "limit": 1, "offset": offset}).json()
+                self.assertEqual(result["total"], 2)
+                self.assertEqual(len(result["items"]), 1)
+            for query in ("rust missing", "rust %", "rust _missing"):
+                result = agent.get(base, headers=headers, params={"q": query}).json()
+                self.assertEqual(result["total"], 0)
+                self.assertEqual(result["items"], [])
+            result = agent.get(base, headers=headers, params={"q": "rust agent", "status": "ready"}).json()
+            self.assertEqual(result["total"], 0)
+            self.assertEqual(agent.get(base, headers=headers, params={"q": " \t\n"}).status_code, 422)
+
+    def test_agent_library_any_keyword_preserves_ownership_status_and_pagination(self):
+        paper_ids = []
+        for index, filename in (
+            (0, "Rust Methods.pdf"), (0, "Agent Tools.pdf"), (0, "Rust Agent.pdf"),
+            (0, "Unrelated.pdf"), (1, "Rust Agent private.pdf"),
+        ):
+            response = self.clients[index].post(
+                "/api/v1/papers", files={"file": (filename, b"%PDF-fixture", "application/pdf")},
+            )
+            self.assertEqual(response.status_code, 201, response.text)
+            paper_ids.append(response.json()["id"])
+        with self.sessions.begin() as session:
+            paper = session.get(Paper, UUID(paper_ids[0]))
+            paper.status, paper.page_count, paper.parser_version = "ready", 1, "fixture"
+
+        browser = self.clients[0]
+        grant = browser.post("/api/v1/agent/library-token")
+        self.assertEqual(grant.status_code, 200, grant.text)
+        headers = {"Authorization": f"Bearer {grant.json()['access_token']}"}
+        with TestClient(browser.app) as agent:
+            base = "/api/v1/agent/papers"
+            for mode, expected in (("any", paper_ids[:3]), ("all", [paper_ids[2]])):
+                with self.subTest(mode=mode):
+                    response = agent.get(base, headers=headers, params={"q": "rUsT AgEnT", "match": mode})
+                    self.assertEqual(response.status_code, 200, response.text)
+                    self.assertEqual(response.json()["total"], len(expected))
+                    self.assertEqual({paper["id"] for paper in response.json()["items"]}, set(expected))
+            pages = []
+            for offset in range(3):
+                result = agent.get(base, headers=headers, params={"q": "rust agent", "match": "any", "limit": 1, "offset": offset}).json()
+                self.assertEqual(result["total"], 3)
+                self.assertEqual(len(result["items"]), 1)
+                pages.append(result["items"][0]["id"])
+            self.assertEqual(set(pages), set(paper_ids[:3]))
+            result = agent.get(base, headers=headers, params={"q": "rust agent", "match": "any", "status": "ready"}).json()
+            self.assertEqual(result["total"], 1)
+            self.assertEqual(result["items"][0]["id"], paper_ids[0])
+            for query in ("missing %", "missing _"):
+                result = agent.get(base, headers=headers, params={"q": query, "match": "any"}).json()
+                self.assertEqual(result["total"], 0)
+            for query in (" \t\n", "\x00"):
+                self.assertEqual(agent.get(base, headers=headers, params={"q": query, "match": "any"}).status_code, 422)
+            self.assertEqual(agent.get(base, headers=headers, params={"match": "any"}).json()["total"], 4)
+            self.assertEqual(agent.get(base, headers=headers, params={"q": "rust agent", "match": "invalid"}).status_code, 422)
+
+    def test_agent_library_token_requires_csrf_and_rejects_invalid_expired_or_revoked_tokens(self):
+        from datetime import timedelta
+        from unittest.mock import patch
+
+        browser = self.clients[0]
+        url = "/api/v1/agent/library-token"
+        base = "/api/v1/agent/papers"
+        self.assertEqual(browser.post(url, headers={"X-CSRF-Token": "invalid"}).status_code, 403)
+        grant = browser.post(url)
+        self.assertEqual(grant.status_code, 200, grant.text)
+        token = grant.json()["access_token"]
+        headers = {"Authorization": f"Bearer {token}"}
+        with TestClient(browser.app) as agent:
+            self.assertEqual(agent.get(base, headers=headers).status_code, 200)
+            tampered = token[:-1] + ("0" if token[-1] != "0" else "1")
+            self.assertEqual(agent.get(base, headers={"Authorization": f"Bearer {tampered}"}).status_code, 401)
+            after_expiry = datetime.fromisoformat(grant.json()["expires_at"]) + timedelta(seconds=1)
+            with patch("app.auth.agent_library.db_now", return_value=after_expiry):
+                self.assertEqual(agent.get(base, headers=headers).status_code, 401)
+            with self.sessions.begin() as session:
+                user_session = session.scalar(select(AuthSession).where(AuthSession.user_id == self.users[0]))
+                user_session.revoked_at = datetime.now(timezone.utc)
+            self.assertEqual(agent.get(base, headers=headers).status_code, 401)
+
     def task(self, paper, index=0, key="same-key"):
         return self.clients[index].post("/api/v1/tasks", json={"task_type": "summary", "question": "Summarize", "paper_ids": [paper]}, headers={"Idempotency-Key": key})
 
@@ -659,7 +816,10 @@ class OwnershipPostgresTests(unittest.TestCase):
         self.assertIsNotNone(permit, "Reset must restore the shared source gate seed")
         release_source_permit(self.sessions, permit)
         with self.engine.connect() as connection:
-            self.assertEqual(connection.scalar(text("SELECT version_num FROM alembic_version")), "20261118_0006")
+            from alembic.script import ScriptDirectory
+            config = Config(str(Path(__file__).resolve().parents[1] / "alembic.ini"))
+            self.assertEqual(connection.scalar(text("SELECT version_num FROM alembic_version")),
+                ScriptDirectory.from_config(config).get_current_head())
             self.assertEqual(connection.scalar(text("SELECT count(*) FROM users")), 0)
             self.assertEqual(connection.scalar(text("SELECT count(*) FROM papers")), 0)
 

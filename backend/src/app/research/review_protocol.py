@@ -6,6 +6,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from app.research.retrieval import EvidenceChunk
 from app.research.validation import validate_selected_review_result
+from app.tasks.language import answer_language_instruction
 
 
 class ReviewCellDraft(BaseModel):
@@ -46,7 +47,7 @@ def analysis_messages(paper: dict, evidence: list[dict], question: str, plan: di
         "Include exactly the supplied column keys. Each non-null value must have 1-2 unique supporting evidence IDs from this paper; "
         "Information unsupported by supplied passages must use null and []; missing passages do not establish absence from the full paper. "
         "Never invent source IDs, citations, quotes or rankings. "
-        f"Keep each value under {limit} characters. Use the requested answer language, otherwise the question language.",
+        f"Keep each value under {limit} characters. " + answer_language_instruction(question),
         {"question": question, "paper": paper, "columns": plan["columns"], "evidence": [{"evidence_id": entry["evidence_id"], "quote": entry["quote"]} for entry in evidence], "validation_feedback": feedback},
     )
 
@@ -69,7 +70,7 @@ def synthesis_messages(section: dict, analyses: list[dict], papers: list[dict], 
         "Every substantive paragraph needs supporting evidence. When information is insufficient say so without making a positive claim. "
         "Do not generate citation markers, source quotes, paper identities, or a comparison table. "
         "Different evaluation settings are not directly comparable; explain this instead of ranking success rates. "
-        f"Each paragraph must have at most {limit} characters. Use the requested answer language, otherwise the question language.",
+        f"Each paragraph must have at most {limit} characters. " + answer_language_instruction(question),
         {"question": question, "section": section, "columns": plan["columns"], "papers": papers, "analyses": analyses, "evidence": evidence, "validation_feedback": feedback},
     )
 

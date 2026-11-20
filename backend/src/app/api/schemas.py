@@ -4,6 +4,8 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
+from app.agent_bridge.contracts import AgentResult, StopReason
+
 PaperStatus = Literal["uploaded", "processing", "ready", "failed"]
 TaskStatus = Literal["queued", "running", "succeeded", "failed"]
 TaskType = Literal["summary", "qa", "review"]
@@ -156,6 +158,24 @@ class RetrievalDiagnostics(BaseModel):
     papers: list[MissingPaperEvidence] = Field(default_factory=list)
 
 
+class AgentExecution(BaseModel):
+    dispatch_id: UUID
+    transport: Literal["file-exchange-v1", "local-process-v1", "tacc-ssh-slurm-v1"] = "file-exchange-v1"
+    remote_job_id: str | None = None
+    stop_reason: StopReason | None = None
+    unresolved: list[str] = Field(default_factory=list)
+    limits: dict[str, int | float]
+
+
+class NativeAgentResponse(BaseModel):
+    task_id: UUID
+    dispatch_id: UUID
+    input_sha256: str
+    status: TaskStatus
+    remote_job_id: str | None
+    result: AgentResult | None
+
+
 class TaskResponse(TaskSummary):
     budget_mode: Literal["manual", "automatic"] = "manual"
     budget: Budget
@@ -163,6 +183,7 @@ class TaskResponse(TaskSummary):
     stats: TaskStats
     last_event_seq: int
     retrieval: RetrievalDiagnostics | None = None
+    agent: AgentExecution | None = None
 
 
 class EventResponse(BaseModel):
@@ -187,7 +208,8 @@ class CitationResponse(BaseModel):
     citation_key: str
     paper_id: UUID
     paper_title: str
-    chunk_id: UUID
+    chunk_id: UUID | str
+    agent_source_id: str | None = None
     page_number: int
     quote: str
 
@@ -201,6 +223,9 @@ class ArtifactResponse(BaseModel):
     title: str
     content_markdown: str
     comparison_table: dict[str, Any] | None
+    comparison_markdown: str | None = None
+    agent_stop_reason: StopReason | None = None
+    unresolved: list[str] = Field(default_factory=list)
     citations: list[CitationResponse]
     created_at: datetime
 

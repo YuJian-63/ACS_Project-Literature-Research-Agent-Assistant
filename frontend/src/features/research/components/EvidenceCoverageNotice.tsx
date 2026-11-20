@@ -4,6 +4,13 @@ import { t, useLocale } from '../../../i18n';
 
 export default function EvidenceCoverageNotice({ task, papers }: { task: Task; papers: Paper[] }) {
   useLocale();
+  const agent = task.agent;
+  if (agent && (agent.stop_reason === 'partial' || agent.unresolved.length > 0)) {
+    const unresolved = [...new Set(agent.unresolved.map((item) => item.trim()).filter(Boolean))];
+    return <Alert className="inline-alert" type="warning" showIcon
+      title={t(agent.stop_reason === 'partial' ? '研究已部分完成，请结合未解决问题阅读结果。' : '研究结果仍有未解决问题，请结合引用阅读。')}
+      description={unresolved.length ? <ul>{unresolved.map((item) => <li key={item}>{item}</li>)}</ul> : t('已保存可用结果，但尚未完成全部研究要求。')} />;
+  }
   const retrieval = task.retrieval;
   if (!retrieval || !['partial', 'insufficient_selected_evidence', 'no_parsed_text'].includes(retrieval.status)) return null;
   const missing = retrieval.missing_aspects ?? [];
