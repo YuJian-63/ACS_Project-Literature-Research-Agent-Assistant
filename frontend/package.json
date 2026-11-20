@@ -7,6 +7,7 @@
   "scripts": {
     "dev": "vite",
     "verify:review": "node checks/review.mjs",
+    "verify:uuid": "node checks/uuid.mjs",
     "typecheck": "tsc --noEmit -p tsconfig.app.json && tsc --noEmit -p tsconfig.node.json",
     "build": "npm run typecheck && vite build",
     "preview": "vite preview"

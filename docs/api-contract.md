@@ -1,5 +1,7 @@
 # Literature Research Agent Assistant — API 契约
 
+> 2026-11-19 Agent 增量：可选 TASK_RUNNER=agent 支持原生结果查询、Markdown 比较表与字符串引用 ID，并新增 manual/local/tacc 传输。任务详情 agent.transport 为 file-exchange-v1、local-process-v1 或 tacc-ssh-slurm-v1，remote_job_id 在提交后更新。业务状态保持四种。详细协议、部署及验收边界见 [后端与独立 Agent 对接](agent-backend-integration.md)。以下历史 Runner 描述适用于原 mock/langgraph 模式；真实 TACC 验收仍须按清单执行。
+
 版本：v1 · 更新日期：2026-11-14。账号契约与集成/验收边界见第 11 节；以下既有业务验收记录保留其原证据范围。已实现 API/Mock Worker、独立 PDF Parser、真实摘要/问答 Runner、多论文综述及第 10 节 arXiv 搜索/导入接口。用户已完成 MVP-3 的隔离原生 PostgreSQL 八组专项验收、真实 arXiv 单版本搜索/下载/解析及浏览器 Mock 任务闭环；另已完成一次 DeepSeek 真实单篇摘要及人工引用/刷新核验，真实问答与多论文综述仍待验收。详细证据范围见实施记录；启动方式见 `backend/README.md`。
 
 需求依据：`docs/Proposal.md` 第 2、3 节。数据库设计见 `docs/database-design.md`，参考 DDL 见 `backend/sql/schema.sql`。
@@ -164,11 +166,197 @@ Content-Type 为 multipart/form-data，仅包含一个必填的 file 字段。
 
 200 返回完整 Paper，用于查询解析状态；不存在返回 `404 PAPER_NOT_FOUND`；UUID 格式错误返回 422。
 
+### DELETE /api/v1/papers/{paper_id}
+
+需要当前账号、同源 Origin 和 X-CSRF-Token。成功返回 204，无响应体。锁定论文后检查任意 TaskPaper 引用；有引用返回 409 PAPER_IN_USE，解析中返回 409 PAPER_PROCESSING。其他账号或不存在的论文返回 404 PAPER_NOT_FOUND。
+
+删除事务清理该论文的导入映射、来源、解析片段及论文记录；提交后清理受控 PDF 文件。研究任务和历史引用不删除。arXiv 搜索的来源元数据缓存不受影响，每次搜索仍实时叠加当前账号的导入状态；删除后返回未导入，可再次导入新记录。
+
 ### GET /api/v1/papers/{paper_id}/file
 
 200 返回 PDF 字节；Content-Type 为 application/pdf，Content-Disposition 使用 inline 及安全编码的原文件名，设置 X-Content-Type-Options: nosniff。首版不承诺 HTTP Range 支持。
 
 数据库记录不存在返回 `404 PAPER_NOT_FOUND`；已有记录但文件不可读返回 `500 FILE_UNAVAILABLE`。路径来自受控存储键，必须验证其位于 STORAGE_ROOT 内，不接受用户路径。
+
+### 4.1 Agent 论文库
+
+| 方法与路径 | 调用方式 |
+| --- | --- |
+| `POST /api/v1/agent/library-token` | 登录后，携带会话 Cookie、`Origin` 和 `X-CSRF-Token` 发起请求，无需请求体。CSRF 值可从 `GET /api/v1/auth/me` 响应获取。返回 `access_token`、`token_type` 和 `expires_at`。 |
+| `GET /api/v1/agent/papers` | 使用 `Authorization: Bearer <access_token>`。支持 `q` 按空白分隔多个关键词；`match=all`（默认）要求所有词命中，`match=any` 要求至少一个词命中。每个词在标题或原文件名中做不区分大小写的字面子串匹配。支持 `status` 过滤。`limit` 默认 20、最大 100，`offset` 默认 0。默认列出调用用户的所有论文，按入库时间倒序。 |
+| `GET /api/v1/agent/papers/{paper_id}/pdf` | 使用同一 Bearer 令牌请求 `download_url`，流式返回持久化的原始 PDF。响应为 `application/pdf`，使用 `attachment` 和原文件名。 |
+
+令牌仅授权签发账号的只读论文库操作，最长有效 30 分钟，且随签发会话过期或撤销而失效。令牌缺失、过期或无效返回 `401 AGENT_LIBRARY_TOKEN_REQUIRED`。论文不存在或属于其他账号时返回 `404 PAPER_NOT_FOUND`。论文记录存在但文件不可读时返回 `500 FILE_UNAVAILABLE`。
+
+多关键词默认按 AND 组合，可以分别命中标题和原文件名，顺序和位置不限。通过 `match` 参数切换组合方式：
+
+| 请求示例 | 匹配规则 |
+| --- | --- |
+| `GET /api/v1/agent/papers?q=Rust%20agent&match=all&limit=10` | 同时包含 `Rust` 和 `agent`；省略 `match` 时行为相同。 |
+| `GET /api/v1/agent/papers?q=Rust%20agent&match=any&limit=10` | 包含 `Rust` 或 `agent` 任一词；同一篇论文只返回一次。 |
+
+`match` 仅接受 `all`、`any`，其他值返回 422。OR 组合仅作用于关键词，不放宽论文归属或 `status` 过滤。多个空格、制表符或换行均作为分隔符；仅包含空白的 `q` 返回 422。不传 `q` 则返回全部本人论文，`match` 不改变该行为。`q` 总长度为 1—200 字符，`%`、`_` 按普通字符匹配；当前不支持在 `q` 中书写 AND/OR 表达式、引号短语、正文或跨语言语义检索。
+
+检索响应沿用 `{items,total,limit,offset}` 分页格式。每条记录包含 `id`、`title`、`original_filename`、`status`、`page_count`、`size_bytes`、`sha256` 和 `download_url`。Agent 将 `download_url` 与已配置的后端地址组合，携带 Bearer 请求头下载，并用 `sha256` 核对下载内容。远端 Agent 需要能够访问该后端地址，令牌仅通过授权请求头传送。
+
+#### 4.1.1 签发 Agent 论文库令牌
+
+`POST /api/v1/agent/library-token`。由已登录用户签发；请求无需正文。下面按本地开发地址示例，实际 `Origin` 必须与 `FRONTEND_PUBLIC_URL` 一致。`<SESSION_COOKIE>` 是登录接口设置的会话 Cookie，`<CSRF_TOKEN>` 从登录响应或 `GET /api/v1/auth/me` 响应读取。开启安全 Cookie 时，Cookie 名称改为 `__Host-lra_session`，并通过 HTTPS 调用。
+
+```http
+POST /api/v1/agent/library-token HTTP/1.1
+Host: 127.0.0.1:8000
+Origin: http://127.0.0.1:5173
+Cookie: lra_dev_session=<SESSION_COOKIE>
+X-CSRF-Token: <CSRF_TOKEN>
+Content-Length: 0
+```
+
+成功返回 `200 OK`，响应头包含 `Content-Type: application/json` 和 `Cache-Control: no-store`：
+
+```json
+{
+  "access_token": "<AGENT_LIBRARY_TOKEN>",
+  "token_type": "Bearer",
+  "expires_at": "2026-11-20T10:30:00Z"
+}
+```
+
+`<AGENT_LIBRARY_TOKEN>` 是占位符，后续请求应替换为本次实际返回的 `access_token`；示例时间也仅作格式说明。`expires_at` 为 UTC 时间，最长为签发后 30 分钟，不超过登录会话有效期。后续两个只读接口使用该 Bearer 令牌，无需发送浏览器 Cookie、Origin 或 CSRF；仅提供 Bearer 不能调用本签发接口。
+
+#### 4.1.2 检索论文及分页返回
+
+下面使用 OR 检索 `Rust`、`agent` 两个关键词，并限定为已解析的论文。改为 `match=all` 即为 AND 检索；省略 `match` 也默认使用 AND。
+
+```http
+GET /api/v1/agent/papers?q=Rust%20agent&match=any&status=ready&limit=10&offset=0 HTTP/1.1
+Host: 127.0.0.1:8000
+Authorization: Bearer <AGENT_LIBRARY_TOKEN>
+Accept: application/json
+```
+
+成功返回 `200 OK`，响应头包含 `Content-Type: application/json` 和 `Cache-Control: no-store`。下面的论文、ID、文件大小和 SHA-256 均为示例数据：
+
+```json
+{
+  "items": [
+    {
+      "id": "11111111-1111-4111-8111-111111111111",
+      "title": "Rust Repository Agents",
+      "original_filename": "Rust Repository Agents.pdf",
+      "status": "ready",
+      "page_count": 13,
+      "size_bytes": 262144,
+      "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "download_url": "/api/v1/agent/papers/11111111-1111-4111-8111-111111111111/pdf"
+    },
+    {
+      "id": "22222222-2222-4222-8222-222222222222",
+      "title": "Agent Tools for Software Engineering",
+      "original_filename": "Agent Tools for Software Engineering.pdf",
+      "status": "ready",
+      "page_count": 20,
+      "size_bytes": 524288,
+      "sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "download_url": "/api/v1/agent/papers/22222222-2222-4222-8222-222222222222/pdf"
+    }
+  ],
+  "total": 2,
+  "limit": 10,
+  "offset": 0
+}
+```
+
+`total` 是过滤后的论文总数，`items` 只包含当前页。`title` 为数据库中的论文标题；`download_url` 为相对路径，需与 Agent 可访问的后端地址拼接。未解析论文的 `page_count` 可以为 `null`。下一页将 `offset` 加上 `limit`。没有匹配论文时仍返回 `200 OK`：
+
+```json
+{"items": [], "total": 0, "limit": 10, "offset": 0}
+```
+
+#### 4.1.3 下载持久化的 PDF 原文件
+
+使用检索返回的 `download_url` 和同一 Bearer 令牌下载。以上述首条结果为例：
+
+```http
+GET /api/v1/agent/papers/11111111-1111-4111-8111-111111111111/pdf HTTP/1.1
+Host: 127.0.0.1:8000
+Authorization: Bearer <AGENT_LIBRARY_TOKEN>
+Accept: application/pdf
+```
+
+成功返回 `200 OK`，正文是 PDF 二进制流，不是 JSON 或 Base64。示例响应如下，方括号内文字仅说明响应体：
+
+```http
+HTTP/1.1 200 OK
+Content-Type: application/pdf
+Content-Disposition: attachment; filename*=utf-8''Rust%20Repository%20Agents.pdf
+Content-Length: 262144
+X-Content-Type-Options: nosniff
+Cache-Control: no-store
+
+[PDF 二进制字节，共 262144 字节]
+```
+
+下载后将文件保存到 Agent 本地，并以检索结果中的 `sha256` 校验内容。该接口不要求论文已完成后端解析，因此 `uploaded` 状态的原文件也可下载；首版不承诺 HTTP Range 支持。远端 Agent 应使用可从 TACC 到达的后端地址，不能将 TACC 自己的 `127.0.0.1` 当成本机后端。
+
+#### 4.1.4 常见错误返回
+
+三个接口均沿用统一的 `error` 结构。常见状态与错误码：
+
+| 接口 | HTTP 状态 | 错误码及含义 |
+| --- | --- | --- |
+| 签发令牌 | 401 | `AUTH_REQUIRED`：登录会话缺失、过期或已撤销。 |
+| 签发令牌 | 403 | `ORIGIN_REJECTED` / `CSRF_REJECTED`：Origin 或 CSRF 校验未通过。 |
+| 检索 / 下载 | 401 | `AGENT_LIBRARY_TOKEN_REQUIRED`：Bearer 令牌缺失、无效、过期，或其绑定会话已失效。 |
+| 检索 | 422 | `INVALID_REQUEST`：关键词、`match`、状态或分页参数不合法。 |
+| 下载 | 404 | `PAPER_NOT_FOUND`：论文不存在或属于其他用户。 |
+| 下载 | 422 | `INVALID_REQUEST`：论文 ID 不是合法 UUID。 |
+| 下载 | 500 | `FILE_UNAVAILABLE`：数据库记录存在，但受控存储中的原文件不可读。 |
+| 全部 | 503 | `AUTH_UNAVAILABLE`：账号服务所需配置不可用。 |
+
+检索或下载时 Bearer 令牌失效的 `401` 示例，响应头另含 `WWW-Authenticate: Bearer realm="agent-library"`：
+
+```json
+{
+  "error": {
+    "code": "AGENT_LIBRARY_TOKEN_REQUIRED",
+    "message": "A valid agent library token is required",
+    "details": {}
+  }
+}
+```
+
+访问其他账号论文或不存在的论文时返回相同的 `404`：
+
+```json
+{
+  "error": {
+    "code": "PAPER_NOT_FOUND",
+    "message": "论文不存在",
+    "details": {}
+  }
+}
+```
+
+#### 4.1.5 PowerShell 完整调用与文件校验
+
+在 PowerShell 中可用已登录的 `$apiSession` 验证完整流程。`$apiBase` 是后端地址，`$frontendOrigin` 与 `FRONTEND_PUBLIC_URL` 一致，均去掉末尾的 `/`。
+
+```powershell
+$identity = Invoke-RestMethod "$apiBase/api/v1/auth/me" -WebSession $apiSession
+$grant = Invoke-RestMethod "$apiBase/api/v1/agent/library-token" -Method Post -WebSession $apiSession `
+    -Headers @{ Origin = $frontendOrigin; 'X-CSRF-Token' = $identity.csrf_token }
+$agentHeaders = @{ Authorization = "Bearer $($grant.access_token)" }
+$papers = Invoke-RestMethod "$apiBase/api/v1/agent/papers?limit=1" -Headers $agentHeaders
+$paper = $papers.items | Select-Object -First 1
+if (-not $paper) { throw 'The library is empty. Upload a PDF first.' }
+$destination = Join-Path ([IO.Path]::GetTempPath()) "agent-paper-$($paper.id).pdf"
+Invoke-WebRequest "$apiBase$($paper.download_url)" -Headers $agentHeaders -OutFile $destination
+if ((Get-FileHash -LiteralPath $destination -Algorithm SHA256).Hash -ine $paper.sha256) {
+    throw 'Downloaded PDF does not match the recorded SHA-256.'
+}
+[pscustomobject]@{ id = $paper.id; title = $paper.title; download_path = $destination }
+```
 
 ## 5. 任务接口
 
@@ -192,6 +380,8 @@ Content-Type 为 application/json；可选 Idempotency-Key 请求头，语义见
 | paper_ids | 是 | summary/qa 恰好 1 篇；review 为 2—20 篇；UUID 不得重复 |
 | workflow_type | 否 | 默认 baseline，MVP-0 不开放 extended |
 | budget | 否 | 兼容旧客户端；新任务统一忽略合法值，由后端动态分配。非法值仍返回 422 |
+
+回答语言跟随用户实际提问的语言，与界面语言和论文原文语言无关。中文提问使用中文回答，英文提问使用英文回答；中英文混合时以问题的主要自然语言为准，孤立的英文术语不改变中文问题的回答语言。summary 未填写关注点时默认中文。证据原文保持逐字引用，不翻译引文。请求不新增 `output_language` 或语言选择参数；Agent 派发及旧研究流程使用相同的提示规则。该规则用于新任务，幂等重放不会改写已冻结的任务输入，也不翻译历史结果。
 
 paper_ids 视为集合，转 UUID 标准字符串后排序。不存在论文返回 404，details.missing_paper_ids 列出缺失 ID。Mock 允许 uploaded/ready，processing/failed 返回 409 PAPER_NOT_READY；真实 Runner 只允许 ready。真实模式需配置 `LLM_BASE_URL`、`LLM_MODEL_ID` 和 `LLM_API_KEY`；缺少任一项时返回 `503 RUNNER_NOT_CONFIGURED`，不创建任务且不降级为 Mock。真实模式支持 summary、qa 及 review；review 要求全部 2—20 篇论文 ready。
 
@@ -305,7 +495,7 @@ event_type 为 status/stage/warning/error。payload 为脱敏的 JSON 对象，�
 
 200 返回 `{"items": [...]}`；当前每个任务最多一个研究结果，仍使用数组便于扩展。
 
-- queued/running/failed 返回空数组，不展示部分生成结果。
+- queued/running/failed 返回空数组，不展示尚未完成交付的生成片段。失败 Agent 任务已交付的原生结果仍可从 `/agent-result` 读取。
 - succeeded 必须已有且仅有一项产物；产物、引用和成功状态在一个事务中提交。
 - 任务不存在返回 404。
 
@@ -327,9 +517,13 @@ Mock 示例：
 
 Artifact 字段如上；is_mock、task_type 从任务派生，数据库不重复保存。content_markdown 非空且 UTF-8 编码最大 2 MiB；前端禁用原始 HTML 渲染。统计读取 Task.stats，不在产物中维护第二份。
 
+Agent 兼容产物另有 `comparison_markdown`、`agent_stop_reason` 和 `unresolved`，引用可附带 `agent_source_id`，`chunk_id` 可为原生字符串。`comparison_markdown` 中已知的原生引用按已保存的 Citation 映射为与正文一致的 `[C1]`、`[C2]`，原生结果及 `/agent-result` 保持不变。比较视图可使用该 Markdown 和同一组引用；旧结构化表格继续按原规则展示。
+
+有效的部分交付仍使用四态中的 `status=succeeded`，同时 `stage=partial`、`agent.stop_reason=partial`；这表示有可读产物，不代表完整完成。页面显示“部分完成”和 `unresolved` 警告，任务历史也保留该区别。不将 Agent 的部分完成提示与旧 `retrieval` 证据覆盖提示混为一谈。
+
 ### 6.1 ComparisonTable
 
-summary/qa 的 comparison_table 为 null；真实 review 使用下述对象。Mock review 允许 null，但必须显示模拟提示。
+summary/qa 的 comparison_table 为 null；旧 langgraph 真实 review 使用下述对象。Agent review 的结构化 comparison_table 为 null，使用上一节的 comparison_markdown。Mock review 允许 null，但必须显示模拟提示。
 
 ```json
 {
@@ -509,9 +703,9 @@ limit 默认 20/范围 1—100，offset 默认 0/非负，可选 status。返回
 
 请求 `{"expected_attempt":1}`，必须严格正整数，不接受 bool/额外字段。
 
-- failed、attempt 匹配且 error.details.retryable=true：原子 attempt+1，清除旧执行信息回 queued，202。
+- failed、attempt 匹配：原子 attempt+1，清除旧执行信息回 queued，202。
 - 已是 expected_attempt+1：重放当前记录，queued/running 为 202、终态为 200；即使已再次失败也不重入队。
-- 其他冲突 409 IMPORT_RETRY_CONFLICT；非可重试失败 409 IMPORT_NOT_RETRYABLE；不存在 404。
+- 其他冲突 409 IMPORT_RETRY_CONFLICT；不存在 404。所有下载失败均允许用户手动重试，仍受账号导入额度和 expected_attempt 约束。
 - 不修改研究 Task 重试规则；Worker 不自动重试网络或失效执行。
 
 ### 10.2 配置、错误与轮询
@@ -532,11 +726,11 @@ HTTP 错误沿用第 8 节 envelope；429 带整数秒 Retry-After 和相同 det
 
 搜索来源失败时，服务端以请求对应的 `X-Request-ID` 记录 `phase`、`elapsed_ms` 和安全错误码；阶段限定为连接、写入、连接池、响应头、响应体、总时限、共享许可、来源 HTTP 状态、响应校验或未知，不记录检索词、联系邮箱、原始异常、响应正文或凭据。该诊断仅用于服务端日志，不添加到公开错误字段；watchdog 退出明确按总时限超时处理。
 
-前端可保留当前页面上一份成功结果，必须同时标注其原关键词、页码和接收时间，并在新请求未完成时说明尚未更新，不得将旧结果冒充新结果。重试重复失败请求的原关键词/offset；旧结果翻页使用其原关键词。`ARXIV_TIMEOUT` 后有 5 秒页面级手动搜索等待，不自动重试，不影响导入/历史读取；它不替代后端共享许可，也不承诺来源恢复时间。429 的服务端冷却规则不变。结果快照不跨刷新持久化，成功空结果会替换旧结果，导入历史仍由服务器保存。
+前端在新搜索或翻页等待期间可暂留上一份成功结果；搜索请求失败后清空搜索状态和旧结果，以弹窗显示错误原因及请求编号，不再展示上次成功结果。站内切换可保留成功搜索状态和进行中的请求，但刷新、新页面或退出账号后清空。手动清除搜索会取消当前查询并忽略迟到响应。`ARXIV_TIMEOUT` 后仍有 5 秒手动搜索等待，429 仍按服务端 Retry-After 限制；清空搜索不解除冷却，也不自动重试。搜索失败不影响已经提交的导入或论文库。
 
 已接收导入的执行失败返回 status=failed/error：ARXIV_NOT_FOUND、ARXIV_VERSION_MISMATCH、ARXIV_RATE_LIMITED、ARXIV_UNAVAILABLE、ARXIV_INVALID_RESPONSE、ARXIV_TIMEOUT、UNSAFE_SOURCE_URL、FILE_TOO_LARGE、INVALID_PDF、STORAGE_WRITE_FAILED、IMPORT_TIMEOUT、IMPORT_LEASE_EXPIRED、IMPORT_WORKER_STOPPED。details.retryable 必须为 boolean：暂时网络/服务/限流/超时/存储及 Worker 中断 true；不存在/版本不符/非法响应/不安全 URL/超限/非法 PDF false。错误不回显上游正文或内部路径。
 
-前端对 queued/running 每 2 秒轮询，终态停止；成功后跟踪 Paper 解析。失败仅 retryable=true 可重试。元数据作为纯文本显示，真正 ready 才允许真实研究任务。
+前端对 queued/running 每 2 秒轮询，终态停止；成功后跟踪 Paper 解析。失败记录均提供手动重新下载；details.retryable 仅记录错误分类，不再作为手动重试门禁。元数据作为纯文本显示，真正 ready 才允许真实研究任务。
 
 ## 11. 账号、会话与资源归属（2026-11-14）
 
@@ -570,7 +764,7 @@ HTTP 错误沿用第 8 节 envelope；429 带整数秒 Retry-After 和相同 det
 
 生产会话 Cookie `__Host-lra_session`：Secure、HttpOnly、SameSite=Lax、Path=/、无 Domain；`AUTH_COOKIE_SECURE=true` 同时要求 HTTPS 前端 origin。本机 HTTP loopback 专用 `lra_dev_session`，其余属性相同但无 Secure。Cookie 的 Max-Age 来自 `AUTH_SESSION_TTL_SECONDS`，服务端仍检查用户 active、会话过期/revoked 和 auth_version。返回 JSON 不含原始会话 token；不得将认证 Cookie 改为 localStorage 中的 Bearer token。
 
-跨端口请求使用 `withCredentials: true` 或 `credentials: "include"`。CORS 允许明确前端 origin 与 credentials，预检须允许 Content-Type、Idempotency-Key、X-CSRF-Token，禁止通配 origin。所有账号 POST（包括公开注册、登录、重置）检查 Origin 与 JSON；其中 logout/change-password 另验证会话及 `X-CSRF-Token`。所有已认证业务写入（含 multipart 上传、任务提交、导入和重试）也必须带当前会话 CSRF 和匹配 Origin，不能因为不是 JSON 而跳过 CSRF。
+跨端口请求使用 `withCredentials: true` 或 `credentials: "include"`。CORS 允许明确前端 origin 与 credentials，预检允许 GET、POST、DELETE 及 Content-Type、Idempotency-Key、X-CSRF-Token，禁止通配 origin。所有账号 POST（包括公开注册、登录、重置）检查 Origin 与 JSON；其中 logout/change-password 另验证会话及 `X-CSRF-Token`。所有已认证业务写入（含 multipart 上传、任务提交、导入、重试和 DELETE 删除）也必须带当前会话 CSRF 和匹配 Origin，不能因为不是 JSON 而跳过 CSRF。部署推荐由前端同源反向代理 `/api/`；CORS 不绕过 Cookie、Origin 或 CSRF 校验。
 
 CSRF 从 login/me 响应读取并仅存内存，按独立密钥与当前会话绑定；更换会话后重新读取。缺失/错误 Origin 返回 `403 ORIGIN_REJECTED`，缺失/错误 CSRF 返回 `403 CSRF_REJECTED`。这两类错误不能解释为账号不存在。已认证业务请求收到 401 才按会话失效处理；公开登录/重置等有意产生的 401 在当前页面显示，不能触发全局重定向循环。
 
@@ -609,3 +803,15 @@ Worker 对含中文的问题最多调用一次查询扩展：1—3 个英文表�
 retrieving 阶段的事件可带 retrieval、retrieval_status、reason、paper_id、new_chunks、evidence_status 等诊断字段。前端必须区分无解析文本、当前证据不足、部分可回答；比较表 null 显示“当前证据未覆盖”，不能据此断言论文未报告。输出仍使用原 Artifact / Citation 结构，引用 ID 由后端解析为冻结原文及物理页码。
 
 新工作流使用与综述相同的租约和持久化调用预留。租约过期可重新排队，保留原 started_at 和截止时间；已完成查询、选证据、分析和输出检查点复用。未知模型调用按预留用量保守保留；查询扩展未知结果不重复发起，生成可在有剩余额度时恢复。迁移 20261115_0005 只扩展 tasks_lifecycle 约束，不删除数据。
+
+### 导入来源快照（2026-11-18）
+
+`paper-imports` 的新建/重试请求体保持不变，不接受客户端提供元数据。服务端可从未过期的搜索缓存查找完全相同版本的已验证元数据，并内部持久化到 `PaperImport.source_metadata`；该字段不出现在公开响应中。Worker 重新校验结构和版本后复用，缺失时回退到原有元数据 API 查询。PDF 仍独立下载、校验和落盘，不把元数据缓存当成 PDF 下载完成。
+
+### DELETE /api/v1/tasks/{task_id}（2026-11-19）
+
+需要账号会话、同源 Origin 和 X-CSRF-Token。仅可删除当前账号的研究记录，成功返回 204。不存在或属于其他账号返回 404 TASK_NOT_FOUND；运行中返回 409 TASK_RUNNING。Agent 任务已经开始后，租约恢复时即使暂为 queued，远端作业仍可能运行，仍返回 409；未开始的排队任务及已完成记录可按原规则删除。先锁定任务行，再检查状态，防止与 Worker 领取竞争。
+
+local/TACC 的失败 Agent 任务若尚未交付结果且未确认作业停止，返回 `409 AGENT_STOP_PENDING`，保留 Task 和 AgentRun 供维护循环继续取消及确认。确认停止后可删除；已交付终态结果（包括失败结果）按原规则允许删除，不要求再次取消。停止 Worker 本身不等于确认作业停止。
+
+使用既有数据库级联删除研究结果、证据引用、执行事件和 task_papers 关联，不删除原论文。论文只有在不再被任何任务引用且不处于解析中时才允许删除；同一论文仍被其他任务引用时继续返回 PAPER_IN_USE。无新增数据库迁移。

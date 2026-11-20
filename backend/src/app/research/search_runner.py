@@ -1,5 +1,4 @@
 import json
-import re
 from dataclasses import replace
 from datetime import datetime, timezone
 from typing import Literal
@@ -195,7 +194,9 @@ def validate_answer(raw, job):
 
 
 def insufficient_result(job, *, no_text=False):
-    english = bool(re.search(r"\bEnglish\b|英文", job.question or "", re.I)) or not re.search(r"[\u3400-\u9fff]", job.question or "")
+    from app.tasks.language import uses_english_labels
+
+    english = uses_english_labels(job.question)
     message = ("No parsed text is available for analysis. Check the paper parsing result." if no_text else
         "The retrieved passages do not provide enough evidence to answer this question. This does not establish that the information is absent from the full paper.") if english else (
         "论文没有可用于分析的解析文本，请检查解析结果。" if no_text else

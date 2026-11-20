@@ -144,7 +144,7 @@ class Task(UUIDPrimaryKey, CreatedAt, UpdatedAt, Base):
         Index("tasks_owner_created_idx", "user_id", text("created_at DESC")),
         CheckConstraint("task_type IN ('summary', 'qa', 'review')"),
         CheckConstraint("workflow_type IN ('baseline', 'extended')"),
-        CheckConstraint("runner_type IN ('mock', 'langgraph')"),
+        CheckConstraint("runner_type IN ('mock', 'langgraph', 'agent')", name="tasks_runner_type_check"),
         CheckConstraint("length(btrim(workflow_version)) > 0"),
         CheckConstraint("length(btrim(prompt_version)) > 0"),
         CheckConstraint("length(btrim(model_id)) > 0"),
@@ -178,7 +178,7 @@ class Task(UUIDPrimaryKey, CreatedAt, UpdatedAt, Base):
             name="tasks_timestamps",
         ),
         CheckConstraint(
-            "(status = 'queued' AND stage = 'queued' AND (started_at IS NULL OR workflow_version IN ('langgraph-review-v2', 'langgraph-search-v1')) AND finished_at IS NULL "
+            "(status = 'queued' AND stage = 'queued' AND (started_at IS NULL OR workflow_version IN ('langgraph-review-v2', 'langgraph-search-v1', 'agent-io-v1')) AND finished_at IS NULL "
             "AND worker_id IS NULL AND lease_expires_at IS NULL) "
             "OR (status = 'running' AND started_at IS NOT NULL AND finished_at IS NULL "
             "AND worker_id IS NOT NULL AND lease_expires_at IS NOT NULL AND lease_expires_at > started_at) "
@@ -204,6 +204,24 @@ class Task(UUIDPrimaryKey, CreatedAt, UpdatedAt, Base):
         Index("tasks_status_created_idx", "status", text("created_at DESC"), text("id DESC")),
         Index("tasks_queue_idx", "created_at", "id", postgresql_where=text("status = 'queued'")),
         Index("tasks_expired_lease_idx", "lease_expires_at", postgresql_where=text("status = 'running'")),
+    )
+
+
+class AgentRun(CreatedAt, UpdatedAt, Base):
+    __tablename__ = "agent_runs"
+
+    task_id: Mapped[UUID] = mapped_column(ForeignKey("tasks.id", ondelete="CASCADE"), primary_key=True)
+    dispatch_id: Mapped[UUID] = mapped_column(unique=True)
+    input_sha256: Mapped[str] = mapped_column(String(64))
+    manifest: Mapped[dict[str, Any]] = mapped_column(JSONB)
+    result: Mapped[dict[str, Any] | None] = mapped_column(JSONB(none_as_null=True))
+    remote_job_id: Mapped[str | None] = mapped_column(String(256))
+    stop_reason: Mapped[str | None] = mapped_column(String(64))
+
+    __table_args__ = (
+        CheckConstraint("input_sha256 ~ '^[0-9a-f]{64}$'", name="agent_runs_input_sha256"),
+        CheckConstraint("jsonb_typeof(manifest) = 'object'", name="agent_runs_manifest_object"),
+        CheckConstraint("result IS NULL OR jsonb_typeof(result) = 'object'", name="agent_runs_result_object"),
     )
 
 
@@ -282,12 +300,20 @@ class Citation(UUIDPrimaryKey, CreatedAt, Base):
     task_id: Mapped[UUID]
     citation_key: Mapped[str] = mapped_column(String(32))
     paper_id: Mapped[UUID]
-    chunk_id: Mapped[UUID]
+    chunk_id: Mapped[UUID | None]
+    agent_chunk_id: Mapped[str | None] = mapped_column(Text)
+    agent_source_id: Mapped[str | None] = mapped_column(Text)
     page_number: Mapped[int] = mapped_column(Integer)
     quote: Mapped[str] = mapped_column(Text)
 
     __table_args__ = (
         CheckConstraint("citation_key ~ '^C[1-9][0-9]*$'"),
+        CheckConstraint(
+            "(chunk_id IS NOT NULL AND agent_chunk_id IS NULL AND agent_source_id IS NULL) "
+            "OR (chunk_id IS NULL AND length(btrim(agent_chunk_id)) > 0 AND agent_chunk_id IS NOT NULL "
+            "AND length(btrim(agent_source_id)) > 0 AND agent_source_id IS NOT NULL)",
+            name="citations_evidence_identity",
+        ),
         CheckConstraint("page_number >= 1"),
         CheckConstraint("length(btrim(quote)) > 0"),
         UniqueConstraint("artifact_id", "citation_key", name="citations_key"),
@@ -339,6 +365,7 @@ class PaperImport(UUIDPrimaryKey, CreatedAt, UpdatedAt, Base):
 
     provider: Mapped[str] = mapped_column(Text)
     external_id: Mapped[str] = mapped_column(String(80))
+    source_metadata: Mapped[dict[str, Any] | None] = mapped_column(JSONB(none_as_null=True))
     attempt: Mapped[int] = mapped_column(Integer, server_default=text("1"))
     status: Mapped[str] = mapped_column(Text, server_default="queued")
     paper_id: Mapped[UUID | None] = mapped_column(ForeignKey("papers.id", ondelete="RESTRICT"), unique=True)

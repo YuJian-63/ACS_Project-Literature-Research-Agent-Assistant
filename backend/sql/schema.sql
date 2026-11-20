@@ -52,7 +52,7 @@ CREATE TABLE tasks (
     task_type text NOT NULL CHECK (task_type IN ('summary', 'qa', 'review')),
     question text,
     workflow_type text NOT NULL DEFAULT 'baseline' CHECK (workflow_type IN ('baseline', 'extended')),
-    runner_type text NOT NULL CHECK (runner_type IN ('mock', 'langgraph')),
+    runner_type text NOT NULL CHECK (runner_type IN ('mock', 'langgraph', 'agent')),
     workflow_version text NOT NULL CHECK (length(btrim(workflow_version)) > 0),
     prompt_version text CHECK (length(btrim(prompt_version)) > 0),
     model_id text CHECK (length(btrim(model_id)) > 0),
@@ -93,7 +93,7 @@ CREATE TABLE tasks (
         AND (finished_at IS NULL OR finished_at >= coalesce(started_at, created_at))
     ),
     CONSTRAINT tasks_lifecycle CHECK (
-        (status = 'queued' AND stage = 'queued' AND (started_at IS NULL OR workflow_version IN ('langgraph-review-v2', 'langgraph-search-v1')) AND finished_at IS NULL
+        (status = 'queued' AND stage = 'queued' AND (started_at IS NULL OR workflow_version IN ('langgraph-review-v2', 'langgraph-search-v1', 'agent-io-v1')) AND finished_at IS NULL
             AND worker_id IS NULL AND lease_expires_at IS NULL)
         OR (status = 'running' AND started_at IS NOT NULL AND finished_at IS NULL
             AND worker_id IS NOT NULL AND lease_expires_at IS NOT NULL AND lease_expires_at > started_at)
@@ -112,6 +112,21 @@ CREATE TABLE tasks (
         runner_type <> 'mock' OR (model_id IS NULL AND input_tokens IS NULL
             AND output_tokens IS NULL AND model_calls IS NULL AND tool_calls IS NULL)
     )
+);
+
+CREATE TABLE agent_runs (
+    task_id uuid PRIMARY KEY REFERENCES tasks(id) ON DELETE CASCADE,
+    dispatch_id uuid NOT NULL UNIQUE,
+    input_sha256 varchar(64) NOT NULL,
+    manifest jsonb NOT NULL,
+    result jsonb,
+    remote_job_id varchar(256),
+    stop_reason varchar(64),
+    created_at timestamptz NOT NULL DEFAULT now(),
+    updated_at timestamptz NOT NULL DEFAULT now(),
+    CONSTRAINT agent_runs_input_sha256 CHECK (input_sha256 ~ '^[0-9a-f]{64}$'),
+    CONSTRAINT agent_runs_manifest_object CHECK (jsonb_typeof(manifest) = 'object'),
+    CONSTRAINT agent_runs_result_object CHECK (result IS NULL OR jsonb_typeof(result) = 'object')
 );
 
 CREATE TABLE task_papers (
@@ -161,11 +176,18 @@ CREATE TABLE citations (
     task_id uuid NOT NULL,
     citation_key varchar(32) NOT NULL CHECK (citation_key ~ '^C[1-9][0-9]*$'),
     paper_id uuid NOT NULL,
-    chunk_id uuid NOT NULL,
+    chunk_id uuid,
+    agent_chunk_id text,
+    agent_source_id text,
     page_number integer NOT NULL CHECK (page_number >= 1),
     quote text NOT NULL CHECK (length(btrim(quote)) > 0),
     created_at timestamptz NOT NULL DEFAULT now(),
     CONSTRAINT citations_key UNIQUE (artifact_id, citation_key),
+    CONSTRAINT citations_evidence_identity CHECK (
+        (chunk_id IS NOT NULL AND agent_chunk_id IS NULL AND agent_source_id IS NULL)
+        OR (chunk_id IS NULL AND length(btrim(agent_chunk_id)) > 0 AND agent_chunk_id IS NOT NULL
+            AND length(btrim(agent_source_id)) > 0 AND agent_source_id IS NOT NULL)
+    ),
     CONSTRAINT citations_artifact FOREIGN KEY (artifact_id, task_id)
         REFERENCES artifacts(id, task_id) ON DELETE CASCADE,
     CONSTRAINT citations_selected_paper FOREIGN KEY (task_id, paper_id)
@@ -357,5 +379,8 @@ ALTER TABLE paper_imports ADD CONSTRAINT paper_imports_paper_owner FOREIGN KEY(p
 
 CREATE INDEX paper_imports_owner_idx ON paper_imports (user_id);
 
+
+-- Verified search metadata reused by independent import workers (20261118_0006).
+ALTER TABLE paper_imports ADD COLUMN source_metadata JSONB;
 
 COMMIT;

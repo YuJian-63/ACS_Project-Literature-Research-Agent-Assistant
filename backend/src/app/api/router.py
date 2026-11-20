@@ -1,5 +1,6 @@
 from fastapi import APIRouter
 
+from app.api.agent_library import router as agent_library_router
 from app.api.health import router as health_router
 from app.api.papers import router as papers_router
 from app.api.schemas import ErrorResponse
@@ -10,4 +11,5 @@ router = APIRouter(responses={
 })
 router.include_router(health_router)
 router.include_router(papers_router)
+router.include_router(agent_library_router)
 router.include_router(tasks_router)

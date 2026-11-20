@@ -30,13 +30,13 @@ The application serves Research Sans and Research Serif Latin subsets locally fr
 - Search: explicit search submission, results and persistent import history in separate columns when space permits. Retain the previous successful results and error recovery behavior.
 - New research: source selection and research question alongside a submission summary. Literature review resources remain automatically allocated by the backend.
 - Research history: filters, question/type, status, source count, execution mode and date. Each record opens its saved task.
-- Research result: task status and question above the result tabs. Reading, comparison and execution events have separate views. Execution statistics, input papers and technical details belong with execution events.
+- Research result: task status and question above the result tabs. Reading, comparison and execution events have separate views. Do not expose execution events, runtime statistics, budget details or a research-input panel. While queued or running, show an indeterminate progress animation, plain-language status and the most recent successful status-check time. Do not invent percentages or remaining duration. Pause the animation and explain reconnection when status queries fail. Retain the research question and source evidence needed to read the result.
 
 ## Results and evidence
 
 ArtifactView renders the saved Markdown; it does not replace it with demo copy. Its outline comes from actual headings. Known [C1]-style markers become citation controls, while code and unknown markers stay literal. Keep the Markdown safety rules: no embedded HTML or images, only supported safe links.
 
-ComparisonView uses the actual backend columns and rows. Resolve paper names from the input papers, then citations; show a readable fallback instead of an ID if neither is available. Missing values mean “Not reported”, not zero. A cited cell selects the corresponding excerpt in EvidencePanel. The panel displays the exact saved quote, paper title and page, with a link to the local PDF at that page. Never invent confidence scores, findings, page counts or citations.
+ComparisonView uses the actual backend columns and rows. Resolve paper names from the input papers, then citations; show a readable fallback instead of an ID if neither is available. Missing values mean “Not reported”, not zero. A cited cell selects the corresponding excerpt in EvidencePanel. The panel offers a readable excerpt with layout whitespace joined and identifiable sentence fragments omitted, plus an expandable exact saved quote for verification. It never invents missing words; if no complete sentence can be identified, show an explicit PDF-context fallback. Paper titles, citation identities and page links retain their saved values. Never invent confidence scores, findings, page counts or citations.
 
 ## Responsive behavior
 

@@ -37,7 +37,7 @@ def owns_task(task: Task | None, owner: UUID, now: datetime) -> bool:
 
 
 def claim_task(sessions: sessionmaker[Session], owner: UUID, runner_type: str = "mock") -> UUID | None:
-    if runner_type not in {"mock", "langgraph"}:
+    if runner_type not in {"mock", "langgraph", "agent"}:
         raise ValueError("Unsupported runner type")
     with sessions.begin() as session:
         task = session.scalar(
@@ -47,17 +47,19 @@ def claim_task(sessions: sessionmaker[Session], owner: UUID, runner_type: str = 
         if task is None:
             return None
         now = database_time(session)
-        staged_review = task.workflow_version in {"langgraph-review-v2", "langgraph-search-v1"}
+        staged_review = task.workflow_version in {"langgraph-review-v2", "langgraph-search-v1", "agent-io-v1"}
         if staged_review and task.started_at is not None and task.started_at + timedelta(seconds=task.timeout_seconds) <= now:
             mark_failed(session, task, now, "TASK_TIMEOUT", "任务超过执行时间预算")
             return None
         task.status = "running"
-        task.stage = "mock_preparing" if runner_type == "mock" else "retrieving"
+        task.stage = {"mock": "mock_preparing", "langgraph": "retrieving", "agent": "agent_packaging"}[runner_type]
         task.worker_id = owner
         if not staged_review or task.started_at is None:
             task.started_at = now
         task.lease_expires_at = now + timedelta(seconds=LEASE_SECONDS)
         message = "模拟任务开始执行，尚未分析论文" if runner_type == "mock" else "真实研究任务开始，正在读取已解析证据"
+        if runner_type == "agent":
+            message = "正在准备 Agent 输入文件"
         append_event(session, task, now, message, "status")
         return task.id
 
@@ -227,12 +229,13 @@ def reap_expired(sessions: sessionmaker[Session]) -> int:
                 mark_failed(session, task, now, "TASK_TIMEOUT", "任务超过执行时间预算")
                 count += 1
             elif task.lease_expires_at <= now:
-                if task.workflow_version in {"langgraph-review-v2", "langgraph-search-v1"}:
+                if task.workflow_version in {"langgraph-review-v2", "langgraph-search-v1", "agent-io-v1"}:
                     task.status = "queued"
                     task.stage = "queued"
                     task.worker_id = None
                     task.lease_expires_at = None
-                    append_event(session, task, now, "研究执行中断，将从已保存的阶段恢复", "warning")
+                    message = "派发 Worker 已中断，将继续等待同一 Agent 派发结果" if task.runner_type == "agent" else "研究执行中断，将从已保存的阶段恢复"
+                    append_event(session, task, now, message, "warning")
                 else:
                     mark_failed(session, task, now, "WORKER_LOST", "Worker 租约已过期")
                 count += 1

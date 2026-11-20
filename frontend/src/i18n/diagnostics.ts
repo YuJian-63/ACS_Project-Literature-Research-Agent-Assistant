@@ -4,6 +4,7 @@ import { stageLabels } from '../shared/lib/format';
 import type { ResourceError, TaskEvent } from '../api/types';
 
 const errorMessages: Record<string, string> = {
+  AGENT_STOP_PENDING: 'The Agent job has not been confirmed stopped. Please try deleting it again shortly.',
   RESEARCH_CAPACITY_EXCEEDED: 'This research input exceeds the server capacity. Narrow the question and try again.',
   IMPORT_CAPACITY_EXCEEDED: 'Your active import limit has been reached. Wait for an existing import to finish.',
   TASK_CAPACITY_EXCEEDED: 'Your active task limit has been reached. Wait for an existing task to finish.',

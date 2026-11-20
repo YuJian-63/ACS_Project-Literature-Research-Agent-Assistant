@@ -312,6 +312,7 @@ Desktop.ini
 /agent/vllm-src/
 /agent/vllm-source.tar.gz
 /agent/.venv-private/
+/agent/tacc.local.json
 
 # Local root agent notes
 /AGENTS.md

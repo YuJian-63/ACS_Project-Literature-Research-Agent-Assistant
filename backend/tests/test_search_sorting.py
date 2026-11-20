@@ -54,6 +54,21 @@ class SearchSortingTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 ArxivClient(transport).search('rust', **options)
 
+    def test_cached_metadata_is_exact_version_unexpired_and_copied(self):
+        from datetime import datetime, timezone
+        from app.sources.arxiv import ArxivPaper
+        now = [0.0]
+        cache = SearchCache(clock=lambda: now[0])
+        paper = ArxivPaper(external_id='1706.03762v1', title='Fixture', authors=['Author'], abstract='',
+                           categories=['cs.AI'], published_at=datetime.now(timezone.utc), source_updated_at=datetime.now(timezone.utc))
+        cache.put('fixture', 10, 0, ArxivPage([paper], 1, 0, 10))
+        self.assertIsNone(cache.find_paper('1706.03762v2'))
+        found = cache.find_paper('1706.03762v1')
+        found.authors.append('Changed')
+        self.assertEqual(cache.find_paper('1706.03762v1').authors, ['Author'])
+        now[0] = 601
+        self.assertIsNone(cache.find_paper('1706.03762v1'))
+
     def test_cache_separates_sort_and_direction(self):
         cache = SearchCache()
         page = ArxivPage([], 30, 0, 10)

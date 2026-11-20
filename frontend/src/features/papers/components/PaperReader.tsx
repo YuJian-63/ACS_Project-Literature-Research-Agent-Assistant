@@ -7,10 +7,11 @@ import type { Paper } from '../../../api/types';
 import { t, useLocale } from '../../../i18n';
 import { ErrorNotice } from '../../../shared/components/ErrorNotice';
 import './paper-reader.css';
+import PaperDeleteButton from './PaperDeleteButton';
 
 type DocumentState = { kind: 'loading' } | { kind: 'ready'; url: string } | { kind: 'error'; error: ApiError };
 
-export default function PaperReader({ paper, papers, page = 1, returnToTask, expanded, onRead, onExpand, onClose }: {
+export default function PaperReader({ paper, papers, page = 1, returnToTask, expanded, onRead, onExpand, onClose, onDelete, deletingId }: {
   paper: Paper;
   papers: Paper[];
   page?: number;
@@ -19,6 +20,8 @@ export default function PaperReader({ paper, papers, page = 1, returnToTask, exp
   onRead: (paper: Paper) => void;
   onExpand: () => void;
   onClose: () => void;
+  onDelete?: (paper: Paper) => Promise<void>;
+  deletingId?: string | null;
 }) {
   useLocale();
   const navigate = useNavigate();
@@ -66,6 +69,7 @@ export default function PaperReader({ paper, papers, page = 1, returnToTask, exp
         <p><span>{paper.original_filename}</span>{paper.page_count !== null && <span>{t('{0} 页', [paper.page_count])}</span>}</p>
       </div></div>
       <div className="paper-reader-actions">
+        {onDelete && <PaperDeleteButton paper={paper} onDelete={onDelete} deletingId={deletingId} />}
         {returnToTask && <Button type="primary" className="reader-task-return" icon={<ArrowLeftOutlined aria-hidden="true" />} onClick={() => navigate(returnToTask)}>{t('返回任务')}</Button>}
         <Button className="reader-expand" icon={expanded ? <FullscreenExitOutlined aria-hidden="true" /> : <FullscreenOutlined aria-hidden="true" />} onClick={onExpand}>{expanded ? t('显示论文列表') : t('专注阅读')}</Button>
         <Button href={paperFileUrl(paper.id, page)} target="_blank" rel="noopener noreferrer" icon={<SelectOutlined aria-hidden="true" />}>{t('在新标签页打开')}</Button>

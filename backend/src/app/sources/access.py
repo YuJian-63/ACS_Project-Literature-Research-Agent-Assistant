@@ -12,7 +12,7 @@ from uuid import UUID, uuid4
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session, sessionmaker
 
-from app.sources.arxiv import MAX_SEARCH_RESULTS, SEARCH_SORT_FIELDS, SEARCH_SORT_ORDERS, ArxivError, ArxivPage, SearchSortBy, SearchSortOrder, build_search_query
+from app.sources.arxiv import MAX_SEARCH_RESULTS, SEARCH_SORT_FIELDS, SEARCH_SORT_ORDERS, ArxivError, ArxivPage, ArxivPaper, normalize_arxiv_id, SearchSortBy, SearchSortOrder, build_search_query
 from app.db.models import SourceRequestGate
 
 
@@ -120,6 +120,17 @@ class SearchCache:
                 return None
             self.entries.move_to_end(key)
             return copy.deepcopy(cached[1])
+
+    def find_paper(self, external_id: str) -> ArxivPaper | None:
+        external_id = normalize_arxiv_id(external_id)
+        with self.lock:
+            for expires, page in reversed(self.entries.values()):
+                if self.clock() >= expires:
+                    continue
+                for paper in page.items:
+                    if paper.external_id == external_id:
+                        return paper.model_copy(deep=True)
+        return None
 
     def put(self, q: str, limit: int, offset: int, page: ArxivPage, *, sort_by: SearchSortBy = "relevance",
             sort_order: SearchSortOrder = "descending") -> None:

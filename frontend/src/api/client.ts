@@ -93,6 +93,7 @@ export const api = {
     request<PaperImport>({ url: `/api/v1/paper-imports/${encodeURIComponent(id)}/retry`, method: 'POST', data: { expected_attempt }, signal }),
   papers: (parameters: { limit?: number; offset?: number; q?: string; status?: PaperStatus }, signal: AbortSignal) =>
     request<Page<Paper>>({ url: '/api/v1/papers', params: parameters, signal }),
+  deletePaper: (id: string, signal: AbortSignal) => request<void>({ url: `/api/v1/papers/${encodeURIComponent(id)}`, method: 'DELETE', signal }),
   paper: (id: string, signal: AbortSignal) => request<Paper>({ url: `/api/v1/papers/${encodeURIComponent(id)}`, signal }),
   paperFile: (id: string, signal: AbortSignal) =>
     request<Blob>({ url: '/api/v1/papers/' + encodeURIComponent(id) + '/file', responseType: 'blob', signal }),
@@ -105,6 +106,7 @@ export const api = {
   },
   tasks: (parameters: { limit?: number; offset?: number; status?: TaskStatus; task_type?: TaskType }, signal: AbortSignal) =>
     request<Page<TaskSummary>>({ url: '/api/v1/tasks', params: parameters, signal }),
+  deleteTask: (id: string, signal: AbortSignal) => request<void>({ url: `/api/v1/tasks/${encodeURIComponent(id)}`, method: 'DELETE', signal }),
   task: (id: string, signal: AbortSignal) => request<Task>({ url: `/api/v1/tasks/${encodeURIComponent(id)}`, signal }),
   createTask: (data: TaskCreate, key: string, signal: AbortSignal) =>
     request<TaskAccepted>({ url: '/api/v1/tasks', method: 'POST', data, headers: { 'Idempotency-Key': key }, signal }),

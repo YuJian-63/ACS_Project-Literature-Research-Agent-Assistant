@@ -1,10 +1,11 @@
-import { useLocale } from '../../i18n';
+import { t, useLocale } from '../../i18n';
 import type { PaperStatus, TaskStatus } from '../../api/types';
 import { paperStatusLabels, taskStatusLabels } from '../lib/format';
 
-export function StatusBadge({ status, kind = 'task' }: { status: TaskStatus | PaperStatus; kind?: 'task' | 'paper' }) {
+export function StatusBadge({ status, stage, kind = 'task' }: { status: TaskStatus | PaperStatus; stage?: string; kind?: 'task' | 'paper' }) {
   useLocale();
   const labels = kind === 'paper' ? paperStatusLabels() : taskStatusLabels();
-  const text = (labels as Record<string, string>)[status] || status;
-  return <span className={`status-badge status-${status}`}><span aria-hidden="true" className="status-dot" />{text}</span>;
+  const partial = kind === 'task' && status === 'succeeded' && stage === 'partial';
+  const text = partial ? t('部分完成') : (labels as Record<string, string>)[status] || status;
+  return <span className={`status-badge status-${partial ? 'partial' : status}`}><span aria-hidden="true" className="status-dot" />{text}</span>;
 }

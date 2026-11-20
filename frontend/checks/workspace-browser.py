@@ -76,10 +76,10 @@ def main():
         expect(page.locator('.comparison-section table tbody tr').first).to_contain_text(PAPERS[0]['title'])
         page.locator('.comparison-cell-trigger').first.click()
         expect(page.locator('.evidence-quote')).to_contain_text('paper 1')
-        page.get_by_role('tab', name='执行记录', exact=True).click()
-        expect(page.locator('.trace-panel')).to_be_visible()
+        expect(page.get_by_role('tab', name='执行记录', exact=True)).to_have_count(0)
+        expect(page.locator('.trace-panel, .stats-panel, .input-panel')).to_have_count(0)
         page.get_by_role('button', name='English', exact=True).click()
-        expect(page.get_by_role('tab', name='Execution events', exact=True)).to_be_visible()
+        expect(page.get_by_role('tab', name='Execution events', exact=True)).to_have_count(0)
         page.get_by_role('tab', name='Review', exact=True).click()
         expect(page.locator('.markdown')).to_contain_text('Repository context matters')
         page.reload()
@@ -106,7 +106,7 @@ def main():
             status['value']=value
             page.goto(BASE + '/tasks/' + TASK['id'])
             expect(page.locator('.task-overview .status-' + value)).to_be_visible()
-            expect(page.locator('.waiting-result')).to_be_visible()
+            expect(page.locator('.task-progress' if value == 'running' else '.waiting-panel')).to_be_visible()
         status['value'] = 'succeeded'
         TASK['task_type'] = 'summary'
         ARTIFACT.update({'task_type': 'summary', 'title': '论文摘要', 'citations': [], 'comparison_table': None})

@@ -1,9 +1,9 @@
 import json
 import math
-import re
 
 from app.research.retrieval import EvidenceChunk, build_citation_passages
 from app.research.review_protocol import analysis_messages, synthesis_messages, token_estimate
+from app.tasks.language import uses_english_labels
 
 POLICY_VERSION = "review-auto-v1"
 WORKFLOW_VERSION = "langgraph-review-v2"
@@ -32,7 +32,7 @@ def build_review_plan(papers: list[dict], groups: dict[str, list[EvidenceChunk]]
         raise ValueError("Review requires 2-20 distinct papers")
     if set(groups) != {paper["paper_id"] for paper in papers}:
         raise ValueError("Evidence groups do not match papers")
-    english = bool(re.search(r"\bEnglish\b|英文", question, re.IGNORECASE)) or not re.search(r"[\u3400-\u9fff]", question)
+    english = uses_english_labels(question)
     columns = [{"key": key, "label": label} for key, label in zip(
         ("objective", "method", "evaluation", "limitations"),
         ("Research objective", "Agent method", "Evaluation", "Limitations") if english else ("研究目标", "代理方法", "评估方式", "局限"), strict=True)]

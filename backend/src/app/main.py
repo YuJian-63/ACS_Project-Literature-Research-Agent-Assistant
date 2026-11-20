@@ -154,7 +154,7 @@ def create_app(settings: Settings | None = None, engine: Engine | None = None, *
     application.include_router(import_router)
     application.add_middleware(ErrorMiddleware)
     application.add_middleware(
-        CORSMiddleware, allow_origins=settings.cors_origins, allow_methods=["GET", "POST"],
+        CORSMiddleware, allow_origins=settings.cors_origins, allow_methods=["GET", "POST", "DELETE"],
         allow_credentials=True,
         allow_headers=["Content-Type", "Idempotency-Key", "X-CSRF-Token"],
         expose_headers=["X-Request-ID", "Location", "Idempotency-Replayed", "Retry-After"],

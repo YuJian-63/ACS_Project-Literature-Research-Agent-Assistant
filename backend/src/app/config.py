@@ -22,7 +22,24 @@ class Settings(BaseSettings):
     task_monitor_enabled: bool = True
     mock_step_delay_seconds: float = Field(default=0.5, ge=0, le=10, allow_inf_nan=False)
     parser_timeout_seconds: float = Field(default=120, ge=1, le=600, allow_inf_nan=False)
-    task_runner: Literal["mock", "langgraph"] = "mock"
+    task_runner: Literal["mock", "langgraph", "agent"] = "mock"
+    agent_dispatch_enabled: bool = False
+    agent_exchange_root: Path | None = None
+    agent_transport: Literal["manual", "local", "tacc"] = "manual"
+    agent_local_root: Path | None = None
+    agent_local_python: Path | None = None
+    agent_tacc_host: str | None = Field(default=None, pattern=r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
+    agent_tacc_helper: str | None = None
+    agent_tacc_config: str | None = None
+    agent_tacc_python: str = Field(default="python3", min_length=1, max_length=1024)
+    agent_transport_timeout_seconds: float = Field(default=30, ge=1, le=300, allow_inf_nan=False)
+    agent_retention_seconds: int = Field(default=604800, ge=86400, le=31536000)
+    agent_max_steps: int = Field(default=100, ge=1, le=100)
+    agent_timeout_seconds: int = Field(default=1800, ge=60, le=1800)
+    agent_output_tokens: int = Field(default=8192, ge=1024, le=32768)
+    agent_context_tokens: int = Field(default=32000, ge=4096, le=1000000)
+    agent_result_max_bytes: int = Field(default=16 * 1024 * 1024, ge=1024, le=64 * 1024 * 1024)
+    agent_poll_seconds: float = Field(default=2, ge=0.1, le=30, allow_inf_nan=False)
     llm_base_url: str | None = None
     llm_model_id: str | None = None
     llm_api_key: SecretStr | None = None
@@ -114,6 +131,20 @@ class Settings(BaseSettings):
     @property
     def real_runner_configured(self) -> bool:
         return bool(self.llm_base_url and self.llm_model_id and self.llm_api_key and self.llm_api_key.get_secret_value())
+
+    @field_validator("agent_exchange_root", "agent_local_root", "agent_local_python", "agent_tacc_host", "agent_tacc_helper", "agent_tacc_config", mode="before")
+    @classmethod
+    def empty_agent_optional_value(cls, value):
+        return None if value == "" else value
+
+    @property
+    def resolved_agent_exchange_root(self) -> Path:
+        value = self.agent_exchange_root
+        if value is None:
+            return self.storage_root / "agent-exchange"
+        if not value.is_absolute():
+            value = Path(__file__).resolve().parents[2] / value
+        return value.absolute()
 
     @field_validator("storage_root")
     @classmethod
