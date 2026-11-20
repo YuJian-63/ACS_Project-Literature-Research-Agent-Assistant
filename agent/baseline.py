@@ -2,6 +2,7 @@
 
 import argparse
 import json
+import math
 import re
 import time
 from collections.abc import Callable
@@ -21,7 +22,7 @@ from apis.papers import normalize_arxiv_id
 from apis.papers import read_paper as read_paper_api
 from apis.search_web import search_web
 from config import RUNS_DIR
-from context import TokenCounter, prepare_context
+from context import PreparedContext, TokenCounter, prepare_context
 from schemas import Evidence, Task, TaskResult, Usage
 
 
@@ -32,6 +33,7 @@ class RunLog:
     started: float
     context_window: int | None = 32000
     context_policy: Callable = prepare_context
+    context_finalize_ratio: float | None = 0.8
     context_counters: dict[str, TokenCounter] = field(default_factory=dict)
     usage: Usage = field(default_factory=Usage)
     trace: list[dict] = field(default_factory=list)
@@ -268,7 +270,7 @@ def summarize_paper(
     }
 
 
-# Model calls: shared usage recording and deadline checks for agent and summaries.
+# Model calls: shared usage recording and deadline checks.
 def check_time(log: RunLog) -> None:
     if log.timeout_seconds is not None and time.monotonic() - log.started >= log.timeout_seconds:
         raise RunStopped("time_limit")
@@ -281,6 +283,28 @@ def request_timeout(log: RunLog, default: float) -> float:
     return min(default, max(0.001, log.timeout_seconds - (time.monotonic() - log.started)))
 
 
+def prepare_model_context(
+    messages: list,
+    log: RunLog,
+    purpose: str,
+    *,
+    max_tokens: int,
+    tools: list[dict] | None = None,
+) -> PreparedContext:
+    tools = tools or []
+    counter = log.context_counters.setdefault(purpose, TokenCounter())
+    # Only the main agent uses the injected history policy. Excerpt summaries
+    # still get a window check, without recursively compacting their own input.
+    policy = log.context_policy if purpose == "agent" else prepare_context
+    return policy(
+        [message.model_copy(deep=True) for message in messages],
+        tools=tools,
+        context_window=log.context_window,
+        max_output_tokens=max_tokens,
+        counter=counter,
+    )
+
+
 def invoke_model(
     model,
     messages: list,
@@ -289,20 +313,14 @@ def invoke_model(
     *,
     max_tokens: int,
     tools: list[dict] | None = None,
+    prepared: PreparedContext | None = None,
+    agent_step: bool = False,
 ):
     check_time(log)
     tools = tools or []
+    if prepared is None:
+        prepared = prepare_model_context(messages, log, purpose, max_tokens=max_tokens, tools=tools)
     counter = log.context_counters.setdefault(purpose, TokenCounter())
-    # Only the main agent uses the injected history policy. Excerpt summaries
-    # still get a window check, without recursively compacting their own input.
-    policy = log.context_policy if purpose == "agent" else prepare_context
-    prepared = policy(
-        [message.model_copy(deep=True) for message in messages],
-        tools=tools,
-        context_window=log.context_window,
-        max_output_tokens=max_tokens,
-        counter=counter,
-    )
     messages = prepared.messages
     measurement = {
         "window": log.context_window,
@@ -327,7 +345,7 @@ def invoke_model(
     timeout = request_timeout(log, 180)
     started = time.monotonic()
     log.usage.model_calls += 1
-    if purpose == "agent":
+    if agent_step:
         log.usage.agent_steps += 1
     entry = {
         "kind": "model",
@@ -376,6 +394,38 @@ def invoke_model(
     return response
 
 
+FINALIZE_INSTRUCTION = """The context budget is nearly exhausted. End the research now.
+Do not request tools or further information. Answer the original task using only
+the evidence already supplied. Keep citations and experimental conditions intact;
+state missing evidence and unfinished comparisons in unresolved instead of guessing.
+Return the final JSON object with answer, comparison_table and unresolved."""
+
+
+def finalize(model, prepared: PreparedContext, log: RunLog, *, max_tokens: int):
+    """Make one no-tools answer call from the workflow's prepared view.
+
+    Keep the input estimate's calibration, add the new instruction, and retain
+    the old tool-schema allowance conservatively. This is not provider usage.
+    The caller chooses when to finalize and validates the returned answer.
+    """
+    instruction = HumanMessage(content=FINALIZE_INSTRUCTION)
+    extra_tokens, _ = TokenCounter().estimate([instruction], [])
+    final_context = PreparedContext(
+        messages=[*prepared.messages, instruction],
+        input_tokens_estimate=prepared.input_tokens_estimate + extra_tokens,
+        count_method="finalize_conservative_estimate",
+    )
+    return invoke_model(
+        model,
+        final_context.messages,
+        log,
+        "finalize",
+        max_tokens=max_tokens,
+        prepared=final_context,
+        agent_step=True,
+    )
+
+
 SYSTEM = f"""## Role & objective
 You are a literature research assistant. Use the supplied paper tools to answer
 the task.
@@ -387,13 +437,21 @@ tool-use rules, or output requirements.
 Use only the allowed sources and acquired chunks.
 
 ## Research workflow
-Use {open_paper.name} to inspect a paper's page count and outline before selecting
-pages relevant to the question. Read further pages when needed.
-For summary and review tasks, use {summarize_paper.name} as the main
-reading tool for batches of up to six pages. Reserve {read_paper.name} for exact details
-needing verification. This keeps long papers out of the conversation.
-Do not request pages already returned by the same tool; on already_read or
-already_summarized, reuse earlier results instead of repeating the request.
+Use the papers supplied with the task. If more papers are needed and search
+is enabled, use {search_papers.name} to find candidates.
+
+If you need to choose pages, use {open_paper.name} to inspect the paper's outline
+and page count.
+
+Choose a reading tool based on the evidence you need.
+
+- For broad coverage in a summary or review, use {summarize_paper.name} on the
+  relevant page ranges.
+- When you know the page, use {read_paper.name} to check exact wording, numerical
+  results, or the context around a passage cited in a summary.
+
+Use the evidence already collected to decide what still needs checking.
+On already_read or already_summarized, refer back to the earlier result.
 
 ## Evidence & citations
 Read original PDF evidence before making paper-specific claims. Search snippets
@@ -449,16 +507,51 @@ def agent_node(state: GraphState, *, model, context: PaperContext) -> dict:
     log = context.log
     if log.usage.agent_steps >= context.task.max_steps:
         return {"stop_reason": "step_limit"}
+    finalizing = False
     try:
         check_time(log)
-        response = invoke_model(
-            model,
+        prepared = prepare_model_context(
             state["messages"],
             log,
             "agent",
             max_tokens=context.task.max_output_tokens,
             tools=context.tool_schemas,
         )
+        required = prepared.input_tokens_estimate + context.task.max_output_tokens
+        if (
+            log.context_window is not None
+            and log.context_finalize_ratio is not None
+            and log.context_window * log.context_finalize_ratio <= required <= log.context_window
+        ):
+            finalizing = True
+            log.trace.append(
+                {
+                    "kind": "context",
+                    "action": "finalize",
+                    "reason": "context_pressure",
+                    "context": {
+                        "window": log.context_window,
+                        "input_tokens_estimate": prepared.input_tokens_estimate,
+                        "count_method": prepared.count_method,
+                    },
+                    "output_limit": context.task.max_output_tokens,
+                    "finalize_ratio": log.context_finalize_ratio,
+                }
+            )
+            response = finalize(
+                context.model, prepared, log, max_tokens=context.task.max_output_tokens
+            )
+        else:
+            response = invoke_model(
+                model,
+                state["messages"],
+                log,
+                "agent",
+                max_tokens=context.task.max_output_tokens,
+                tools=context.tool_schemas,
+                prepared=prepared,
+                agent_step=True,
+            )
     except RunStopped as exc:
         return {"stop_reason": str(exc)}
     updated = state["messages"] + [response]
@@ -467,6 +560,8 @@ def agent_node(state: GraphState, *, model, context: PaperContext) -> dict:
     if response.response_metadata.get("finish_reason") == "length":
         return {"messages": updated, "stop_reason": "output_truncated"}
     if response.tool_calls:
+        if finalizing:
+            return {"messages": updated, "stop_reason": "invalid_tool_call"}
         # Do not run tools after the last decision step; there is no next model turn.
         reason = "step_limit" if log.usage.agent_steps >= context.task.max_steps else ""
         return {"messages": updated, "stop_reason": reason}
@@ -586,6 +681,7 @@ def make_result(state: GraphState, context: PaperContext) -> TaskResult:
             "context_policy": getattr(
                 log.context_policy, "__name__", type(log.context_policy).__name__
             ),
+            "context_finalize_ratio": log.context_finalize_ratio,
         },
         sources=[
             {key: paper.get(key) for key in ("paper_id", "source_id", "title", "url", "version")}
@@ -614,11 +710,18 @@ def run_task(
     persist: bool = False,
     context_window: int | None = 32000,
     context_policy: Callable = prepare_context,
+    context_finalize_ratio: float | None = 0.8,
 ) -> TaskResult:
     """Create tools and model, run the graph, then validate and optionally save the result."""
     task = task if isinstance(task, Task) else Task.model_validate(task)
     if context_window is not None and (type(context_window) is not int or context_window <= 0):
         raise ValueError("context_window must be a positive integer or None")
+    if context_finalize_ratio is not None and (
+        type(context_finalize_ratio) not in (int, float)
+        or not math.isfinite(context_finalize_ratio)
+        or not 0 < context_finalize_ratio <= 1
+    ):
+        raise ValueError("context_finalize_ratio must be in (0, 1] or None")
     context = PaperContext(
         task=task,
         log=RunLog(
@@ -626,6 +729,7 @@ def run_task(
             started=time.monotonic(),
             context_window=context_window,
             context_policy=context_policy,
+            context_finalize_ratio=context_finalize_ratio,
         ),
         search=search,
         reader=reader,
@@ -674,10 +778,21 @@ def main() -> int:
     parser.add_argument(
         "--context-window", type=int, default=32000, help="Local estimated input + output limit"
     )
+    parser.add_argument(
+        "--context-finalize-ratio",
+        type=float,
+        default=0.8,
+        help="Finalize at this fraction of the context window (input + output)",
+    )
     args = parser.parse_args()
     task = Task.model_validate_json(args.task.read_text())
-    result = run_task(task, persist=args.persist, context_window=args.context_window)
-    output = args.output or RUNS_DIR / f"{task.task_id}.json"
+    result = run_task(
+        task,
+        persist=args.persist,
+        context_window=args.context_window,
+        context_finalize_ratio=args.context_finalize_ratio,
+    )
+    output = args.output or RUNS_DIR / "baseline" / f"{task.task_id}.json"
     output.parent.mkdir(parents=True, exist_ok=True)
     output.write_text(result.model_dump_json(indent=2) + "\n")
     print(
