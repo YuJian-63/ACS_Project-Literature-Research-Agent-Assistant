@@ -5,7 +5,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.db.models import Paper, PaperChunk
-from app.tasks.lifecycle import LEASE_SECONDS, database_time
+from app.db.leases import LEASE_SECONDS, database_time
 from app.papers.pdf_parser import ParseResult
 
 

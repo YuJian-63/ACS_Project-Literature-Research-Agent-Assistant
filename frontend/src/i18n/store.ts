@@ -1,7 +1,7 @@
 import { english, englishSingular } from './messages';
 
 export type Locale = 'zh-CN' | 'en-US';
-const storageKey = 'literature-ui-locale';
+const storageKey = 'literature-v3-ui-locale';
 const listeners = new Set<() => void>();
 const chinese = new Map(Object.entries(english).map(([source, translation]) => [translation, source]));
 

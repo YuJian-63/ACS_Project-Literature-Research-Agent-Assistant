@@ -15,7 +15,7 @@ from starlette.responses import StreamingResponse
 from app.api.pagination import Limit, Offset
 from app.api.schemas import Page, PaperResponse, PaperStatus
 from app.api.views import paper_view
-from app.db.models import Paper, PaperImport, PaperSource, TaskPaper
+from app.db.models import Paper, PaperImport, PaperSource, ResearchPaper
 from app.errors import APIError
 from app.papers.storage import controlled_path, remove_file, save_paper
 
@@ -95,7 +95,7 @@ def delete_paper(request: Request, paper_id: UUID, user: CurrentUser) -> None:
         paper = session.scalar(select(Paper).where(Paper.id == paper_id, Paper.user_id == user.id).with_for_update())
         if paper is None:
             raise APIError(404, "PAPER_NOT_FOUND", "论文不存在")
-        if session.scalar(select(TaskPaper.paper_id).where(TaskPaper.paper_id == paper_id).limit(1)) is not None:
+        if session.scalar(select(ResearchPaper.paper_id).where(ResearchPaper.paper_id == paper_id).limit(1)) is not None:
             raise APIError(409, "PAPER_IN_USE", "论文已被研究任务引用，无法删除")
         if paper.status == "processing":
             raise APIError(409, "PAPER_PROCESSING", "论文正在解析，请稍后再删除")

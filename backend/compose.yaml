@@ -1,20 +1,20 @@
+name: literature-v3
 services:
   postgres:
     image: postgres:17
     environment:
-      POSTGRES_DB: ${POSTGRES_DB:-literature}
-      POSTGRES_USER: ${POSTGRES_USER:-literature}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
+      POSTGRES_DB: literature_v3
+      POSTGRES_USER: literature_v3
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set the v3-only POSTGRES_PASSWORD in backend/.env}
     ports:
-      - "127.0.0.1:${POSTGRES_PORT:-5432}:5432"
+      - "127.0.0.1:55435:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U \"$$POSTGRES_USER\" -d \"$$POSTGRES_DB\""]
-      interval: 5s
+      test: ["CMD-SHELL", "pg_isready -U literature_v3 -d literature_v3"]
+      interval: 3s
       timeout: 5s
-      retries: 10
-      start_period: 5s
-
+      retries: 20
 volumes:
   postgres_data:
+    name: literature_v3_postgres_data

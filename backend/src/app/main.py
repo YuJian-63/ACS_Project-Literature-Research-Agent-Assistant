@@ -19,7 +19,6 @@ from app.auth.dependencies import AuthResponseMiddleware
 from app.config import Settings
 from app.db.session import create_database_engine, create_session_factory
 from app.errors import APIError
-from app.tasks.lifecycle import TaskMonitor
 from app.papers.storage import MAX_FILE_BYTES
 
 logger = logging.getLogger(__name__)
@@ -100,21 +99,16 @@ def create_app(settings: Settings | None = None, engine: Engine | None = None, *
             application.state.arxiv_client = ArxivClient(SupervisedArxivTransport(
                 settings.arxiv_contact_email, lambda: source_permit(application.state.sessions),
             ))
-        monitor = TaskMonitor(application.state.sessions) if settings.task_monitor_enabled else None
         try:
-            if monitor is not None:
-                await run_in_threadpool(monitor.start)
             yield
         finally:
-            if monitor is not None and monitor.thread.is_alive():
-                await run_in_threadpool(monitor.close)
             if engine is None:
                 await run_in_threadpool(database.dispose)
 
     application = FastAPI(title="Literature Research Agent Assistant", version="0.1.0", lifespan=lifespan)
     application.state.settings = settings
     application.state.arxiv_cache = SearchCache()
-    application.state.migration_heads = set(ScriptDirectory(str(Path(__file__).resolve().parents[2] / "alembic")).get_heads())
+    application.state.migration_heads = set(ScriptDirectory(str(Path(__file__).resolve().parents[2] / "alembic_v3")).get_heads())
 
     @application.exception_handler(APIError)
     async def api_error_handler(request: Request, error: APIError):
@@ -154,7 +148,7 @@ def create_app(settings: Settings | None = None, engine: Engine | None = None, *
     application.include_router(import_router)
     application.add_middleware(ErrorMiddleware)
     application.add_middleware(
-        CORSMiddleware, allow_origins=settings.cors_origins, allow_methods=["GET", "POST"],
+        CORSMiddleware, allow_origins=settings.cors_origins, allow_methods=["GET", "POST", "DELETE"],
         allow_credentials=True,
         allow_headers=["Content-Type", "Idempotency-Key", "X-CSRF-Token"],
         expose_headers=["X-Request-ID", "Location", "Idempotency-Replayed", "Retry-After"],

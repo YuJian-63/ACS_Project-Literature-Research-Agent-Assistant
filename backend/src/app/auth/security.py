@@ -86,7 +86,8 @@ def csrf_token(settings, raw_session: str) -> str:
 
 
 def cookie_name(settings) -> str:
-    return "__Host-lra_session" if settings.auth_cookie_secure else "lra_dev_session"
+    name = getattr(settings, "auth_cookie_name", "lra_v3_session")
+    return "__Host-" + name if settings.auth_cookie_secure else name
 
 
 def unavailable() -> APIError:

@@ -15,7 +15,7 @@ from sqlalchemy.orm import Session, sessionmaker
 from app.config import Settings
 from app.db.models import Paper
 from app.db.session import create_database_engine, create_session_factory
-from app.tasks.lifecycle import HEARTBEAT_SECONDS, MONITOR_SECONDS
+from app.db.leases import HEARTBEAT_SECONDS, MONITOR_SECONDS
 from app.papers.lifecycle import claim_parse, fail_parse, finish_parse, reap_parses, renew_parse
 from app.papers.pdf_parser import MAX_TEXT_BYTES, ParseFailure, ParseResult
 

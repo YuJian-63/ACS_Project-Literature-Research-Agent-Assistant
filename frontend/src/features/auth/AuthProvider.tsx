@@ -11,7 +11,7 @@ interface AuthContextValue extends AuthState {
   reload: () => void;
 }
 const AuthContext = createContext<AuthContextValue | null>(null);
-const channelName = 'literature-auth';
+const channelName = 'literature-v3-auth';
 
 export default function AuthProvider({ children }: { children: ReactNode }) {
   const [state, setState] = useState<AuthState>({ user: null, status: 'loading', generation: 0 });

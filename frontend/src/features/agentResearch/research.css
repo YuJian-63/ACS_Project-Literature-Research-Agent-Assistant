@@ -1,0 +1,65 @@
+.research-badge { margin: 0; border-color: var(--line); background: #edf5f1; color: var(--accent); }
+.research-breadcrumb-separator { color: #b4c4be; }
+.research-caption { margin: -12px 0 26px; font-size: 12px; color: var(--muted); line-height: 1.8; }
+.research-result-link { white-space: nowrap; font-size: 13px; }
+.research-creation-layout { display: grid; grid-template-columns: minmax(0,1fr) 280px; gap: 32px; align-items: start; }
+.research-section-label { text-transform: uppercase; color: var(--accent); letter-spacing: .08em; font-size: 11px; font-weight: 600; margin-bottom: 12px; }
+.research-question-panel { padding: 28px 30px; }
+.research-question-panel h2 { font: 600 24px/1.6 var(--serif); margin: 0 0 6px; }
+.research-question-panel > p, .research-paper-panel .panel-heading p { color: var(--muted); font-size: 13px; line-height: 1.8; }
+.research-question-panel .ant-form-item { margin: 24px 0 12px; }
+.research-question-panel textarea { line-height: 1.9; padding: 14px 16px; }
+.research-example-question { border: 0; background: none; padding: 8px 0; color: var(--accent); font-size: 12px; cursor: pointer; }
+.research-paper-panel { margin-top: 24px; padding: 28px 30px; }
+.research-paper-panel .panel-heading h2 { margin: 0; font-size: 18px; }
+.research-paper-search { max-width: 360px; margin: 0 0 20px; }
+.research-paper-title strong { display: block; font-weight: 500; color: var(--ink); font-size: 14px; }
+.research-paper-title > span { display: block; color: var(--muted); margin-top: 8px; font-size: 11px; }
+.research-submit-panel { position: sticky; top: 24px; padding: 26px; background: #eaf2ee; border-radius: 6px; border: 1px solid var(--line); }
+.research-submit-panel h2 { font: 600 22px/1.5 var(--serif); margin: 6px 0 16px; }
+.research-submit-panel > p { color: var(--muted); font-size: 13px; line-height: 1.9; white-space: pre-wrap; overflow-wrap: anywhere; }
+.research-submit-count { border-top: 1px solid #d1dfd7; margin-top: 24px; padding-top: 22px; display: flex; gap: 10px; align-items: baseline; }
+.research-submit-count .anticon { color: var(--accent); }
+.research-submit-count strong { font: 600 30px/1 var(--serif); }
+.research-submit-count > span:last-child { color: var(--muted); font-size: 12px; }
+.research-submit-panel ul { padding-left: 17px; margin: 18px 0; font-size: 12px; line-height: 1.8; color: var(--muted); }
+.research-submit-panel .ant-btn { margin-top: 26px; }
+.research-submit-panel > small { display: block; text-align: center; color: var(--muted); font-size: 10px; line-height: 1.8; margin-top: 12px; }
+.research-result-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 28px; }
+.research-result-toolbar .back-link { margin: 0; }
+.research-sample-select { display: flex; align-items: center; gap: 12px; color: var(--muted); font-size: 12px; }
+.research-sample-select .ant-select { min-width: 205px; }
+.research-result-tabs > .ant-tabs-nav { margin-bottom: 0; }
+.research-result-tabs .ant-tabs-tab { padding-block: 18px; font-size: 15px; }
+.research-result-tabs .ant-tabs-content-holder { padding: 30px 36px; background: white; border: 1px solid var(--line); border-top: 0; border-radius: 0 0 5px 5px; }
+.research-markdown { max-width: 100%; margin: 0; }
+.research-markdown > :first-child { margin-top: 0; }
+.research-markdown h2 { font-size: 24px; }
+.research-markdown table { min-width: 560px; width: 100%; font-size: 13px; }
+.research-markdown { overflow-x: auto; }
+.research-markdown .citation-trigger { white-space: nowrap; }
+.research-unresolved { max-width: 780px; }
+.research-unresolved > p { color: var(--muted); line-height: 1.9; }
+.research-unresolved li { line-height: 1.9; margin: 18px 0; padding-left: 8px; }
+.research-sources-view h2 { font-size: 19px; margin: 4px 0 20px; }
+.research-sources-view h2:not(:first-child) { margin-top: 34px; }
+.research-citation-card { display: flex; width: 100%; gap: 18px; border: 1px solid var(--line); padding: 20px 22px; background: #fff; text-align: left; border-radius: 4px; margin-bottom: 14px; color: var(--ink); cursor: pointer; }
+.research-citation-card:hover { background: #f5f9f7; border-color: #98b5a7; }
+.research-citation-card .citation-chip { align-self: flex-start; }
+.research-citation-card strong { font-weight: 500; font-size: 15px; }
+.research-citation-card p { font-size: 13px; line-height: 1.9; color: var(--muted); margin: 10px 0; }
+.research-citation-card small { color: var(--accent); }
+.research-source-list { list-style: none; padding: 0; }
+.research-source-list li { display: flex; align-items: center; gap: 16px; padding: 18px 0; border-top: 1px solid var(--line); }
+.research-source-list small { display: block; color: var(--muted); margin-top: 6px; }
+.research-pdf-placeholder { margin-top: 20px; padding: 38px 22px; background: var(--bg); border: 1px dashed #a5bbb0; text-align: center; }
+.research-pdf-placeholder > .anticon { display: block; font-size: 40px; color: var(--accent); margin-bottom: 18px; }
+.research-pdf-placeholder p { color: var(--muted); font-size: 12px; line-height: 1.8; }
+@media(max-width:1100px) { .research-creation-layout { grid-template-columns: minmax(0,1fr) 240px; gap: 22px; } .research-submit-panel { padding: 22px; } }
+@media(max-width:900px) { .research-creation-layout { grid-template-columns: minmax(0,1fr); } .research-submit-panel { position: static; } .research-submit-panel > p { display: none; } .research-submit-panel .ant-btn { margin-top: 18px; } }
+@media(max-width:600px) { .research-question-panel,.research-paper-panel { padding: 22px 18px; } .research-result-toolbar { align-items: flex-start; flex-direction: column; } .research-result-tabs .ant-tabs-content-holder { padding: 24px 18px; } .research-result-tabs .ant-tabs-tab { font-size: 13px; } .research-caption { margin-top: 0; } .research-badge { font-size: 10px; } .research-citation-card { padding: 16px; gap: 12px; } }
+
+.research-sample-select select { min-width: 205px; background: white; color: var(--ink); border: 1px solid var(--line); border-radius: 4px; padding: 8px 12px; font: inherit; }
+.research-result-tabs > .ant-tabs-nav .ant-tabs-tab { font-size: 16px; padding-block: 18px; }
+.research-markdown .citation-trigger { font-size: 12px; }
+@media(max-width:600px) { .research-result-tabs > .ant-tabs-nav .ant-tabs-tab { font-size: 14px; } }

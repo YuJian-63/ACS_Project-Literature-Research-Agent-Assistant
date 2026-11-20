@@ -53,7 +53,7 @@ def main():
         browser = driver.chromium.launch(headless=True, **options)
         context = browser.new_context(viewport={'width': 1440, 'height': 1080}, reduced_motion='reduce')
         context.add_init_script("""
-            localStorage.setItem('literature-ui-locale', 'en-US');
+            localStorage.setItem('literature-v3-ui-locale', 'en-US');
             window.revokedDocuments = [];
             const originalRevoke = URL.revokeObjectURL.bind(URL);
             URL.revokeObjectURL = (url) => { window.revokedDocuments.push(url); originalRevoke(url); };

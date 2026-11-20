@@ -11,9 +11,9 @@ import AuthPage from '../features/auth/pages/AuthPage';
 
 const PapersPage = lazy(() => import('../features/papers/pages/PapersPage'));
 const SearchPapersPage = lazy(() => import('../features/search/pages/SearchPapersPage'));
-const NewTaskPage = lazy(() => import('../features/research/pages/NewTaskPage'));
-const TasksPage = lazy(() => import('../features/research/pages/TasksPage'));
-const TaskDetailPage = lazy(() => import('../features/research/pages/TaskDetailPage'));
+const NewResearchPage = lazy(() => import('../features/agentResearch/NewResearchPage'));
+const AgentResultPage = lazy(() => import('../features/agentResearch/ResultPage'));
+const TasksPage = lazy(() => import('../features/agentResearch/RecordsPage'));
 
 function AppFailure() {
   useLocale();
@@ -39,10 +39,10 @@ function Workspace() {
   const { user } = useAuth();
   const { pathname } = useLocation();
   const [sidebarCollapsed, setSidebarCollapsed] = useState(() => {
-    try { return localStorage.getItem('literature-sidebar-collapsed') === '1'; } catch { return false; }
+    try { return localStorage.getItem('literature-v3-sidebar-collapsed') === '1'; } catch { return false; }
   });
   useEffect(() => {
-    try { localStorage.setItem('literature-sidebar-collapsed', sidebarCollapsed ? '1' : '0'); } catch { /* Preference storage is optional. */ }
+    try { localStorage.setItem('literature-v3-sidebar-collapsed', sidebarCollapsed ? '1' : '0'); } catch { /* Preference storage is optional. */ }
   }, [sidebarCollapsed]);
   const searchActive = pathname === '/papers/search';
   const [searchVisited, setSearchVisited] = useState(searchActive);
@@ -65,8 +65,9 @@ function Workspace() {
         <Route path="/papers" element={<PapersPage />} />
         <Route path="/papers/search" element={null} />
         <Route path="/tasks" element={<TasksPage />} />
-        <Route path="/tasks/new" element={<NewTaskPage />} />
-        <Route path="/tasks/:taskId" element={<TaskDetailPage />} />
+        <Route path="/tasks/new" element={<NewResearchPage />} />
+        <Route path="/tasks/preview" element={<Navigate to="/tasks" replace />} />
+        <Route path="/tasks/:taskId" element={<AgentResultPage />} />
         <Route path="/account/password" element={<AuthPage />} />
         <Route path="*" element={<Result status="404" title={t('页面不存在')} subTitle={t('你可以回到论文库，或从任务列表重新打开研究任务。')} extra={<Link to="/papers"><Button type="primary">{t('返回论文库')}</Button></Link>} />} />
       </Routes></Suspense></main>

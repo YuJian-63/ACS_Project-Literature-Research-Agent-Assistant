@@ -15,7 +15,7 @@ from pydantic import SecretStr
 
 def settings(**overrides):
     values = dict(
-        frontend_public_url="http://localhost:5173", auth_cookie_secure=False,
+        frontend_public_url="http://localhost:5175", auth_cookie_secure=False,
         auth_session_ttl_seconds=604800, auth_verify_ttl_seconds=86400,
         auth_reset_ttl_seconds=1800, auth_rate_key=SecretStr("test-rate-key-" * 4),
         auth_csrf_key=SecretStr("test-csrf-key-" * 4), auth_configured=True,
@@ -29,14 +29,14 @@ def settings(**overrides):
 
 class SecurityTests(unittest.TestCase):
     def test_database_harness_refuses_acceptance_and_nonlocal_targets(self):
-        for database in ("auth_tests", "auth_tests_" + "a" * 32):
+        for database in ("literature_v3_test_auth", "literature_v3_test_auth_" + "a" * 32):
             self.assertTrue(isolated_postgres_target("postgresql+psycopg://localhost/" + database))
         for url in ("postgresql://localhost/literature_acceptance",
-                    "postgresql://example.com/auth_tests", "sqlite:///auth_tests",
-                    "postgresql://localhost/auth_tests_acceptance", "invalid",
-                    "postgresql://localhost/auth_tests?dbname=literature_acceptance",
-                    "postgresql://localhost/auth_tests?host=example.com",
-                    "postgresql://localhost/auth_tests?service=acceptance"):
+                    "postgresql://example.com/literature_v3_test_auth", "sqlite:///literature_v3_test_auth",
+                    "postgresql://localhost/literature_v3_test_auth_acceptance", "invalid",
+                    "postgresql://localhost/literature_v3_test_auth?dbname=literature_acceptance",
+                    "postgresql://localhost/literature_v3_test_auth?host=example.com",
+                    "postgresql://localhost/literature_v3_test_auth?service=acceptance"):
             with self.subTest(url=url):
                 self.assertFalse(isolated_postgres_target(url))
 
@@ -143,7 +143,7 @@ class SecurityTests(unittest.TestCase):
         from app.errors import APIError
         app = FastAPI()
         app.state.settings = settings()
-        for origin in (None, "null", "http://localhost:5173.evil.invalid", "http://localhost:5173/"):
+        for origin in (None, "null", "http://localhost:5175.evil.invalid", "http://localhost:5175/"):
             headers = [(b"x-forwarded-for", b"203.0.113.5")]
             if origin is not None:
                 headers.append((b"origin", origin.encode()))
@@ -539,18 +539,18 @@ class AuthBehaviorTests(unittest.TestCase):
             return {"id": str(user.id)}
         with TestClient(app) as client:
             client.cookies.set(cookie_name(self.settings), first)
-            headers = {"Origin": "http://localhost:5173", "X-CSRF-Token": csrf_token(self.settings, second)}
+            headers = {"Origin": "http://localhost:5175", "X-CSRF-Token": csrf_token(self.settings, second)}
             self.assertEqual(client.post("/api/v1/private", headers=headers).status_code, 403)
             headers["X-CSRF-Token"] = csrf_token(self.settings, first)
             self.assertEqual(client.post("/api/v1/private", headers=headers).status_code, 200)
             headers["Origin"] = "http://attacker.invalid"
-            headers["X-Forwarded-Host"] = "localhost:5173"
+            headers["X-Forwarded-Host"] = "localhost:5175"
             denied = client.post("/api/v1/private", headers=headers)
             self.assertEqual(denied.status_code, 403)
             self.assertEqual(denied.headers["cache-control"], "no-store")
             with self.sessions.begin() as session:
                 session.get(User, user.id).auth_version += 1
-            headers["Origin"] = "http://localhost:5173"
+            headers["Origin"] = "http://localhost:5175"
             self.assertEqual(client.post("/api/v1/private", headers=headers).status_code, 401)
 
     def test_auth_validation_errors_never_echo_passwords_or_tokens(self):
@@ -568,7 +568,7 @@ class AuthBehaviorTests(unittest.TestCase):
         async def errors(request, error):
             return JSONResponse({"error": error.error}, status_code=error.status_code)
         with TestClient(app) as client:
-            headers = {"Origin": "http://localhost:5173"}
+            headers = {"Origin": "http://localhost:5175"}
             secret = "credential-must-never-appear"
             invalid = client.post("/api/v1/auth/register", headers=headers,
                                   json={"username": "admin", "email": "bad", "password": secret})
@@ -638,7 +638,7 @@ class AuthBehaviorTests(unittest.TestCase):
         with TestClient(app) as client:
             data = {"username": "Alice", "password": self.password}
             self.assertEqual(client.post("/api/v1/auth/login", json=data).status_code, 403)
-            headers = {"Origin": "http://localhost:5173"}
+            headers = {"Origin": "http://localhost:5175"}
             self.assertEqual(client.post("/api/v1/auth/login", data=data, headers=headers).status_code, 415)
             self.assertEqual(client.post("/api/v1/auth/login", json=data, headers={"Origin": "http://evil.invalid"}).status_code, 403)
             login = client.post("/api/v1/auth/login", json=data, headers=headers)
@@ -798,12 +798,12 @@ def isolated_postgres_target(value):
         return (target.drivername in {"postgresql", "postgresql+psycopg"}
                 and target.host in {"localhost", "127.0.0.1", "::1"}
                 and not {key.lower() for key in target.query}.intersection({"host", "hostaddr", "dbname", "service"})
-                and bool(re.fullmatch(r"auth_tests(?:_[0-9a-f]{32})?", target.database or "")))
+                and bool(re.fullmatch(r"literature_v3_test_auth(?:_[0-9a-f]{32})?", target.database or "")))
     except (ArgumentError, TypeError, ValueError):
         return False
 
 
-@unittest.skipUnless(POSTGRES_URL, "Set AUTH_TEST_DATABASE_URL to an isolated local auth_tests database")
+@unittest.skipUnless(POSTGRES_URL, "Set AUTH_TEST_DATABASE_URL to an isolated local literature_v3_test_auth database")
 class AuthPostgresTests(AuthBehaviorTests):
     def setUp(self):
         from sqlalchemy import MetaData, create_engine, text
@@ -811,7 +811,7 @@ class AuthPostgresTests(AuthBehaviorTests):
         from app.auth.service import AuthService
         from app.db.models import AuthEmailToken, AuthMailOutbox, AuthRateBucket, AuthSession, User
         if not isolated_postgres_target(POSTGRES_URL):
-            raise RuntimeError("Refused: authentication tests require the local isolated auth_tests database")
+            raise RuntimeError("Refused: authentication tests require the local isolated literature_v3_test_auth database")
         self.models = (User, AuthSession, AuthEmailToken, AuthMailOutbox, AuthRateBucket)
         self.schema = "auth_test_" + uuid4().hex
         self.engine = create_engine(POSTGRES_URL, execution_options={"schema_translate_map": {None: self.schema}})
@@ -1007,7 +1007,7 @@ def run_postgres_tests():
     from app.config import Settings
     admin = None
     created = False
-    database = "auth_tests_" + uuid4().hex
+    database = "literature_v3_test_auth_" + uuid4().hex
     try:
         base = make_url(Settings().database_url.get_secret_value())
         target = base.set(database=database)
@@ -1057,7 +1057,7 @@ const { PGLiteSocketServer } = require(path.join(packages, '@electric-sql', 'pgl
     console.log('Isolated PostgreSQL engine:', (await database.query('SELECT version()')).rows[0].version);
     await new Promise((resolve, reject) => {
       const child = spawn(process.argv[2], ['-B', process.argv[1], '-v'], {
-        env: { ...process.env, PYTHONPATH: path.resolve('backend/src'), AUTH_TEST_DATABASE_URL: 'postgresql+psycopg://postgres@' + server.getServerConn() + '/auth_tests?sslmode=disable' },
+        env: { ...process.env, PYTHONPATH: path.resolve('backend/src'), AUTH_TEST_DATABASE_URL: 'postgresql+psycopg://postgres@' + server.getServerConn() + '/literature_v3_test_auth?sslmode=disable' },
         stdio: 'inherit', windowsHide: true, timeout: 90000,
       });
       child.once('error', reject);

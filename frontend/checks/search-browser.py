@@ -16,7 +16,7 @@ def main():
     with sync_playwright() as driver:
         browser = driver.chromium.launch(headless=True)
         context = browser.new_context(viewport={'width': 1440, 'height': 1000}, reduced_motion='reduce')
-        context.add_init_script("localStorage.setItem('literature-ui-locale', 'en-US')")
+        context.add_init_script("localStorage.setItem('literature-v3-ui-locale', 'en-US')")
         requests, errors, external = [], [], []
         state = {'fail': False, 'empty': False, 'total': 1500}
 
