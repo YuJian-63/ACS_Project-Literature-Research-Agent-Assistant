@@ -1,10 +1,10 @@
 # Agent Baseline 输入输出接口 v1
 
-更新：2026-11-17。依据当前 `agent/schemas.py`、`agent/baseline.py`、`agent/context.py` 和 `agent/apis/papers.py` 整理。
+更新：2026-11-20。依据当前 `agent/schemas.py`、`agent/baseline.py`、`agent/context.py` 和 `agent/apis/papers.py` 整理。
 
 本文约定 Agent 的任务输入与结果输出。当前提供 Python 函数和本地 CLI，跨模块调用、传输及部署方式尚未联调；本文不定义 HTTP 路由。
 
-Agent 支持可选的 Neon 持久化：`persist=false`（默认）不写入数据库；`persist=true` 保存论文和运行结果。`persist`、`context_window` 和 `context_policy` 属于运行参数，不放在任务输入 JSON 中，调用方式见第 4 节。
+Agent 支持可选的 Neon 持久化：`persist=false`（默认）不写入数据库；`persist=true` 保存论文和运行结果。`persist`、`context_window`、`context_policy` 和 `context_finalize_ratio` 属于运行参数，不放在任务输入 JSON 中，调用方式见第 4 节。
 
 ## 1. 输入
 
@@ -44,12 +44,13 @@ Agent 支持可选的 Neon 持久化：`persist=false`（默认）不写入数�
 
 执行参数含义：
 
-- `max_steps` 包含最终回答所在轮；摘要工具内部的模型调用不占主 agent 轮数，但计入 `usage.model_calls`。一轮可请求多个工具，当前按返回顺序串行执行。
+- `max_steps` 包含自然最终回答和上下文压力收尾所在轮；摘要工具内部的模型调用不占主 agent 轮数，但计入 `usage.model_calls`。一轮可请求多个工具，当前按返回顺序串行执行。
 - 达到轮数或时间上限直接停止，不追加最终回答调用。最后一轮若仍请求工具，该轮工具不会执行。
 - 时间限制通过调用前后检查及收紧单次请求超时实现，不是到点强杀。`timeout_seconds=null` 不取消各适配器的单次请求超时。
 - 摘要内部每次模型调用的输出上限为 `min(1200, max_output_tokens)`。
 - 当前不设置独立的工具调用次数上限或累计 token 预算。运行参数 `context_window` 默认 `32000`；主模型和摘要调用前，估算输入加本次输出额度超过窗口则停止为 `context_limit`，不发起该次模型调用。服务端可识别的容量错误也记录为 `context_limit`。
-- 默认 `prepare_context` 保留完整历史，不自动压缩或追加收尾调用，也不根据连续无进展强制生成答案。它不额外调用模型；本地容量拦截不增加 `usage.model_calls` 或 `usage.agent_steps`。
+- 默认 `prepare_context` 保留完整历史，自身不调用模型。主循环准备一次输入后，若 `input_tokens_estimate + max_output_tokens >= context_window * context_finalize_ratio` 且未超过硬窗口，改为一次无工具收尾；比例默认 `0.8`。收尾在准备后的视图追加作答指令，再做硬容量检查，基于已有证据回答并说明未解决项。
+- 收尾只由上下文压力触发，不因最后一轮、剩余时间或连续无进展提前触发；原有轮数和时间硬限制仍生效。摘要不触发收尾。已超过硬窗口时直接停止，不尝试收尾；超限或失败不压缩、不裁剪、不循环重试。本地容量拦截不增加 `usage.model_calls/agent_steps`，实际收尾调用计入两项及 API 用量。
 
 最小输入：
 
@@ -122,7 +123,7 @@ Agent 支持可选的 Neon 持久化：`persist=false`（默认）不写入数�
 | `stop_reason` | string | 本次运行的最终停止原因，见第 3 节 |
 | `usage` | object | 主 agent 轮数、调用次数、token 消耗与执行耗时 |
 | `sources` | object[] | 实际获取的论文元数据，按 `source_id` 去重 |
-| `trace` | object[] | 本次运行的模型、工具及本地上下文拦截记录 |
+| `trace` | object[] | 本次运行的模型、工具及本地上下文控制记录 |
 | `errors` | object[] | 错误摘要，每项包含 `stage` 和 `type` |
 | `configuration` | object | 本次运行采用的完整任务、模型及上下文配置 |
 
@@ -139,7 +140,7 @@ Agent 支持可选的 Neon 持久化：`persist=false`（默认）不写入数�
 
 | 字段 | 含义 |
 |---|---|
-| `agent_steps` | 主 agent 模型调用次数，包含生成最终回答的调用 |
+| `agent_steps` | 主 agent 模型调用次数，包含自然最终回答和上下文压力收尾 |
 | `model_calls` | 所有模型调用次数，包含主 agent 和工具内部摘要调用 |
 | `tool_calls` | 实际开始处理的工具调用次数，包含参数错误等失败尝试 |
 | `input_tokens` / `output_tokens` / `total_tokens` | 所有模型调用的累计 API token 统计，可为 `null` |
@@ -234,18 +235,24 @@ Agent 支持可选的 Neon 持久化：`persist=false`（默认）不写入数�
 
 模型记录：
 
-- `purpose`：`agent` 表示主循环，包含最终回答调用；`chunk_summary` 表示工具内部的分块摘要调用。
+- `purpose`：`agent` 表示普通主循环，包含自然最终回答；`chunk_summary` 表示工具内部的分块摘要；`finalize` 表示上下文压力触发的一次无工具收尾。
 - `messages` 和 `response` 是 LangChain 消息对象的序列化结果，不是供应商原始 HTTP 请求和响应。`messages` 记录准备后实际发送的输入视图；默认策略保留此前消息和工具结果，自定义主历史策略可返回不同视图。
 - 初始 human message 包含任务 JSON：`task_id`、`question`、`sources`、`allow_search`、`max_papers`。`question` 原样传入主模型；程序不按任务类型分流。
 - `max_steps`、`timeout_seconds`、`max_output_tokens` 不进入该任务消息；补齐默认值的完整任务保存在 `configuration.task`。
 - 分块摘要调用的 human message 只包含原始 `question` 和本批 `chunks`。
+- 收尾复用主循环已准备的输入视图，再追加基于已有证据作答的指令，不重新运行自定义 `context_policy`，不提供工具。
 - `output_limit` 是本次模型调用配置的最大输出 token 数；`response.usage_metadata` 是本次 API 返回的用量，可能缺失。
-- `context` 包含运行窗口 `window`（可为 `null`）、本次估算输入 `input_tokens_estimate` 和计数方式 `count_method`。默认方式为 `heuristic` 或 `usage_anchored_estimate`，均不是精确 tokenizer 计数。
+- `context` 包含运行窗口 `window`（可为 `null`）、本次估算输入 `input_tokens_estimate` 和计数方式 `count_method`。普通调用为 `heuristic` 或 `usage_anchored_estimate`，收尾为 `finalize_conservative_estimate`，均不是精确 tokenizer 计数。
 - 模型调用失败时，保留 `kind`、`purpose`、`output_limit`、`context`、`messages` 和 `elapsed_seconds`，以 `error` 记录异常类型，不包含 `response`。
 
 默认计数先按序列化请求中的 ASCII 字符数 / 3、非 ASCII 字符数 × 2，加消息包装与工具定义估算。已有 API `input_tokens` 且历史前缀、工具定义均匹配时，改用该输入用量加新增消息估算；否则回退为 `heuristic`。主 agent 与摘要分别维护计数锚点。估算仅用于本地容量检查，不替代 API usage；实际 TACC 窗口和 tokenizer 仍待对齐。
 
-本地容量拦截记录使用 `kind="context"`，包含 `purpose`、`context`、`output_limit`、`stop_reason="context_limit"` 和准备后的 `messages`；没有 `response` 或模型调用耗时。它表示请求尚未发出，与 API 返回上下文超限时的失败 `kind="model"` 记录不同。
+收尾不对完整输入重新计数：沿用主循环准备后的输入估算，加新增作答指令估算，并保留原工具定义的估算额度；实际模型请求不带工具。`finalize_conservative_estimate` 表示这种保守计算方式，不保证数学上界，不补入 API usage。调用前仍检查该估算加输出额度是否超过硬窗口。
+
+`kind="context"` 有两类事件，均不是模型调用记录：
+
+- 硬容量拦截包含 `purpose`、`context`、`output_limit`、`stop_reason="context_limit"` 和准备后的 `messages`；没有 `response` 或模型调用耗时。请求尚未发出，与 API 返回上下文超限时的失败 `kind="model"` 记录不同。
+- 收尾触发包含 `action="finalize"`、`reason="context_pressure"`、准备后输入的 `context`、`output_limit` 和阈值 `finalize_ratio`；实际收尾调用另记为 `kind="model", purpose="finalize"`。触发原因不替代最终 `stop_reason`：回答仍经原有解析、引用与未解决项检查，可能为 `completed`、`partial` 或错误状态。
 
 工具记录：
 
@@ -266,7 +273,7 @@ Agent 支持可选的 Neon 持久化：`persist=false`（默认）不写入数�
 
 记录不一定按 model/tool 两条交替：一次摘要工具内部的 `chunk_summary` 模型记录会先追加，再追加外层 `summarize_paper` 工具记录。工具耗时包含其内部模型调用，不能把所有 trace 耗时相加当作任务总耗时。
 
-后端可将 `trace` 整体作为 JSON 保存；当前随最终结果一次返回，不提供进度事件流。当前不产生 `purpose="final"`、上下文压缩或 `no_progress` 控制记录。
+后端可将 `trace` 整体作为 JSON 保存；当前随最终结果一次返回，不提供进度事件流。当前收尾使用 `purpose="finalize"`，不产生上下文压缩或 `no_progress` 控制记录。
 
 ### 2.2 运行配置 `configuration`
 
@@ -277,8 +284,9 @@ Agent 支持可选的 Neon 持久化：`persist=false`（默认）不写入数�
 | `temperature` | 实际使用的温度参数；未取得时为 `null` |
 | `context_window` | 本地估算输入加输出上限，默认 `32000`；`null` 表示关闭本地上限 |
 | `context_policy` | 主 agent 使用的策略函数名，默认 `"prepare_context"`；可调用对象无函数名时记录类名 |
+| `context_finalize_ratio` | 主循环压力收尾阈值，默认 `0.8`；`null` 表示禁用该触发；`context_window=null` 时也不触发 |
 
-当前结果构造始终包含这五个键。`context_window/context_policy` 不属于 `configuration.task`；`persist` 不记录在 `configuration` 中。
+当前结果构造始终包含这六个键。三个上下文参数不属于 `configuration.task`；`persist` 不记录在 `configuration` 中。
 
 ## 3. 结果状态与错误处理
 
@@ -290,7 +298,7 @@ Agent 支持可选的 Neon 持久化：`persist=false`（默认）不写入数�
 | `time_limit` | 检查时已达到整任务时间上限 |
 | `context_limit` | 本地估算输入加本次输出额度超过窗口，或模型 API 返回可识别的 `context_length_exceeded` 错误 |
 | `model_error` | 模型初始化、工具绑定或模型调用失败；未识别为上下文超限的模型错误也归入此项 |
-| `invalid_tool_call` | 主模型响应包含无法正确解析的工具调用 |
+| `invalid_tool_call` | 主模型响应包含无法正确解析的工具调用，或无工具收尾仍返回工具调用 |
 | `output_truncated` | 主模型响应的 `finish_reason="length"`，输出被截断 |
 | `invalid_output` | 最终回答无法解析为所需的 JSON 对象和字段类型 |
 | `invalid_citations` | 最终正文或表格包含未知或本次未获取的引用 ID |
@@ -300,10 +308,10 @@ Agent 支持可选的 Neon 持久化：`persist=false`（默认）不写入数�
 
 - 以 `stop_reason` 判断研究任务结果；函数正常返回不等于任务完成。`completed` 不代表已自动评估内容准确性或覆盖完整性。
 - `completed` 和 `partial` 可作为正常结果展示；其他状态应同时展示停止原因和未解决项，不能仅凭 `answer` 是否非空判断成功。
-- 达到执行上限或运行失败时不补最终答案；已有来源、trace 和错误记录仍保留。最终未引用的证据不会额外填入 `citations`，阅读原文等可从 trace 查看。
+- 达到硬执行上限或运行失败时不补最终答案；上下文压力收尾只在尚未超过硬窗口时触发，仍须通过轮数、时间和最终请求容量检查。已有来源、trace 和错误记录保留；最终未引用的证据不会额外填入 `citations`，阅读原文等可从 trace 查看。
 - `errors` 可能包含已恢复的工具错误，非空不一定表示最终失败。未知工具、禁用工具或无效参数通常返回工具错误供模型继续处理，不直接设置 `invalid_tool_call`。
 - 摘要输出截断或引用无效通常作为工具错误返回；主模型输出截断才直接设置 `output_truncated`。摘要内部模型调用失败可能直接终止任务。
-- 输入校验失败直接抛出 `ValidationError`；非法 arXiv 来源或非法 `context_window` 可能直接抛出 `ValueError`。调用方需捕获异常并映射为自己的错误响应；并非所有运行环境或文件错误都会包装成 `TaskResult`。
+- 输入校验失败直接抛出 `ValidationError`；非法 arXiv 来源或非法上下文运行参数可能直接抛出 `ValueError`。调用方需捕获异常并映射为自己的错误响应；并非所有运行环境或文件错误都会包装成 `TaskResult`。
 - Neon 保存失败时，结果追加 `stage="persistence"` 的错误，保留研究结果，且不改变 `stop_reason`。
 
 错误摘要示例：
@@ -335,6 +343,7 @@ result = run_task(
     },
     persist=False,
     context_window=32000,
+    context_finalize_ratio=0.8,
 )
 payload = result.model_dump(mode="json")
 ```
@@ -347,6 +356,7 @@ payload = result.model_dump(mode="json")
 |---|---|---|
 | `context_window: int \| None` | `32000` | 正整数；Python 传 `None` 关闭本地上限，服务端仍校验容量 |
 | `context_policy: Callable` | `prepare_context` | 替换主 agent 的输入准备策略；摘要始终使用默认 `prepare_context` 和容量检查 |
+| `context_finalize_ratio: float \| None` | `0.8` | 有限数值，范围 `(0, 1]`，不接受布尔值；`None` 禁用该触发，`context_window=None` 时也禁用 |
 
 策略接口定义在 [context.py](context.py)：
 
@@ -355,7 +365,7 @@ prepare_context(messages, *, tools, context_window, max_output_tokens, counter)
     -> PreparedContext(messages, input_tokens_estimate, count_method)
 ```
 
-策略收到历史消息的副本、工具定义、容量配置和本调用流的 `TokenCounter`；返回准备后的模型输入及其估算。保存的原始历史与该输入视图分离；容量判断由调用层统一执行。当前默认实现不修改历史，未实现压缩或收尾策略。
+策略收到历史消息的副本、工具定义、容量配置和本调用流的 `TokenCounter`；返回准备后的模型输入及其估算。保存的原始历史与该输入视图分离；容量判断和压力收尾由调用层执行。当前默认策略不修改历史，不实现压缩；一次收尾复用准备结果，不重复执行该策略。
 
 CLI 示例，从项目根目录运行：
 
@@ -364,9 +374,10 @@ cd agent
 uv run python baseline.py --task examples/qa.json --output runs/task-001.json
 ```
 
-- `--output` 指定完整结果 JSON 文件；省略时写入 `runs/<task_id>.json`。
+- `--output` 指定完整结果 JSON 文件；Baseline 省略此参数时写入 `runs/baseline/<task_id>.json`。
 - `--persist` 同时保存到 Neon；不影响 CLI 写入本地结果文件。
 - `--context-window INT` 配置本地窗口，默认 `32000`；关闭本地上限需使用 Python `context_window=None`。
+- `--context-finalize-ratio FLOAT` 配置收尾阈值，默认 `0.8`；仅禁用压力收尾需使用 Python `context_finalize_ratio=None`。
 - 标准输出只包含 `task_id/stop_reason/answer/comparison_table/unresolved/usage/errors/output`，其中 `output` 是结果文件路径。标准输出不是完整 `TaskResult`；需要引用和 trace 时，应读取结果文件。
 - 退出码为 0 的条件：`stop_reason` 是 `completed` 或 `partial`，且无持久化错误；否则返回 1。输入、文件等直接抛出的异常也会导致进程失败。
 
@@ -383,7 +394,7 @@ uv run python baseline.py --task examples/qa.json --output runs/task-001.json
 | `usage.budget_tokens` | 删除；新增 `usage.agent_steps` |
 | `model_call_budget/tool_call_budget/token_budget/time_budget/context_budget` | 不再产生；当前执行限制或容量错误使用 `step_limit/time_limit/context_limit`，并非逐项等价替换 |
 | trace 中的 `budget_remaining/estimated_input_tokens/token_estimator` | 旧字段删除；当前容量估算记录在 model/context 事件的 `context` 对象中 |
-| 预留最终回答、压缩上下文、两轮无进展后收尾 | 当前无这些机制及其 trace 事件 |
+| 预留最终回答、压缩上下文、两轮无进展后收尾 | 当前仅有上下文压力触发的一次收尾，不因轮数、时间或无进展提前收尾，未实现压缩 |
 | `configuration.model/temperature` 可能缺省 | 当前始终含键，未取得时为 `null` |
 
 结果顶层移除 `task_type`，引用证据字段保持不变。v0 的最小输入仍可使用；包含 `budget` 或 `task_type` 的输入需要修改后再提交。
