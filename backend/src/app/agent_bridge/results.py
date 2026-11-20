@@ -6,6 +6,40 @@ from app.agent_bridge.bundles import manifest_digest
 from app.agent_bridge.contracts import AgentResult, DispatchManifest, ResultEnvelope
 
 
+ARXIV_SOURCE = re.compile(
+    r"arxiv:(?P<base>(?:\d{2}(?:0[1-9]|1[0-2])\.\d{4,5}|"
+    r"[A-Za-z][A-Za-z.-]*/\d{2}(?:0[1-9]|1[0-2])\d{3}))"
+    r"(?:(?P<version>v[1-9]\d*)|@[0-9a-f]{12})"
+)
+
+
+def _search_sources(manifest, result):
+    selected = {source.source_id for source in manifest.sources}
+    external = {}
+    for source in result.sources:
+        identity = source.get("source_id")
+        if isinstance(identity, str) and identity in selected:
+            continue
+        match = ARXIV_SOURCE.fullmatch(identity) if isinstance(identity, str) else None
+        if not manifest.task.allow_search or match is None:
+            raise ValueError("Result source is outside authorized inputs")
+        paper_id = "arxiv:" + match["base"]
+        url = "https://arxiv.org/abs/" + match["base"] + (match["version"] or "")
+        if source.get("paper_id") != paper_id or source.get("url") != url or identity in external:
+            raise ValueError("Search source identity or URL does not match arXiv")
+        external[identity] = source
+    if len(selected) + len({source["paper_id"] for source in external.values()}) > manifest.task.max_papers:
+        raise ValueError("Result exceeds the authorized paper limit")
+    return external
+
+
+def _validate_search_citation(citation, external):
+    source = external.get(citation.source_id)
+    if (source is None or citation.paper_id != source["paper_id"] or citation.url != source["url"]
+        or re.fullmatch(re.escape(citation.source_id) + rf":p{citation.page}:c[1-9]\d*", citation.chunk_id) is None):
+        raise ValueError("Citation does not match an authorized search source")
+
+
 @dataclass(frozen=True)
 class PresentedCitation:
     citation_key: str
@@ -29,12 +63,15 @@ def validate_delivery(manifest: DispatchManifest, envelope: ResultEnvelope) -> N
     if result.task_id != manifest.task.task_id or result.question != manifest.task.question:
         raise ValueError("Result task identity does not match dispatch")
     sources = {source.source_id: source for source in manifest.sources}
+    external = _search_sources(manifest, result)
     chunks = set()
     for citation in result.citations:
         source = sources.get(citation.source_id)
-        if source is None or citation.paper_id not in {source.source_id, str(source.paper_id)}:
+        if source is None:
+            _validate_search_citation(citation, external)
+        elif citation.paper_id not in {source.source_id, str(source.paper_id)}:
             raise ValueError("Citation references a paper outside the selected inputs")
-        if source.page_count is not None and citation.page > source.page_count:
+        if source is not None and source.page_count is not None and citation.page > source.page_count:
             raise ValueError("Citation page exceeds the selected PDF")
         if citation.chunk_id in chunks or not citation.source_text.strip():
             raise ValueError("Duplicate or empty citation")
@@ -56,10 +93,11 @@ def normalize_citation_references(markdown: str, keys: dict[str, str]) -> str:
 
 def present_result(manifest: DispatchManifest, result: AgentResult) -> PresentedResult:
     sources = {source.source_id: source for source in manifest.sources}
-    keys = {citation.chunk_id: f"C{index}" for index, citation in enumerate(result.citations, 1)}
+    local_citations = [citation for citation in result.citations if citation.source_id in sources]
+    keys = {citation.chunk_id: f"C{index}" for index, citation in enumerate(local_citations, 1)}
     markdown = normalize_citation_references(
         "\n\n".join(part.strip() for part in (result.answer, result.comparison_table) if part.strip()), keys)
     citations = [PresentedCitation(citation_key=keys[item.chunk_id], paper_id=sources[item.source_id].paper_id,
         page_number=item.page, quote=item.source_text, agent_chunk_id=item.chunk_id,
-        agent_source_id=item.source_id) for item in result.citations]
+        agent_source_id=item.source_id) for item in local_citations]
     return PresentedResult(content_markdown=markdown, citations=citations)

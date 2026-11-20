@@ -1246,3 +1246,29 @@ uv run --project ./backend --locked python -m app.agent_bridge.maintenance --cle
 预期：预览保留文件；apply 仅清理终态且超过本地和远程保留时间的受控任务目录。失败且取消尚未确认的任务不会删除。业务数据库中的结果、原始上传 PDF、其他用户或其他 dispatch 目录不受影响。小型身份清理凭据会保留，用于阻止旧 dispatch 再次执行。清理命令需要读取相应服务的数据库与传输配置，属于维护操作，不是离线测试。
 
 最后按 [统一验收清单](agent-transport-acceptance.md) 一次检查 local、TACC、恢复、失败和清理。离线模拟通过不等于真实集群及模型质量验收通过。
+
+## 前端回归与真实本地研究联调（2026-11-20）
+
+全部从仓库根目录运行，先按 [前端 README](../frontend/README.md) 准备依赖及 Playwright Chromium。
+
+Windows PowerShell：
+
+~~~powershell
+npm.cmd --prefix frontend run build
+npm.cmd --prefix frontend run verify:unit
+& runtime/browser-venv/Scripts/python.exe -B frontend/checks/run-browser-checks.py
+uv run --project backend --locked python -B backend/checks/live_research_acceptance.py --allow-model-requests
+~~~
+
+macOS / Linux：
+
+~~~bash
+npm --prefix frontend run build
+npm --prefix frontend run verify:unit
+runtime/browser-venv/bin/python -B frontend/checks/run-browser-checks.py
+uv run --project backend --locked python -B backend/checks/live_research_acceptance.py --allow-model-requests
+~~~
+
+预期：构建及单元检查通过；离线入口输出 `16/16 checks passed; APIs are mocked.`，自动关闭自己的 Vite。真实入口要求可访问本地 PostgreSQL 且账号有建库权限、Agent 本地解释器可用、模型配置有效；自动启用独立 API/Parser/Agent Worker/Vite，以临时账号上传合成 PDF，验证草稿、幂等提交、模型执行和引用往返，输出 `LIVE RESEARCH ACCEPTANCE PASSED` 与 `CLEANUP PASSED`。真实调用可能计费，不应在自动化离线回归中默认执行。日志保存在 `runtime/frontend-checks/` 和 `runtime/live-integration/`。
+
+最新结果与范围见 [前后端本地验收记录](frontend-backend-acceptance.md)。本地通过不代表真实 arXiv、邮件或 ECS/TACC 已验收。

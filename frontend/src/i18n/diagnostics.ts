@@ -1,7 +1,6 @@
 import { english } from './messages';
 import { getLocale, t } from './store';
-import { stageLabels } from '../shared/lib/format';
-import type { ResourceError, TaskEvent } from '../api/types';
+import type { ResourceError } from '../api/types';
 
 const errorMessages: Record<string, string> = {
   AGENT_STOP_PENDING: 'The Agent job has not been confirmed stopped. Please try deleting it again shortly.',
@@ -64,18 +63,4 @@ export function errorText(error: Pick<ResourceError, 'code' | 'message'>): strin
   }
   if (!/[\u3400-\u9fff]/.test(error.message)) return t(error.message);
   return errorMessages[error.code] ?? `The request failed (${error.code}). Please try again.`;
-}
-
-export function eventText(event: TaskEvent): string {
-  if (event.message === '已完成证据检查' && typeof event.payload.evidence_status === 'string') {
-    const labels: Record<string, string> = { answered: '已完成证据检查', partial: '部分问题或比较维度缺少支持证据，请结合引用阅读。', insufficient_selected_evidence: '当前检索片段不足以支持回答，不代表论文全文没有相关信息。' };
-    return t(labels[event.payload.evidence_status] ?? event.message);
-  }
-  if ((event.stage === 'analyzing' || event.stage === 'synthesizing') && Number.isInteger(event.payload.current) && Number.isInteger(event.payload.total)) {
-    return t(event.stage === 'analyzing' ? '正在分析论文：{0} / {1}' : '正在生成综述章节：{0} / {1}', [event.payload.current, event.payload.total]);
-  }
-  if (getLocale() === 'zh-CN') return event.message;
-  if (Object.hasOwn(english, event.message)) return t(event.message);
-  if (!/[\u3400-\u9fff]/.test(event.message)) return event.message;
-  return stageLabels()[event.stage] ?? t('任务执行已结束');
 }

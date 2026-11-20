@@ -22,7 +22,7 @@ type SearchSnapshot = { page: Page<SearchPaper>; query: string; sort: SearchSort
 const pageSizeOptions = [10, 25, 50];
 const maximumOffset = 1000;
 // Keep the API stable so rerenders do not run the notification cleanup.
-const searchNotificationConfig = { placement: 'top', duration: 5, maxCount: 3, stack: false, classNames: { list: 'search-notification-list' } } as const;
+const searchNotificationConfig = { placement: 'top', duration: 3, maxCount: 3, stack: false, classNames: { list: 'search-notification-list' } } as const;
 
 function pending(item: PaperImport): boolean {
   return item.status === 'queued' || item.status === 'running' || (item.status === 'succeeded' && (item.paper_status === 'uploaded' || item.paper_status === 'processing'));
@@ -119,7 +119,7 @@ export default function SearchPapersPage({ active = true }: { active?: boolean }
       type: error.status === 429 ? 'warning' : 'error',
       title,
       placement: 'top',
-      duration: 5,
+      duration: 3,
       description: <div className="search-notification-content">
         <p>{identity && <>arXiv · {identity}<br /></>}{errorText(error)}</p>
         {cooldown > 0 && <p>{t('{0} 秒后可重试', [cooldown])} · {error.code === 'ARXIV_TIMEOUT' ? t('本次搜索超时。不会自动重试；已有论文和导入记录不受影响。') : t('共享来源访问额度正在冷却。不会自动重新搜索或下载。')}</p>}
@@ -336,7 +336,6 @@ export default function SearchPapersPage({ active = true }: { active?: boolean }
           <Pagination current={Math.floor(result.offset / resultPageSize) + 1} pageSize={resultPageSize} total={Math.min(result.total, maximumResults)} disabled={searching || searchSeconds > 0} showSizeChanger={false} showQuickJumper showLessItems onChange={(page) => void search(snapshot.query, (page - 1) * resultPageSize, snapshot.sort, true, resultPageSize)} />
         </nav>}
       </div>}
-      {!query && <div className="search-intro"><SearchOutlined /><h2>{t("发现文献，再开始研究")}</h2><p>{t("搜索只读取来源元数据。点击「导入 PDF」后，由独立 Worker 下载并交给解析器，不会调用模型。")}</p></div>}
     </section>
 </div>
   </>;

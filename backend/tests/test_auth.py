@@ -428,16 +428,21 @@ class AuthBehaviorTests(unittest.TestCase):
             self.auth.verify_email(old, self.password, "127.0.0.1")
         self.auth.verify_email(new, self.password, "127.0.0.1")
 
-    def test_change_password_checks_current_and_revokes_session(self):
+    def test_change_password_keeps_current_session_and_revokes_other_sessions(self):
         from app.errors import APIError
         self.activate()
         user, raw = self.auth.login("alice", self.password, "127.0.0.1")
-        with self.assertRaises(APIError):
+        other = self.auth.login("alice", self.password, "127.0.0.1")[1]
+        with self.assertRaises(APIError) as caught:
             self.auth.change_password(user.id, raw, "incorrect", "a different long password", "127.0.0.1")
+        self.assertEqual(caught.exception.status_code, 400)
+        self.assertEqual(caught.exception.error["code"], "CURRENT_PASSWORD_INCORRECT")
         self.auth.authenticate(raw)
         self.auth.change_password(user.id, raw, self.password, "a different long password", "127.0.0.1")
+        self.assertEqual(self.auth.authenticate(raw)[0].id, user.id)
         with self.assertRaises(APIError):
-            self.auth.authenticate(raw)
+            self.auth.authenticate(other)
+        self.assertEqual(self.auth.login("alice", "a different long password", "127.0.0.1")[0].id, user.id)
 
     def test_expiry_auth_version_disable_and_logout(self):
         from app.auth.service import db_now
@@ -544,6 +549,48 @@ class AuthBehaviorTests(unittest.TestCase):
                 session.get(User, user.id).auth_version += 1
             headers["Origin"] = "http://localhost:5173"
             self.assertEqual(client.post("/api/v1/private", headers=headers).status_code, 401)
+
+    def test_change_password_http_preserves_cookie_csrf_and_current_session(self):
+        from fastapi import FastAPI
+        from fastapi.responses import JSONResponse
+        from fastapi.testclient import TestClient
+        from app.auth.api import router
+        from app.auth.security import cookie_name
+        from app.errors import APIError
+
+        self.activate()
+        _, other_raw = self.auth.login("Alice", self.password, "127.0.0.2")
+        app = FastAPI()
+        app.state.sessions, app.state.settings = self.sessions, self.settings
+        app.include_router(router)
+
+        @app.exception_handler(APIError)
+        async def errors(request, error):
+            return JSONResponse({"error": error.error}, status_code=error.status_code)
+
+        with TestClient(app) as client:
+            headers = {"Origin": self.settings.frontend_public_url}
+            login = client.post("/api/v1/auth/login", headers=headers,
+                json={"username": "Alice", "password": self.password})
+            self.assertEqual(login.status_code, 200, login.text)
+            raw = client.cookies.get(cookie_name(self.settings))
+            headers["X-CSRF-Token"] = login.json()["csrf_token"]
+            wrong = client.post("/api/v1/auth/change-password", headers=headers,
+                json={"current_password": "wrong-password", "password": "new_password"})
+            self.assertEqual(wrong.status_code, 400)
+            self.assertEqual(wrong.json()["error"]["code"], "CURRENT_PASSWORD_INCORRECT")
+            self.assertEqual(client.get("/api/v1/auth/me").status_code, 200)
+            changed = client.post("/api/v1/auth/change-password", headers=headers,
+                json={"current_password": self.password, "password": "new_password"})
+            self.assertEqual(changed.status_code, 200, changed.text)
+            self.assertNotIn("set-cookie", changed.headers)
+            self.assertEqual(client.cookies.get(cookie_name(self.settings)), raw)
+            current = client.get("/api/v1/auth/me")
+            self.assertEqual(current.status_code, 200, current.text)
+            self.assertEqual(current.json()["csrf_token"], headers["X-CSRF-Token"])
+            with self.assertRaises(APIError):
+                self.auth.authenticate(other_raw)
+            self.assertEqual(client.post("/api/v1/auth/logout", headers=headers, json={}).status_code, 200)
 
     def test_auth_validation_errors_never_echo_passwords_or_tokens(self):
         from fastapi import FastAPI

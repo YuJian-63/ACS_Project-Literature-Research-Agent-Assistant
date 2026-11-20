@@ -1,7 +1,7 @@
-const { chromium } = require(process.env.PLAYWRIGHT_MODULE || 'playwright');
+const { launchBrowser } = require('./browser.cjs');
 const assert = require('node:assert/strict');
 (async () => {
- const browser = await chromium.launch({ executablePath: process.env.BROWSER_EXECUTABLE || '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome', headless:true });
+ const browser = await launchBrowser();
  try {
  const context = await browser.newContext({reducedMotion:'reduce'});
  const page = await context.newPage(); page.setDefaultTimeout(5000); const errors=[]; page.on('pageerror', e=>errors.push(e.message));

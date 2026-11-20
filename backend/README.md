@@ -1,6 +1,6 @@
 # 后端开发
 
-> 2026-11-18：新增可选 `TASK_RUNNER=agent` 的独立 Agent 后端适配。该模式绕过本文原有真实 Runner 的检索和生成流程，详见 [Agent 对接协议](../docs/agent-backend-integration.md)。TACC 传输桥接与 Agent 本地 PDF 来源支持仍待下一阶段；启用开关默认关闭，不自动迁移现有数据库。
+> 2026-11-20：V3 统一研究接口 `/api/v1/agent-research` 已接入现有 Agent Worker，支持仅提问、指定论文和按需搜索。必须配置 `TASK_RUNNER=agent`、`AGENT_DISPATCH_ENABLED=true` 及对应传输；不会回退到 Mock 或后端旧研究实现。local/TACC 适配器已有离线验证，本地 PDF、真实模型及浏览器端到端验收已通过，真实集群仍需部署验收。接口见 [API 契约第 13 节](../docs/api-contract.md#13-v3-统一研究接口2026-11-20)，协议见 [Agent 对接](../docs/agent-backend-integration.md)，复跑入口与覆盖边界见 [本地验收记录](../docs/frontend-backend-acceptance.md)。本次复用现有任务表，无新增迁移、无需清库。
 
 当前已实现 MVP-0 API/Mock Worker、MVP-1A 文本 PDF Parser Worker、MVP-1B 真实摘要/问答 Runner、MVP-2 多论文综述与比较表，以及 MVP-3 arXiv 搜索和指定版本 PDF 导入。真实 Runner 使用可替换的模型接口和证据引用校验；尚未实现 OCR。arXiv 默认关闭，真实来源和模型服务需单独配置，不代表本地已完成外部服务验收。接口规范见 `../docs/api-contract.md`。2026-11-14 账号、配置校验、Cookie/CSRF、私有资源归属和所有权迁移已实现；真实 QQ SMTP 配置与投递验收待完成。首次启动前先阅读第 10 节。
 

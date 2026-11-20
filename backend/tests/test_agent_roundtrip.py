@@ -10,8 +10,8 @@ from pathlib import Path
 from unittest.mock import patch
 from uuid import uuid4
 
-from app.agent_bridge.bundles import export_bundle, read_result
-from app.agent_bridge.policy import build_manifest
+from app.agent_bridge.bundles import export_bundle, manifest_digest, read_result
+from app.agent_bridge.policy import build_manifest, build_research_manifest
 from app.agent_bridge.results import present_result, validate_delivery
 from app.agent_bridge.tacc import TaccTransport
 from app.agent_bridge.transport import LocalTransport
@@ -36,6 +36,40 @@ AGENT_PYTHON = Path(
     "Install the separate Agent environment for offline process integration",
 )
 class AgentProcessRoundtripTests(unittest.TestCase):
+    def test_search_only_backend_bundle_crosses_actual_agent_process_offline(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve()
+            settings = Settings(_env_file=None, database_url="postgresql://unused@127.0.0.1/unused",
+                storage_root=root)
+            manifest = build_research_manifest(uuid4(), uuid4(), "Explain attention", [], settings, allow_search=True)
+            bundle = export_bundle(manifest, root, settings.resolved_agent_exchange_root)
+            script = """import sys, socket
+from pathlib import Path
+from agent_io.job import run_dispatch
+from schemas import Evidence, TaskResult, Usage
+def no_network(*args, **kwargs):
+    raise AssertionError('offline contract test must not access the network')
+socket.socket.connect = no_network
+def runner(task, **kwargs):
+    assert task.allow_search and not task.sources
+    source = {'source_id': 'arxiv:1706.03762v7', 'paper_id': 'arxiv:1706.03762',
+        'title': 'External evidence', 'url': 'https://arxiv.org/abs/1706.03762v7'}
+    evidence = Evidence(**source, chunk_id='arxiv:1706.03762v7:p1:c1', page=1,
+        source_text='Original evidence.')
+    return TaskResult(task_id=task.task_id, question=task.question, answer='Answer [' + evidence.chunk_id + ']',
+        citations=[evidence], sources=[source], stop_reason='completed', usage=Usage())
+run_dispatch(Path(sys.argv[1]), work_root=Path(sys.argv[2]), output_dir=Path(sys.argv[3]),
+    dispatch_id=sys.argv[4], input_sha256=sys.argv[5], runner=runner)
+"""
+            completed = subprocess.run([str(AGENT_PYTHON), "-B", "-c", script,
+                str(bundle), str(root / "work"), str(root / "output"), str(manifest.dispatch_id),
+                manifest_digest(manifest)], cwd=REPOSITORY / "agent", capture_output=True, timeout=30)
+            self.assertEqual(completed.returncode, 0, completed.stderr.decode("utf-8", errors="replace"))
+            envelope = read_result(root / "output" / "result.json", settings.agent_result_max_bytes)
+            validate_delivery(manifest, envelope)
+            self.assertEqual(envelope.result.citations[0].paper_id, "arxiv:1706.03762")
+            self.assertEqual(present_result(manifest, envelope.result).citations, [])
+
     def test_real_pdf_and_scripted_agent_cross_separate_processes_without_network(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary).resolve()

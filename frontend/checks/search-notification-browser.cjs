@@ -1,7 +1,7 @@
-const { chromium } = require(process.env.PLAYWRIGHT_MODULE || 'playwright');
+const { launchBrowser } = require('./browser.cjs');
 const assert = require('node:assert/strict');
 (async () => {
- const browser = await chromium.launch({ executablePath: '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome', headless: true });
+ const browser = await launchBrowser();
  const page = await browser.newPage();
  let mode = 'error';
  const imported = new Map();

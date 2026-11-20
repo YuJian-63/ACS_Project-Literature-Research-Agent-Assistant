@@ -23,7 +23,7 @@ from app.api.views import summary_view, task_view
 from app.auth.dependencies import require_user
 from app.db.models import AgentRun, Artifact, Citation, Paper, Task, TaskEvent, User
 from app.errors import APIError
-from app.tasks.service import get_task, selected_papers, submit_task
+from app.tasks.service import ensure_task_deletable, get_task, selected_papers, submit_task
 
 CurrentUser = Annotated[User, Depends(require_user)]
 
@@ -99,16 +99,7 @@ def delete_task(request: Request, task_id: UUID, user: CurrentUser) -> None:
         task = session.scalar(select(Task).where(Task.id == task_id, Task.user_id == user.id).with_for_update())
         if task is None:
             raise APIError(404, "TASK_NOT_FOUND", "研究记录不存在")
-        if task.status == "running" or (
-            task.runner_type == "agent" and task.status == "queued" and task.started_at is not None
-        ):
-            raise APIError(409, "TASK_RUNNING", "研究正在执行，请等待完成后再删除")
-        if (task.runner_type == "agent" and task.status == "failed"
-            and task.run_config.get("transport") in {"local-process-v1", "tacc-ssh-slurm-v1"}
-            and not task.run_config.get("agent_cancel_confirmed")):
-            run = session.get(AgentRun, task_id)
-            if run is not None and run.result is None:
-                raise APIError(409, "AGENT_STOP_PENDING", "Agent 作业尚未确认停止，请稍后再删除")
+        ensure_task_deletable(session, task)
         # Existing cascades remove artifacts, citations, events and task-paper references.
         # Original papers remain and may still be referenced by other tasks.
         session.delete(task)

@@ -52,7 +52,7 @@ class DispatchManifest(Contract):
     schema_version: Literal["agent-dispatch-v1"] = "agent-dispatch-v1"
     dispatch_id: UUID
     task: AgentTask
-    sources: list[SourceFile] = Field(min_length=1, max_length=20)
+    sources: list[SourceFile] = Field(default_factory=list, max_length=20)
     runtime: RuntimeOptions
 
     @model_validator(mode="after")
@@ -60,7 +60,8 @@ class DispatchManifest(Contract):
         identities = [source.source_id for source in self.sources]
         if len(set(identities)) != len(identities) or len({source.paper_id for source in self.sources}) != len(self.sources):
             raise ValueError("Duplicate source identity")
-        if self.task.sources != identities or self.task.allow_search or self.task.max_papers != len(identities):
+        if (self.task.sources != identities or self.task.max_papers < len(identities)
+            or (not self.task.allow_search and self.task.max_papers != len(identities))):
             raise ValueError("Task and source manifest must identify the same selected PDFs")
         return self
 

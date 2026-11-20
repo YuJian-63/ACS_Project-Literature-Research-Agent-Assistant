@@ -750,7 +750,7 @@ HTTP 错误沿用第 8 节 envelope；429 带整数秒 Retry-After 和相同 det
 | GET /me | 无 | `200 {user:{id,username,email},csrf_token}` | Cookie |
 | POST /logout | `{}`，无业务字段 | `200 {"ok":true}`，清除 Cookie | Cookie + CSRF；仅撤销当前会话 |
 | POST /reset-password | `{token,password}` | `200 {"ok":true}`，清除 Cookie | 公开；password 是新密码，撤销所有会话 |
-| POST /change-password | `{current_password,password}` | `200 {"ok":true}`，清除 Cookie | Cookie + CSRF；验证当前密码，撤销所有会话 |
+| POST /change-password | `{current_password,password}` | `200 {"ok":true}`，保留当前 Cookie | Cookie + CSRF；验证当前密码，保留当前会话并撤销其他会话 |
 
 注册/重发/忘记密码的 202 只表示请求受理，不表示 SMTP 已投递；用户名/邮箱冲突注册统一 `409 REGISTRATION_UNAVAILABLE`，不区分冲突字段。忘记密码对不存在、未验证或停用账号同样返回通用 202；格式错误、限流和服务配置错误仍可分别返回 422/429/503。错误凭据统一 `401 INVALID_CREDENTIALS`；仅在用户名密码正确但尚未验证时返回 `403 EMAIL_NOT_VERIFIED`。
 
@@ -788,6 +788,8 @@ CSRF 从 login/me 响应读取并仅存内存，按独立密钥与当前会话�
 
 代码静态对照：前后端 endpoint、字段名、login/me 响应和凭据/CSRF 发送一致；logout/reset/change 实际返回 200 JSON，前端忽略响应体，兼容。当前前端 email 正则比后端宽松，未同步 ASCII/254 字符及保留用户名校验；登录/当前密码前端要求 6—128，后端模型允许 1—128（正常新账号不受影响）。前端验证文案固定 24 小时，而后端验证 TTL 可缩短；这些属于非阻断的预校验/文案差异，服务端仍执行完整规则；当前验收使用默认 24 小时时效和符合完整规则的输入。
 
+修改密码时，当前密码错误返回 `400 CURRENT_PASSWORD_INCORRECT`，不触发前端的全局 401 退出；成功后保持当前 Cookie、会话到期时间及 CSRF Token 有效，并更新其认证版本。其他会话仍被撤销，找回密码的 reset-password 仍撤销全部会话并清除 Cookie。
+
 ## 12. 跨语言研究检索（2026-11-15）
 
 新建真实 summary / qa / review 任务使用 workflow_version=langgraph-search-v1。单篇内部协议为 evidence-search-v1，综述为 evidence-review-search-v1；旧工作流按旧路径读取，历史结果不自动重跑。任务创建只执行本地规划，原有请求字段与自动预算规则不变。
@@ -815,3 +817,95 @@ retrieving 阶段的事件可带 retrieval、retrieval_status、reason、paper_i
 local/TACC 的失败 Agent 任务若尚未交付结果且未确认作业停止，返回 `409 AGENT_STOP_PENDING`，保留 Task 和 AgentRun 供维护循环继续取消及确认。确认停止后可删除；已交付终态结果（包括失败结果）按原规则允许删除，不要求再次取消。停止 Worker 本身不等于确认作业停止。
 
 使用既有数据库级联删除研究结果、证据引用、执行事件和 task_papers 关联，不删除原论文。论文只有在不再被任何任务引用且不处于解析中时才允许删除；同一论文仍被其他任务引用时继续返回 PAPER_IN_USE。无新增数据库迁移。
+
+## 13. V3 统一研究接口（2026-11-20）
+
+V3 前端统一使用以下接口。后端复用 Task、TaskPaper、AgentRun 和现有 Agent Worker；不新建独立研究数据库，不调用旧摘要、检索或分阶段综述执行器。仅 `TASK_RUNNER=agent` 且派发已启用时接收新研究；未连接返回 `503 AGENT_NOT_CONNECTED`，传输配置不完整返回 `503 RUNNER_NOT_CONFIGURED`。
+
+所有接口要求登录；POST/DELETE 另要求匹配的 Origin 和当前 `X-CSRF-Token`。账号归属、配额、幂等及四种业务状态沿用原有规则。以下 JSON 中 UUID 为示例。
+
+### POST /api/v1/agent-research
+
+```json
+{
+  "question": "比较这些论文的研究问题、方法和实验结果",
+  "paper_ids": ["407420cb-5e74-4286-8351-1d9499337e0d"],
+  "allow_search": true
+}
+```
+
+- `question` 必填，去除首尾空白后非空，最长 8000 字符，要求有效 UTF-8 且不能包含 NUL。
+- `paper_ids` 默认空数组，最多 20 个唯一 UUID，按提交顺序保存；只能选择当前账号的论文。Agent 自行读取原始 PDF，允许 uploaded、processing、ready，解析失败的论文返回 `409 PAPER_NOT_READY`。
+- `allow_search` 默认为 `true`，必须为 JSON 布尔值。空论文列表且关闭搜索返回 422。开启搜索表示允许 Agent 按需补充外部论文；关闭时只读已选输入。
+- 不接受 `task_type`、`budget` 或其他额外字段，传入返回 422。使用什么语言提问就要求 Agent 用对应的主要自然语言回答，引文保留原文。
+- 可选 `Idempotency-Key`：同账号同键同请求重放已有任务；更换问题、论文顺序、搜索开关，或与旧 `/tasks` 请求复用该键，返回 `409 IDEMPOTENCY_CONFLICT`。有效重放先于配额和连接检查。
+
+返回 `202 Accepted`，`Location: /api/v1/agent-research/{task_id}`，`Idempotency-Replayed: false`（重放为 true）：
+
+```json
+{"task_id":"602aaa2f-ba09-403d-9f82-f995d4c04906","status":"queued"}
+```
+
+### GET /api/v1/agent-research
+
+查询参数：可选 `status=queued|running|succeeded|failed`；`limit` 默认 20、范围 1—100；`offset` 默认 0、最小 0。按创建时间倒序及 UUID 稳定排序。每条记录的论文数组保持创建时的选择顺序。
+
+```json
+{
+  "items": [{
+    "id": "602aaa2f-ba09-403d-9f82-f995d4c04906",
+    "question": "比较这些论文的研究问题、方法和实验结果",
+    "paper_ids": ["407420cb-5e74-4286-8351-1d9499337e0d"],
+    "papers": [{"id":"407420cb-5e74-4286-8351-1d9499337e0d","title":"Example research paper"}],
+    "status": "queued",
+    "created_at": "2026-11-20T10:00:00Z"
+  }],
+  "total": 1,
+  "limit": 20,
+  "offset": 0
+}
+```
+
+该列表仅包含当前账号通过统一接口创建的 Agent 记录，以 `run_config.interface=agent-research-v1` 区分；旧 `/tasks` 记录保留，通过原接口查询，不自动改写或搬迁。
+
+### GET /api/v1/agent-research/{task_id}
+
+```json
+{
+  "task_id": "602aaa2f-ba09-403d-9f82-f995d4c04906",
+  "question": "比较这些论文的研究问题、方法和实验结果",
+  "status": "queued",
+  "paper_ids": ["407420cb-5e74-4286-8351-1d9499337e0d"],
+  "result": null,
+  "error": null
+}
+```
+
+`result` 在交付前为 null，交付后为原始 AgentResult，包含 answer、comparison_table、citations、sources、unresolved、stop_reason、usage、trace、errors、configuration 等字段。顶层 question 为用户原问题，`result.question` 保留派发时包含执行指令的原始问题；不能用它覆盖顶层展示问题。
+
+- `completed`：status=succeeded；`partial`：status=succeeded，保留 stop_reason=partial 和 unresolved，前端须显示未解决项。
+- 失败：status=failed，error 使用统一错误对象；若收到 Agent 的失败结果，result 也保留，不能把它丢弃或伪装为成功；尚未交付的传输失败可为 null。
+- 本地引用：paper_id 为论文 UUID（兼容 source_id 别名），物理页码对应原 PDF；外部引用保持 Agent 原生 `arxiv:...` 标识、版本和 canonical arXiv URL，不伪造本地论文 UUID。
+- 外部引用必须关联 result.sources 中相同来源，绑定合法 arXiv 标识、URL 和页号对应的 chunk_id；清单外本地文件、伪造外链和超额论文会被拒绝。后端旧 Citation 外键表仅投影本地引用，统一接口读取的原生结果保留全部外部证据。
+
+### DELETE /api/v1/agent-research/{task_id}
+
+成功返回 204，无正文；不存在、其他账号、旧接口创建的任务均返回 `404 TASK_NOT_FOUND`。运行中或已开始后恢复为 queued 的任务返回 `409 TASK_RUNNING`；local/TACC 作业尚未确认停止且没有交付结果时返回 `409 AGENT_STOP_PENDING`。删除记录级联清理结果及关联，不删除 PDF。
+
+### 服务端预算与部署
+
+搜索可补充的论文数量由 `AGENT_SEARCH_MAX_PAPERS` 控制，默认 5；开启搜索时 N=min(20, 已选数量+该配置)，关闭时 N=已选数量。max_steps=min(AGENT_MAX_STEPS,16+4N)，timeout_seconds=min(AGENT_TIMEOUT_SECONDS,300+60N)，max_output_tokens=min(AGENT_OUTPUT_TOKENS,AGENT_CONTEXT_TOKENS-2048,4096+768×max(0,N-1))。用户不填写预算，配置是上限，不承诺一定生成或读完 N 篇论文。
+
+API 与 Worker 需一起更新并重启，local/TACC 上的 Agent 也必须更新 `agent_io/contracts.py`、`agent_io/bundle.py`、`apis/sources.py`，否则旧包装器会拒绝空来源/自动搜索。Agent 的搜索能力由自身环境决定；后端 `ARXIV_ENABLED` 仍只控制原有 `/paper-search` 与导入能力。本次无需新增数据库迁移；部署时继续确认数据库处于项目已有 head。
+
+### 前端来源阅读与导入
+
+研究结果中的来源标题和引用「查看 PDF 对应页」已区分本地论文与外部 arXiv 来源：
+
+- 本地 UUID 或合法 `local:<UUID>@<sha256>` 来源直接进入论文库内嵌阅读器。
+- 外部来源先显示导入确认。用户确认后，以引用的明确版本调用 `POST /api/v1/paper-imports`，复用当前用户已有的同版本导入记录。仅当下载成功且 `GET /api/v1/papers/{paper_id}` 返回 ready 后，才用真实本地 UUID 打开阅读器。
+- 打开前核对 arXiv 版本、来源携带的 PDF 摘要前缀及引用物理页码范围；不匹配时显示错误，不跳转。缺少明确版本时提示先在搜索论文中确认版本，不自动选择最新版本或补造 v1。
+- 下载失败须显式重试，携带当前 `expected_attempt`；状态查询失败可重新检查，解析失败可前往论文库查看。关闭弹窗只停止前端等待，不取消后台导入。
+- 引用阅读保留物理页码、返回研究任务及当前引用，返回后恢复原证据面板。来源标题阅读保留返回研究任务入口。
+
+该流程复用已有导入和论文接口，无新增迁移。实际使用须启用并配置后端 arXiv 导入能力，同时运行 Import Worker 与 Parser Worker；Agent 可搜索不代表后端导入已配置。离线浏览器测试不替代真实下载、解析及模型联调。

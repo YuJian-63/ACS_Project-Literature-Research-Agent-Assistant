@@ -1,5 +1,5 @@
-const {chromium}=require(process.env.PLAYWRIGHT_MODULE || 'playwright');const assert=require('node:assert/strict');
-(async()=>{const browser=await chromium.launch({executablePath:process.env.BROWSER_EXECUTABLE || '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',headless:true});try{
+const {launchBrowser}=require('./browser.cjs');const assert=require('node:assert/strict');
+(async()=>{const browser=await launchBrowser();try{
  const page=await browser.newPage({viewport:{width:1440,height:1000},reducedMotion:'reduce'});page.setDefaultTimeout(7000);const errors=[];page.on('pageerror',e=>errors.push(e.message));
  await page.route('**/api/v1/**',route=>new URL(route.request().url()).pathname.endsWith('/auth/me')?route.fulfill({json:{user:{id:'fixture',username:'Researcher'},csrf_token:'fixture'}}):route.fulfill({json:{items:[],total:0,limit:20,offset:0}}));
  const base=process.env.SEARCH_PREVIEW_URL || 'http://127.0.0.1:5198';await page.goto(base+'/papers');

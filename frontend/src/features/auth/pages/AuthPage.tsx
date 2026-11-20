@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react';
-import { Alert, Button, Input } from 'antd';
+import { Alert, App, Button, Input } from 'antd';
 import { Link, Navigate, useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 import { asApiError, isCanceled } from '../../../api/client';
 import AuthLayout from '../components/AuthLayout';
@@ -24,6 +24,7 @@ function validPassword(value: string) {
 export default function AuthPage() {
   useLocale();
   const auth = useAuth();
+  const { notification } = App.useApp();
   const { pathname, state: navigationState } = useLocation();
   const [parameters] = useSearchParams();
   const navigate = useNavigate();
@@ -69,7 +70,11 @@ export default function AuthPage() {
     event.preventDefault();
     setAttempted(true);
     setError('');
-    if (inFlight.current || Object.keys(validation).length || (needsToken && !token)) return;
+    if (inFlight.current) return;
+    if (Object.keys(validation).length || (needsToken && !token)) {
+      if (change) notification.error({ title: t('密码修改失败'), description: t(Object.values(validation)[0] || '请求未完成，请稍后重试。'), duration: 3 });
+      return;
+    }
     inFlight.current = true;
     setBusy(true);
     const pending = new AbortController();
@@ -91,11 +96,23 @@ export default function AuthPage() {
       setAttempted(false);
       setDone(true);
       setToken('');
-      if (reset || change) auth.endSession();
-      if (change) navigate('/login', { replace: true, state: { passwordChanged: true } });
+      if (reset) auth.endSession();
+      if (change) {
+        notification.success({ title: t('密码修改成功'), description: t('新密码已生效。'), duration: 3 });
+        navigate('/papers', { replace: true });
+      }
     } catch (failure) {
       if (pending.signal.aborted || isCanceled(failure)) return;
       const problem = asApiError(failure);
+      if (change) {
+        const reason = problem.code === 'CURRENT_PASSWORD_INCORRECT' || problem.code === 'INVALID_CREDENTIALS' ? '当前密码不正确，请重新输入。'
+          : problem.status === 429 ? '请求过于频繁，请稍后再试。'
+          : problem.status === null || (problem.status && problem.status >= 500) ? '服务暂时不可用，请稍后重试。'
+          : problem.code === 'CSRF_REJECTED' || problem.code === 'ORIGIN_REJECTED' ? '请求验证失败，请刷新页面后重试。'
+          : '密码未能更新，请检查输入后重试。';
+        notification.error({ title: t('密码修改失败'), description: t(reason), duration: 3 });
+        return;
+      }
       if (problem.status === 429) setError('请求过于频繁，请稍后再试。');
       else if (problem.status === null || (problem.status && problem.status >= 500)) setError('服务暂时不可用，请稍后重试。');
       else if (login && /VERIF/i.test(problem.code)) { setPendingVerification(true); setError('请先验证邮箱，再登录。'); }
@@ -103,7 +120,6 @@ export default function AuthPage() {
       else if (register) setError('该注册信息不可用，请重新填写或重新发送验证邮件。');
       else if (verify) setError('链接无效、已过期或密码不正确。请重试或重新申请邮件。');
       else if (reset) setError('链接无效或已过期，请重新申请邮件。');
-      else if (change) setError('当前密码不正确，或密码未能更新。请重试。');
       else setError('请求未完成，请稍后重试。');
     } finally {
       inFlight.current = false;
