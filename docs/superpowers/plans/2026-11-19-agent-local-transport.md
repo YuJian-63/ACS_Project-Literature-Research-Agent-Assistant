@@ -35,5 +35,5 @@
 - 整体审查发现的取消/提交竞态、维护扫描饥饿及部分清理恢复问题已完成回归修复；审查复核未发现剩余重要问题。
 - 后端完整离线测试：230 项，157 通过、73 跳过；Agent 完整测试：214 通过、4 跳过。后端包含真实独立 Python 进程、本地与假 SSH/Slurm 的 PDF 往返，并发提交只启动一次。
 - 后端变更 Python 的 E9/F/I、Agent 新模块完整 Ruff、新增 Python 格式及 git diff --check 已通过。
-- 未执行：隔离 PostgreSQL 集成、真实模型、真实 SSH/Slurm、TACC 网络/权限与 macOS 运行验收。测试的跳过项不算验收通过。操作步骤及统一检查矩阵见 docs/terminal-operations.md 与 docs/agent-transport-acceptance.md。
+- 当时未执行隔离 PostgreSQL 集成、真实模型、真实 SSH/Slurm、TACC 网络/权限与 macOS 验收。后续运行步骤与验证范围见[前后端验收记录](../../frontend-backend-acceptance.md)。
 - 当前工作区保留未提交修改；未改真实 .env，未运行数据库迁移、真实模型或集群作业，未提交或推送 Git。
