@@ -24,6 +24,7 @@ class Settings(BaseSettings):
     task_runner: Literal["agent"] = "agent"
     agent_dispatch_enabled: bool = False
     agent_exchange_root: Path | None = None
+    agent_library_public_url: str | None = None
     agent_transport: Literal["manual", "local", "tacc"] = "manual"
     agent_local_root: Path | None = None
     agent_local_python: Path | None = None
@@ -84,6 +85,17 @@ class Settings(BaseSettings):
         parsed = urlsplit(value)
         if parsed.scheme not in {"http", "https"} or not parsed.netloc or parsed.username or parsed.password or parsed.query or parsed.fragment or parsed.path not in {"", "/"}:
             raise ValueError("FRONTEND_PUBLIC_URL must be an HTTP(S) origin without credentials")
+        return value.rstrip("/")
+
+    @field_validator("agent_library_public_url", mode="before")
+    @classmethod
+    def validate_job_library_url(cls, value: str | None) -> str | None:
+        if not value:
+            return None
+        parsed = urlsplit(value)
+        if (parsed.scheme != "https" or not parsed.hostname or parsed.port == 0 or parsed.username is not None
+            or parsed.password is not None or parsed.query or parsed.fragment or parsed.path not in {"", "/"}):
+            raise ValueError("AGENT_LIBRARY_PUBLIC_URL must be an HTTPS origin without credentials")
         return value.rstrip("/")
 
     @property

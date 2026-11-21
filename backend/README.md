@@ -52,6 +52,7 @@ Parser 只提取 PDF 元数据。邮件 Worker 需要完整 SMTP 配置。研究
 | TASK_RUNNER | 默认 agent，仅支持独立 Agent |
 | AGENT_DISPATCH_ENABLED | 默认 false；完成传输配置后启用 |
 | AGENT_TRANSPORT | manual、local 或 tacc |
+| AGENT_LIBRARY_PUBLIC_URL | 可选，计算节点可访问的后端 HTTPS 地址。设置后，Worker 在每个派发的 outbox 写入作业私有的 `library-access.json`。课程 CPU 联调见 [TACC 说明](../tacc/TACC.md)。 |
 | CORS_ORIGINS | JSON 字符串数组；默认允许 localhost:5173 和 127.0.0.1:5173，不接受逗号分隔的裸字符串 |
 
 应用在宿主机运行，示例 DATABASE_URL 连接 `127.0.0.1:5432`。若已有独立 PostgreSQL 17+，可直接配置其 DATABASE_URL，跳过 Compose。修改用户、密码、端口或数据库名时，必须同步修改 DATABASE_URL；已初始化的数据卷不会因为更改 POSTGRES_* 自动修改已有数据库账号。

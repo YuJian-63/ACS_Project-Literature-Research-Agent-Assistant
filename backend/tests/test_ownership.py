@@ -459,6 +459,74 @@ class OwnershipPostgresTests(unittest.TestCase):
                 user_session.revoked_at = datetime.now(timezone.utc)
             self.assertEqual(agent.get(base, headers=headers).status_code, 401)
 
+    def submit_library_job(self, papers, *, allow_search):
+        from app.db.models import AgentRun
+
+        response = self.clients[0].post("/api/v1/agent-research", json={
+            "question": "Read the evidence", "paper_ids": papers, "allow_search": allow_search,
+        })
+        self.assertEqual(response.status_code, 202, response.text)
+        task_id = UUID(response.json()["task_id"])
+        with self.sessions() as session:
+            return task_id, session.get(AgentRun, task_id).dispatch_id
+
+    def test_search_job_token_follows_task_owner_lifetime_and_deadlines(self):
+        from datetime import timedelta
+        from unittest.mock import patch
+        from app.auth.agent_library import issue_job_library_token
+        from app.tasks.lifecycle import claim_task, fail_owned
+
+        own_paper = self.upload()
+        foreign_paper = self.upload(1)
+        task_id, dispatch_id = self.submit_library_job([], allow_search=True)
+        owner = uuid4()
+        base = "/api/v1/agent/papers"
+        expiry = datetime.now(timezone.utc) + timedelta(minutes=1)
+        token = issue_job_library_token(self.settings, dispatch_id, expiry.timestamp())
+        with TestClient(self.clients[0].app, headers={"Authorization": f"Bearer {token}"}) as agent:
+            self.assertEqual(agent.get(base).status_code, 401)
+            self.assertEqual(claim_task(self.sessions, owner), task_id)
+            found = agent.get(base)
+            self.assertEqual(found.status_code, 200, found.text)
+            self.assertEqual([item["id"] for item in found.json()["items"]], [own_paper])
+            self.assertEqual(agent.get(f"{base}/{own_paper}/pdf").content, b"%PDF-fixture")
+            self.assertEqual(agent.get(f"{base}/{foreign_paper}/pdf").status_code, 404)
+            self.assertEqual(agent.get("/api/v1/papers").status_code, 401)
+
+            tampered = token[:-1] + ("0" if token[-1] != "0" else "1")
+            self.assertEqual(agent.get(base, headers={"Authorization": f"Bearer {tampered}"}).status_code, 401)
+            with patch("app.auth.agent_library.db_now", return_value=expiry + timedelta(seconds=1)):
+                self.assertEqual(agent.get(base).status_code, 401)
+            with self.sessions() as session:
+                task = session.get(Task, task_id)
+                task_deadline = task.started_at + timedelta(seconds=task.timeout_seconds)
+            later = issue_job_library_token(self.settings, dispatch_id, (task_deadline + timedelta(minutes=1)).timestamp())
+            with patch("app.auth.agent_library.db_now", return_value=task_deadline + timedelta(seconds=1)):
+                self.assertEqual(agent.get(base, headers={"Authorization": f"Bearer {later}"}).status_code, 401)
+
+            self.assertTrue(fail_owned(self.sessions, task_id, owner, "TEST_STOP", "Stopped"))
+            self.assertEqual(agent.get(base).status_code, 401)
+            self.assertEqual(agent.get(f"{base}/{own_paper}/pdf").status_code, 401)
+
+    def test_job_with_search_disabled_can_only_read_its_selected_pdfs(self):
+        from app.auth.agent_library import issue_job_library_token
+        from app.tasks.lifecycle import claim_task
+
+        selected = self.upload()
+        unselected = self.upload()
+        foreign = self.upload(1)
+        task_id, dispatch_id = self.submit_library_job([selected], allow_search=False)
+        self.assertEqual(claim_task(self.sessions, uuid4()), task_id)
+        deadline = datetime.now(timezone.utc).timestamp() + 60
+        token = issue_job_library_token(self.settings, dispatch_id, deadline)
+        base = "/api/v1/agent/papers"
+        with TestClient(self.clients[0].app, headers={"Authorization": f"Bearer {token}"}) as agent:
+            self.assertEqual(agent.get(base).status_code, 403)
+            self.assertEqual(agent.get(f"{base}/{selected}/pdf").content, b"%PDF-fixture")
+            for paper_id in (unselected, foreign):
+                with self.subTest(paper_id=paper_id):
+                    self.assertEqual(agent.get(f"{base}/{paper_id}/pdf").status_code, 404)
+
     def task(self, paper, index=0, key="same-key"):
         return self.clients[index].post("/api/v1/tasks", json={"task_type": "summary", "question": "Summarize", "paper_ids": [paper]}, headers={"Idempotency-Key": key})
 

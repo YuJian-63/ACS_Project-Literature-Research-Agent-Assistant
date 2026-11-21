@@ -6,7 +6,8 @@ from zipfile import BadZipFile
 
 from sqlalchemy.orm import Session, sessionmaker
 
-from app.agent_bridge.bundles import export_bundle, read_result
+from app.agent_bridge.bundles import canonical_json, export_bundle, read_result
+from app.agent_bridge.files import atomic_write
 from app.agent_bridge.maintenance import AgentMaintenance, cancel_terminal
 from app.agent_bridge.store import complete_delivery, load_execution, record_job
 from app.agent_bridge.transport import (
@@ -15,6 +16,7 @@ from app.agent_bridge.transport import (
     create_transport,
     transport_name,
 )
+from app.auth.agent_library import issue_job_library_token
 from app.config import Settings
 from app.db.session import create_database_engine, create_session_factory
 from app.tasks.lifecycle import (
@@ -68,6 +70,11 @@ class AgentWorker:
             if execution.transport != transport_name(self.settings):
                 raise TransportError("AGENT_TRANSPORT_CHANGED")
             bundle = export_bundle(manifest, self.settings.storage_root, self.settings.resolved_agent_exchange_root)
+            if self.settings.agent_library_public_url:
+                token = issue_job_library_token(self.settings, manifest.dispatch_id, execution.deadline)
+                atomic_write(bundle.with_name("library-access.json"), canonical_json({
+                    "base_url": self.settings.agent_library_public_url, "token": token,
+                }))
             if ownership_lost.is_set() or not set_task_stage(self.sessions, task_id, self.owner,
                 "agent_packaging", "agent_waiting", "输入文件已就绪，正在派发并等待 Agent 结果"):
                 return

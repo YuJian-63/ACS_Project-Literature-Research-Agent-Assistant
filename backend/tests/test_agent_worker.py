@@ -1,4 +1,8 @@
+import json
+import os
 import unittest
+from zipfile import ZipFile
+from pydantic import SecretStr
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
 from uuid import UUID
@@ -79,6 +83,26 @@ class AgentWorkerTests(unittest.TestCase):
             self.fail_owned.call_args.kwargs["details"]["wrapper_code"],
             "EXECUTION_ERROR",
         )
+
+    def test_online_job_receives_private_credentials_separately_from_its_input(self):
+        from app.auth.agent_library import issue_job_library_token
+
+        url = "https://library.example.org"
+        settings = self.worker.settings.model_copy(update={
+            "agent_library_public_url": url, "auth_csrf_key": SecretStr("fixture-key" * 4),
+        })
+        self.worker.settings = settings
+        self.transport.poll.return_value = self.status("failed", "model_error")
+        self.worker.execute(self.task_id)
+        _, bundle = self.transport.upload.call_args.args
+        private = bundle.with_name("library-access.json")
+        token = issue_job_library_token(settings, self.manifest.dispatch_id, self.execution.deadline)
+        self.assertEqual(json.loads(private.read_text()), {"base_url": url, "token": token})
+        if os.name == "posix":
+            self.assertEqual(private.stat().st_mode & 0o777, 0o600)
+        with ZipFile(bundle) as archive:
+            self.assertNotIn(private.name, archive.namelist())
+            self.assertNotIn(token.encode(), archive.read("manifest.json"))
         self.complete_delivery.assert_not_called()
 
     def test_success_status_without_result_never_marks_task_success(self):

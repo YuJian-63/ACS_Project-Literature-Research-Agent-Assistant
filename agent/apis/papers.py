@@ -6,7 +6,7 @@ import json
 import re
 import tempfile
 import time
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from urllib.parse import unquote, urlparse
 
@@ -15,6 +15,7 @@ import pymupdf
 
 from config import DATA_DIR
 
+UTC = timezone.utc  # noqa: UP017 - TACC's CPU probe uses Python 3.10.
 ARXIV_HOSTS = {"arxiv.org", "www.arxiv.org", "export.arxiv.org"}
 ARXIV_ID = re.compile(
     r"(?P<base>(?:\d{2}(?:0[1-9]|1[0-2])\.\d{4,5}|[A-Za-z][A-Za-z.-]*/\d{2}(?:0[1-9]|1[0-2])\d{3}))"

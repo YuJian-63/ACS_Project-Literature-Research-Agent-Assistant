@@ -190,7 +190,11 @@ Content-Type 为 multipart/form-data，仅包含一个必填的 file 字段。
 | `GET /api/v1/agent/papers` | 使用 `Authorization: Bearer <access_token>`。支持 `q` 按空白分隔多个关键词；`match=all`（默认）要求所有词命中，`match=any` 要求至少一个词命中。每个词在标题或原文件名中做不区分大小写的字面子串匹配。支持 `status` 过滤。`limit` 默认 20、最大 100，`offset` 默认 0。默认列出调用用户的所有论文，按入库时间倒序。 |
 | `GET /api/v1/agent/papers/{paper_id}/pdf` | 使用同一 Bearer 令牌请求 `download_url`，流式返回持久化的原始 PDF。响应为 `application/pdf`，使用 `attachment` 和原文件名。 |
 
-令牌仅授权签发账号的只读论文库操作，最长有效 30 分钟，且随签发会话过期或撤销而失效。令牌缺失、过期或无效返回 `401 AGENT_LIBRARY_TOKEN_REQUIRED`。论文不存在或属于其他账号时返回 `404 PAPER_NOT_FOUND`。论文记录存在但文件不可读时返回 `500 FILE_UNAVAILABLE`。
+浏览器签发的会话令牌仅授权该账号的只读论文库操作，最长有效 30 分钟，且随签发会话过期或撤销而失效。
+
+两个 GET 接口也接受 Worker 自动签发的作业令牌。后端按 `dispatch_id` 查任务所属用户、搜索设置和截止时间。开启搜索时可检索并下载该用户的论文，关闭搜索时列表返回 `403 AGENT_LIBRARY_SEARCH_DISABLED`，下载只开放预选的 UUID。任务终结、超时或账号停用后，作业令牌失效。签发配置见 [TACC 联调说明](../tacc/TACC.md)。
+
+缺失、过期或无效的令牌返回 `401 AGENT_LIBRARY_TOKEN_REQUIRED`。论文不存在、属于其他账号或不在允许下载的范围时返回 `404 PAPER_NOT_FOUND`。论文记录存在但文件不可读时返回 `500 FILE_UNAVAILABLE`。
 
 多关键词默认按 AND 组合，可以分别命中标题和原文件名，顺序和位置不限。通过 `match` 参数切换组合方式：
 
