@@ -151,7 +151,8 @@ done < <(find "$release/frontend" -maxdepth 1 -type f -print0)
 as_acs install -m 644 "$release/frontend/index.html" "$site/.index-$run_id.html"
 as_acs mv -f "$site/.index-$run_id.html" "$site/index.html"
 curl --noproxy '*' --connect-timeout 5 --max-time 15 -fsS \
-    -H 'Host: 8.218.149.237' http://127.0.0.1/ > "$backup/served-index.html"
+    --resolve 8.218.149.237:443:127.0.0.1 \
+    https://8.218.149.237/ > "$backup/served-index.html"
 cmp "$release/frontend/index.html" "$backup/served-index.html"
 curl --noproxy '*' --retry 3 --connect-timeout 5 --max-time 15 -fsS \
     https://8.218.149.237/ready

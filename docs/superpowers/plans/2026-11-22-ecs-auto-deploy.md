@@ -36,6 +36,7 @@ Activation uses GitHub repository secrets, installation of the ECS entrypoint by
 - Verified Git bundle creation, full-tree archive extraction, locked requirements export, workflow structure, and embedded Bash syntax locally.
 - Uploaded the four installer files to `/home/acs/acs-deploy/auto-bootstrap/` and checked their hashes and syntax on ECS.
 - Confirmed production absolute storage paths, compatibility of the privileged backup helper with system Python 3.6, six active services, and API readiness.
-- Root installation and dedicated deployment-key login with the entrypoint sudo grant have been verified; the user confirmed both repository secrets were added. Publication to main and the first actual Actions deployment are the next activation steps.
+- Root installation and dedicated deployment-key login with the entrypoint sudo grant have been verified; both repository secret names were verified through GitHub. Published the workflow in commit `a2455a9` and observed Actions run `44932982176`.
+- The first run backed up PostgreSQL, migrated, started all services, and published the frontend, but its final index comparison read an HTTP 308 redirect page. Confirmed HTTPS serves the exact published file and added a regression test before correcting the check to use verified HTTPS over loopback. The root-owned entrypoint must be reinstalled before publishing this correction and repeating deployment.
 - Ruling: use repository secrets rather than requiring a GitHub deployment environment, to avoid introducing private-repository plan dependencies.
 - Ruling: require absolute production storage paths instead of silently relocating persisted PDFs when switching source trees.
