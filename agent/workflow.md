@@ -29,36 +29,38 @@
 
 打开、阅读与摘要共用论文加载和缓存；打开论文只返回导航信息，原文证据在读取或成功摘要后登记。PDF 本地缓存；启用持久化时，论文及结果保存到数据库。原文与摘要分别去重，摘要后可再读取原文核实。摘要工具的现有策略暂保留，后续单独评估。
 
-主模型调用前经 `prepare_context` 准备一次输入视图并估算容量；默认保留完整历史，不压缩。`run_task` 可注入主 agent 的 `context_policy`，返回的模型视图与保存的历史分离；摘要独立准备输入，只使用默认策略。输入估算加本次输出额度达到窗口的 `context_finalize_ratio`（默认 `0.8`）且未超过硬上限时，使用该视图追加作答指令，经过硬容量检查后发起一次无工具收尾，基于已有证据作答并说明缺口。超限或失败不裁剪、不循环重试。
+主模型调用前按 `context_policy` 准备输入视图。两版默认使用 `full`，可切换为 `compact`。估算输入加本次输出额度达到窗口的 `context_finalize_ratio`（默认 `0.9`）时，`compact` 先用程序精简工具回包。准备后仍有压力且能放入窗口时，主 agent 追加作答指令，经容量检查后做一次无工具收尾。保存的历史、原文证据和工具记录保留。分块摘要独立准备完整输入。
 
 ## Extensions
 
-第一版 Extension 复用现有 ReAct 图、论文工具与 context 策略，新增 `retrieve`。该工具在指定的一篇或多篇论文中联合检索。首次检索时复用已打开论文的解析结果，逐篇按需为原文块建索引并缓存在本地。每次调用生成一个查询向量，在全部选中论文中按余弦相似度取全局前 `top_k` 个块，仅登记实际返回的原文块为检索证据。后续 Planner 与 Reflection 可通过同一模型的独立调用实现，届时再确定构图。历史压缩等策略可通过已有 `prepare_context` 接口继续扩展。
+Extension 复用 ReAct 图、论文工具与 context 策略，新增 `retrieve`。该工具在指定的一篇或多篇论文中联合检索。首次检索时复用已打开论文的解析结果，逐篇按需为原文块建索引并缓存在本地。每次调用生成一个查询向量，在全部选中论文中按余弦相似度取全局前 `top_k` 个块，仅登记实际返回的原文块为检索证据。[实验结果](../RESULTS.md) · [后续计划](../PLAN.md)
 
 | 模块 | 职责与返回内容 |
 |---|---|
-| Planner | 将要求展开为子问题、输出字段和调查顺序；维护可更新的覆盖清单 |
+| Planner（`--planner` 开启） | 起始无工具调用，返回空计划或 1–3 行建议，写入 `state.plan` 供主 agent 参考 |
 | Chunk & Embed | 将获取的正文分块、生成向量，保留原文和来源定位 |
 | Vector DB | 存储文本块、向量及来源信息，供已获取材料的重复检索 |
 | Retrieval | 在允许的文献范围内按子问题检索，返回相关原文、定位及必要的相邻上下文 |
-| Reflection | 对照任务、覆盖清单、候选输出及所引原文，返回具体缺口和修订/结束建议 |
+| Reflection（`--reflection` 开启） | 在自然交稿后对照正文、表格与引用原文，接受草稿、直接修订或补证一次后无工具修订 |
 
 存储与读取路径为 **Chunk & Embed → Vector DB → Retrieval**。Paper DB 管文献，Vector DB 管可检索文本块；embedding 后仍由 LLM 阅读证据、综合作答。检索后的问题定向摘要可按上下文需要加入。
 
-覆盖清单记录待查、已有证据、证据不足或冲突。Reflection 发现缺口后交回 agent：补读已有材料、改写库内查询、在允许时补搜新文献，或收紧结论。论文总结按章节和总结维度取证；检索遗漏时可按位置补读。
+Planner 与 Reflection 可独立开启，默认均关闭。Planner 的非空建议附在初始任务消息的原任务 JSON 之后。Reflection 只接收主 agent 自然提交且可解析的草稿，需要更多原文时可选一次 `read_paper` 或 `retrieve`。接受或修订后的答案统一进入最终校验。压力收尾直接进入最终校验。
+
+DeepSeek Harness 的待办工具让模型在简单单步任务上跳过清单，Pi 的 Plan Mode 示例通过开关显式启用。本项目让 Planner 自行判断是否有容易遗漏的证据要求。即使是多篇比较，如果原任务已经足够明确，也可以返回空计划。[DeepSeek Harness 待办工具](https://github.com/deepseek-ai/deepseek-harness/blob/master/packages/todo/tool-todo/src/index.ts) · [Pi Plan Mode 示例](https://github.com/earendil-works/pi/blob/main/packages/coding-agent/examples/extensions/plan-mode/index.ts)
 
 ## 证据与状态
 
 证据记录至少包含 `source_id`、`paper_id`（适用时）、版本、`chunk_id`、章节或页码及 `source_text`。摘要、答案论断和比较表单元格关联这些记录；可用的定位精度由解析结果决定。
 
-当前 `GraphState` 仅保存消息、停止原因和最终输出；资料、证据及运行记录由单次运行维护。以下是研究过程涉及的信息，后续按实际需要调整状态结构：
+当前 `GraphState` 保存消息、停止原因和最终输出，Extension 另存本次计划。资料、证据及运行记录由单次运行维护。
 
 | 状态项 | 内容 |
 |---|---|
 | Task | 原问题、输出要求、允许来源、主 agent 轮数和时间上限 |
 | Sources | 候选与纳入文献、版本、全文状态、去重和筛选记录 |
 | Evidence | 原文块、摘要、来源定位、论断或比较字段的证据关联 |
-| Progress | 工具历史、候选输出、未解决项；扩展另含覆盖清单与检查反馈 |
+| Progress | 计划、工具历史、候选输出、未解决项 |
 | Usage | 时间、API 返回的 token、主 agent 轮数、模型/工具调用数与错误 |
 
 整任务限制为最大主 agent 轮数与时间，默认分别为 40 轮和 600 秒；自然最终回答和压力收尾都占一轮，摘要调用另计入模型用量。到限直接停止并保存 `stop_reason`、证据和 trace；不因最后一轮、剩余时间或无进展提前收尾。时间在调用前后检查，并限制单次请求超时。
@@ -72,7 +74,7 @@
 1. 固定输入、输出和证据结构，接通模型客户端，用单篇 QA 跑通 ReAct 调用、补读、引用和停止。
 2. 接入 Source Search 与长文分块摘要，覆盖论文总结、综述和比较表；保留可复现的 baseline 配置与 trace。
 3. 验证 context 压力收尾，先在独立的 Extension 入口接入按需建索引与 Retrieval，沿用 Baseline 的执行与收尾。
-4. 跑通并完善 Extension 后，根据实际差异决定模块化范围与后续 context 策略。Planner 与 Reflection 留待后续讨论。
+4. 在 Extension 对照完整历史与程序压缩，再分别试验 Planner、Reflection。
 5. 用相同任务与允许资料检查遗漏、无证据回答、不同实验条件和全文不可得等情况，记录策略与成本差异，按结果调整实现。
 
 Baseline 使用 LangGraph、搜索 API、PDF parser 和 PostgreSQL。首版 Extension 使用百炼 embedding 与本地向量索引，后续再评估 pgvector。

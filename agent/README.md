@@ -27,7 +27,7 @@ PDF 缓存在 `data/papers/`；解析保留页码、版本及原文块。设计�
 uv run python baseline.py --task examples/qa.json --persist
 uv run python baseline.py --task examples/summary.json
 uv run python baseline.py --task examples/review.json
-uv run python baseline.py --task examples/qa.json --context-window 32000 --context-finalize-ratio 0.8
+uv run python baseline.py --task examples/qa.json --context-window 32000 --context-finalize-ratio 0.9
 uv run pytest -q
 ```
 
@@ -37,7 +37,18 @@ Baseline 结果与 trace 写入 `runs/baseline/`；`--persist` 同时保存到 N
 
 ```bash
 uv run python extension.py --task examples/qa.json
+uv run python extension.py --task examples/summary.json --context-policy compact
+uv run python extension.py --task examples/review.json --planner --context-policy full --context-finalize-ratio 0.9
+uv run python extension.py --task examples/qa.json --reflection
 ```
+
+Extension 默认关闭 Planner。传 `--planner` 或 Python 参数 `planner=True`，会在研究开始前做一次无工具模型调用，输出额度为 `min(256, max_output_tokens)`。主 agent 的首条任务消息先给原任务 JSON，再附上 1–3 行标为参考的建议。空计划、格式无效或规划请求失败时，主 agent 直接处理原任务。规划共用任务时限。
+
+结果的 `configuration.planner` 记录开关。`purpose="planner"` 的模型记录可查请求、响应和用量，`kind="planner"` 的记录可查采纳的计划及处理结果。规划调用计入 `usage.model_calls` 和 API token 用量，主 agent 的 `max_steps` 单独计数。
+
+Reflection 独立于 Planner，默认关闭。传 `--reflection` 或 Python 参数 `reflection=True` 后，主 agent 自然交稿时，模型会对照原任务、正文、比较表及其引用的原文，核实结论、比较对象和实验条件。它可以接受草稿、直接修订，或调用一次 `read_paper` / `retrieve` 补证再修订。补证后的修订调用不带工具。三条路径均经过原有引用与未解决项校验。压力收尾直接进入该校验。
+
+结果的 `configuration.reflection` 记录开关，`kind="reflection"` 记录处理结果。核对和补证后的修订分别记为 `purpose="reflection"` 和 `purpose="reflection_revision"`。额外的 1–2 次模型调用计入聊天用量和整任务耗时，补证计入工具调用数，主 agent 轮数单独计量。若核对请求失败、超出窗口或返回无效输出，保留草稿并执行原有校验。整任务超时仍返回 `time_limit`。实测增量见[开关对照](../RESULTS.md)。
 
 Extension 的 `retrieve(source, query, top_k=3)` 接受单个论文标识或非空标识列表。所选论文的原文块一起排名，合计返回最多 `top_k` 个（可设为 1–5），每块保留论文标识、页码和引用 ID。例如传入两篇论文及 `top_k=3` 时，两篇合计最多返回三个块，结果可以全部来自同一篇。每次调用只为查询文本生成一个向量。
 
@@ -45,7 +56,9 @@ Extension 的 `retrieve(source, query, top_k=3)` 接受单个论文标识或非�
 
 结果写入 `runs/extension/`。启用 `--persist` 时，Neon 存储键为 `extension/<task_id>`，结果 JSON 保留原任务 ID。Trace 中 `retrieval_index` 记录建索引或复用，`embedding` 按 `document` 和 `query` 分别记录调用耗时与实际输入 token；`usage` 延续 Baseline 的聊天模型统计。
 
-在 `agent/` 运行 `./run.sh` 可串行对比三个示例。每个示例先跑 Baseline，再跑 Extension，各自写入对应目录的 `qa.json`、`summary.json`、`review.json`。重跑会覆盖这六个同名结果。单项失败后继续运行其余项，脚本最后以非零状态退出。
+在 `agent/` 运行 `./run.sh` 可串行对比三个示例。每个示例先跑 Baseline，再跑 Extension，分别写入 `runs/baseline/<task_id>.json` 和 `runs/extension/<task_id>.json`。示例每次生成新的任务 ID。单项失败后继续运行其余项，脚本最后以非零状态退出。
+
+重复写入同一路径会覆盖已有结果。对照实验可用 `--output` 为每次运行指定不同的文件名。
 
 任务要求写在 `question` 中，可包含问答、总结、比较或混合要求。任务 JSON 还可设置以下执行参数：
 
@@ -59,11 +72,13 @@ Extension 的 `retrieve(source, query, top_k=3)` 接受单个论文标识或非�
 
 模型请求工具时继续循环，返回最终 JSON 时结束。到达轮数或时间上限直接记录 `step_limit` / `time_limit`，保留证据与 trace，不追加收尾调用。时间在调用前后检查，并收紧单次请求超时；它不是到点强杀。Token 用量只按 API usage 记录，不设累计额度。
 
-每次主模型或摘要调用前，检查估算输入 token 加本次输出额度是否超过 `context_window`；超过则直接停止为 `context_limit`，不发起模型调用。窗口默认 `32000`，CLI 通过 `--context-window` 配置；Python 可传 `run_task(..., context_window=None)` 关闭本地上限。这是运行参数，不放入任务 JSON。服务端报告上下文超限时也记录 `context_limit`。
+每次主模型或摘要调用前，检查准备后的输入估算加本次输出额度是否超过 `context_window`。超过则直接停止为 `context_limit`。窗口默认 `32000`，CLI 通过 `--context-window` 配置，Python 可传 `run_task(..., context_window=None)` 关闭本地上限。这是运行参数，不放入任务 JSON。服务端报告上下文超限时也记录 `context_limit`。
 
-主循环先运行一次 [prepare_context](context.py)。准备后输入估算加输出额度达到窗口的 `context_finalize_ratio`（默认 `0.8`）且未超过硬上限时，改为一次无工具收尾：在该输入视图追加作答指令，再检查容量，要求基于已有证据回答并说明缺口。CLI 可用 `--context-finalize-ratio` 配置 `(0, 1]` 的比例；Python 传 `context_finalize_ratio=None` 或 `context_window=None` 禁用该触发。它不由最后一轮或剩余时间触发；如果已超过硬窗口则直接停止，不尝试收尾，超限或失败不裁剪、不重试。
+两版均可用 `--context-policy full|compact` 或 Python 的 `context_policy` 选择主 agent 的输入视图。默认 `full` 保留完整历史。`compact` 在估算输入加输出额度达到窗口的 90% 时，以程序精简重复的原文块、已有选文的搜索回包及空读记录。每个唯一原文块保留一份完整文本，工具调用与返回保持配对。原始历史和工具 trace 保留，精简不调用模型。分块摘要始终使用完整输入。[策略实现](context.py)
 
-默认 `prepare_context` 保留完整历史，不压缩，也不调用模型。首次计数使用字符、消息包装和工具定义估算；后续请求的历史前缀和工具定义匹配时，用 API `input_tokens` 校准并估算新增内容。主 agent 与摘要分别维护计数锚点；所有本地计数仍是近似值，实际 TACC 容量与 tokenizer 待对齐。Python 可通过 `context_policy` 替换主历史处理策略；摘要仍使用默认准备逻辑和容量检查，不触发收尾。
+用 `--context-finalize-ratio` 调整同一个压力阈值。准备后的输入加输出额度仍达到阈值且在硬窗口内时，主 agent 追加一次无工具作答指令，检查容量后收尾。若仍超硬窗口，返回 `context_limit`。Python 传 `context_finalize_ratio=None` 关闭压力收尾，此时 `compact` 仅在达到硬窗口时尝试精简。传 `context_window=None` 则关闭本地容量触发。
+
+首次计数按字符、消息包装和工具定义估算。历史前缀和工具定义匹配时，用 API `input_tokens` 校准并估算新增内容。改写历史可能使估算回退到字符法。主 agent 与摘要分别维护计数锚点，实际 TACC 容量与 tokenizer 待对齐。
 
 收尾沿用准备后的输入估算，再加新增作答指令估算；虽然实际请求不带工具，估算保留原工具定义额度，记录为 `finalize_conservative_estimate`。这是保守估算方式，不保证数学上界，也不作为 API 用量。
 

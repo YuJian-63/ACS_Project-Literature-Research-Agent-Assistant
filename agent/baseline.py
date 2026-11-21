@@ -9,7 +9,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from functools import partial
 from pathlib import Path
-from typing import Annotated, Any, TypedDict
+from typing import Annotated, Any, NotRequired, TypedDict
 
 from langchain_core.messages import BaseMessage, HumanMessage, SystemMessage, ToolMessage
 from langchain_core.tools import BaseTool, InjectedToolArg, tool
@@ -22,7 +22,13 @@ from apis.papers import normalize_arxiv_id
 from apis.papers import read_paper as read_paper_api
 from apis.search_web import search_web
 from config import RUNS_DIR
-from context import PreparedContext, TokenCounter, prepare_context
+from context import (
+    DEFAULT_FINALIZE_RATIO,
+    PreparedContext,
+    TokenCounter,
+    prepare_context,
+    resolve_context_policy,
+)
 from schemas import Evidence, Task, TaskResult, Usage
 
 
@@ -33,7 +39,7 @@ class RunLog:
     started: float
     context_window: int | None = 32000
     context_policy: Callable = prepare_context
-    context_finalize_ratio: float | None = 0.8
+    context_finalize_ratio: float | None = DEFAULT_FINALIZE_RATIO
     context_counters: dict[str, TokenCounter] = field(default_factory=dict)
     usage: Usage = field(default_factory=Usage)
     trace: list[dict] = field(default_factory=list)
@@ -61,7 +67,7 @@ class RunStopped(Exception):
 
 # Tools: shared paper helpers, then the model-facing functions.
 # Citation normalization is also used when assembling the final result.
-def _citations(text: str) -> tuple[str, list[str]]:
+def normalize_citations(text: str) -> tuple[str, list[str]]:
     """Normalize marked evidence references, leaving ordinary brackets untouched."""
     cited = []
 
@@ -251,7 +257,7 @@ def summarize_paper(
             or response.response_metadata.get("finish_reason") == "length"
         ):
             raise ValueError("Chunk summary was empty or truncated; request fewer pages")
-        summary, referenced = _citations(response.content)
+        summary, referenced = normalize_citations(response.content)
         chunk_ids = [c["chunk_id"] for c in batch]
         if not referenced or any(key not in chunk_ids for key in referenced):
             raise ValueError("Chunk summary contained invalid citations; request fewer pages")
@@ -296,13 +302,25 @@ def prepare_model_context(
     # Only the main agent uses the injected history policy. Excerpt summaries
     # still get a window check, without recursively compacting their own input.
     policy = log.context_policy if purpose == "agent" else prepare_context
-    return policy(
+    prepared = policy(
         [message.model_copy(deep=True) for message in messages],
         tools=tools,
         context_window=log.context_window,
         max_output_tokens=max_tokens,
         counter=counter,
     )
+    if prepared.compaction is not None:
+        log.trace.append(
+            {
+                "kind": "context",
+                "action": "compact",
+                "purpose": purpose,
+                "window": log.context_window,
+                "output_limit": max_tokens,
+                **prepared.compaction,
+            }
+        )
+    return prepared
 
 
 def invoke_model(
@@ -484,15 +502,20 @@ class GraphState(TypedDict):
     messages: list[BaseMessage]
     stop_reason: str
     final: dict[str, Any]
+    natural_draft: NotRequired[bool]
+    plan: NotRequired[str]
 
 
-def _final_json(content: str) -> dict[str, Any]:
+def parse_json_response(content: str) -> Any:
     if not isinstance(content, str):
         raise TypeError("Final response must be text")
     text = content.strip()
     if text.startswith("```"):
         text = re.sub(r"^```(?:json)?\s*|\s*```$", "", text)
-    result = json.loads(text)
+    return json.loads(text)
+
+
+def validate_final_fields(result: Any) -> dict[str, Any]:
     if not isinstance(result, dict) or not isinstance(result.get("answer"), str):
         raise TypeError("Final response must contain a string answer")
     if not isinstance(result.get("comparison_table", ""), str):
@@ -566,11 +589,16 @@ def agent_node(state: GraphState, *, model, context: PaperContext) -> dict:
         reason = "step_limit" if log.usage.agent_steps >= context.task.max_steps else ""
         return {"messages": updated, "stop_reason": reason}
     try:
-        final = _final_json(response.content)
+        final = validate_final_fields(parse_json_response(response.content))
     except (TypeError, ValueError):
         log.errors.append({"stage": "final", "type": "InvalidOutput"})
         return {"messages": updated, "stop_reason": "invalid_output"}
-    return {"messages": updated, "final": final, "stop_reason": "completed"}
+    return {
+        "messages": updated,
+        "final": final,
+        "natural_draft": not finalizing,
+        "stop_reason": "completed",
+    }
 
 
 def tools_node(state: GraphState, *, tools: dict[str, BaseTool], context: PaperContext) -> dict:
@@ -626,15 +654,38 @@ def tools_node(state: GraphState, *, tools: dict[str, BaseTool], context: PaperC
     return {"messages": state["messages"] + observations, "stop_reason": reason}
 
 
-# Graph construction: just the ReAct loop.
-def build_graph(model, tools: list[BaseTool], context: PaperContext):
+# The ReAct loop can start with a plan and finish with a review of a natural draft.
+def build_graph(
+    model,
+    tools: list[BaseTool],
+    context: PaperContext,
+    *,
+    planner: Callable | None = None,
+    reflection: Callable | None = None,
+):
     graph = StateGraph(GraphState)
     graph.add_node("agent", partial(agent_node, model=model, context=context))
     graph.add_node(
         "tools", partial(tools_node, tools={item.name: item for item in tools}, context=context)
     )
-    graph.add_edge(START, "agent")
-    graph.add_conditional_edges("agent", lambda state: END if state["stop_reason"] else "tools")
+    if planner is None:
+        graph.add_edge(START, "agent")
+    else:
+        graph.add_node("planner", partial(planner, context=context))
+        graph.add_edge(START, "planner")
+        graph.add_conditional_edges(
+            "planner", lambda state: END if state["stop_reason"] else "agent"
+        )
+    if reflection is not None:
+        graph.add_node("reflection", partial(reflection, context=context))
+        graph.add_edge("reflection", END)
+
+    def after_agent(state: GraphState) -> str:
+        if reflection is not None and state.get("natural_draft"):
+            return "reflection"
+        return END if state["stop_reason"] else "tools"
+
+    graph.add_conditional_edges("agent", after_agent)
     graph.add_conditional_edges("tools", lambda state: END if state["stop_reason"] else "agent")
     return graph.compile()
 
@@ -643,8 +694,8 @@ def build_graph(model, tools: list[BaseTool], context: PaperContext):
 def make_result(state: GraphState, context: PaperContext) -> TaskResult:
     task, log = context.task, context.log
     final, reason = state["final"], state["stop_reason"]
-    answer, answer_citations = _citations(final.get("answer", ""))
-    table, table_citations = _citations(final.get("comparison_table", ""))
+    answer, answer_citations = normalize_citations(final.get("answer", ""))
+    table, table_citations = normalize_citations(final.get("comparison_table", ""))
     unresolved = list(final.get("unresolved", []))
     cited = list(dict.fromkeys(answer_citations + table_citations))
     missing = [key for key in cited if key not in context.evidence]
@@ -709,8 +760,8 @@ def run_task(
     reader: Callable = read_paper_api,
     persist: bool = False,
     context_window: int | None = 32000,
-    context_policy: Callable = prepare_context,
-    context_finalize_ratio: float | None = 0.8,
+    context_policy: str | Callable = prepare_context,
+    context_finalize_ratio: float | None = DEFAULT_FINALIZE_RATIO,
 ) -> TaskResult:
     """Create tools and model, run the graph, then validate and optionally save the result."""
     task = task if isinstance(task, Task) else Task.model_validate(task)
@@ -728,7 +779,7 @@ def run_task(
             timeout_seconds=task.timeout_seconds,
             started=time.monotonic(),
             context_window=context_window,
-            context_policy=context_policy,
+            context_policy=resolve_context_policy(context_policy, context_finalize_ratio),
             context_finalize_ratio=context_finalize_ratio,
         ),
         search=search,
@@ -779,9 +830,15 @@ def main() -> int:
         "--context-window", type=int, default=32000, help="Local estimated input + output limit"
     )
     parser.add_argument(
+        "--context-policy",
+        choices=("full", "compact"),
+        default="full",
+        help="Keep full history or compact redundant tool results under pressure",
+    )
+    parser.add_argument(
         "--context-finalize-ratio",
         type=float,
-        default=0.8,
+        default=DEFAULT_FINALIZE_RATIO,
         help="Finalize at this fraction of the context window (input + output)",
     )
     args = parser.parse_args()
@@ -790,6 +847,7 @@ def main() -> int:
         task,
         persist=args.persist,
         context_window=args.context_window,
+        context_policy=args.context_policy,
         context_finalize_ratio=args.context_finalize_ratio,
     )
     output = args.output or RUNS_DIR / "baseline" / f"{task.task_id}.json"
