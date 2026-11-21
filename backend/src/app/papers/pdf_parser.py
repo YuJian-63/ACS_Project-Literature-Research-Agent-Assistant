@@ -2,19 +2,22 @@ import hashlib
 import io
 import json
 import logging
+import math
+import re
 import sys
+import unicodedata
 from pathlib import Path
 
 import pypdf
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 from pypdf import PdfReader
+from app.papers.limits import MAX_PDF_BYTES as MAX_FILE_BYTES
 
 MAX_PAGES = 500
 MAX_TEXT_BYTES = 8 * 1024 * 1024
 MAX_CHUNKS = 10000
 MAX_STREAM_BYTES = 16 * 1024 * 1024
 CHUNK_CHARACTERS = 2000
-MAX_FILE_BYTES = 20 * 1024 * 1024
 PARSER_VERSION = f"pypdf-{pypdf.__version__}-text-v1"
 
 
@@ -35,6 +38,7 @@ class ParsedChunk(BaseModel):
 
 class ParseResult(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
+    title: str | None = Field(default=None, min_length=1, max_length=255)
     page_count: int = Field(ge=1, le=MAX_PAGES)
     parser_version: str
     chunks: list[ParsedChunk] = Field(min_length=1, max_length=MAX_CHUNKS)
@@ -60,6 +64,40 @@ class ParseResult(BaseModel):
         return self
 
 
+def normalize_title(value: object) -> str | None:
+    if not isinstance(value, str):
+        return None
+    value = ''.join(' ' if unicodedata.category(character).startswith('C') else character for character in value)
+    title = ' '.join(value.split())
+    if not title or title.casefold() in {'untitled', 'untitled document', 'main document', 'document',
+            'title', 'paper', 'manuscript', 'article', 'unknown', 'no title', 'abstract', 'introduction',
+            'contents', 'references', '摘要', '引言', '目录'}:
+        return None
+    if re.fullmatch(r'(?:\d{4}\.\d{4,5}(?:v\d+)?|[a-z.-]+/\d{7}(?:v\d+)?)', title, re.IGNORECASE):
+        return None
+    if title.lower().endswith(('.pdf', '.doc', '.docx', '.tex')) or re.match(
+            r'^(?:microsoft (?:word|powerpoint)|arxiv\s*:?\s*\d|preprint\b)', title, re.IGNORECASE):
+        return None
+    return title[:255].rstrip()
+
+
+def first_page_title(fragments: list[tuple[str, float]]) -> str | None:
+    candidates = [(text, size) for text, size in fragments if normalize_title(text) is not None]
+    body_sizes = [size for text, size in candidates if len(text) >= 20]
+    if not candidates or not body_sizes:
+        return None
+    largest = max(size for _, size in candidates)
+    if largest < min(body_sizes) * 1.35:
+        return None
+    lines = []
+    for text, size in candidates:
+        if size >= largest * .9:
+            lines.append(text)
+        elif lines:
+            break
+    return normalize_title(' '.join(lines))
+
+
 def parse_pdf(
     source: bytes, *, max_pages: int = MAX_PAGES, max_text_bytes: int = MAX_TEXT_BYTES,
     max_chunks: int = MAX_CHUNKS, max_stream_bytes: int = MAX_STREAM_BYTES,
@@ -76,12 +114,24 @@ def parse_pdf(
         if page_count > max_pages:
             raise ParseFailure("PDF_LIMIT_EXCEEDED", "PDF 超出解析页数限制")
         chunks = []
+        fragments = []
+
+        def collect_title(text, matrix, text_matrix, font, size):
+            if not isinstance(size, (int, float)) or not math.isfinite(size) or size <= 0:
+                return
+            if abs(matrix[1]) > abs(matrix[0]):
+                return
+            for line in text.splitlines():
+                line = line.strip()
+                if line and len(fragments) < 128:
+                    fragments.append((line, float(size)))
+
         total_bytes = 0
         for page_number, page in enumerate(reader.pages, start=1):
             stream = page.get_contents()
             if stream is not None and len(stream.get_data()) > max_stream_bytes:
                 raise ParseFailure("PDF_LIMIT_EXCEEDED", "PDF 单页内容流超出解析限制")
-            content = (page.extract_text() or "").replace("\r\n", "\n").replace("\r", "\n").replace("\x00", "").strip()
+            content = (page.extract_text(visitor_text=collect_title if page_number == 1 else None) or "").replace("\r\n", "\n").replace("\r", "\n").replace("\x00", "").strip()
             total_bytes += len(content.encode("utf-8"))
             if total_bytes > max_text_bytes:
                 raise ParseFailure("PDF_LIMIT_EXCEEDED", "PDF 文本超出解析大小限制")
@@ -95,7 +145,12 @@ def parse_pdf(
                                           content_sha256=hashlib.sha256(piece.encode("utf-8")).hexdigest()))
         if not chunks:
             raise ParseFailure("PDF_NO_TEXT", "PDF 没有可提取文本，扫描件需要 OCR，当前暂不支持")
-        return ParseResult(page_count=page_count, parser_version=PARSER_VERSION, chunks=chunks)
+        try:
+            title = normalize_title(reader.metadata.title) if reader.metadata else None
+        except Exception:
+            title = None
+        return ParseResult(title=title or first_page_title(fragments), page_count=page_count,
+            parser_version=PARSER_VERSION, chunks=chunks)
     except ParseFailure:
         raise
     except Exception:

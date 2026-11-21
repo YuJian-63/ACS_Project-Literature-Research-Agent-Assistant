@@ -49,7 +49,7 @@ class Paper(UUIDPrimaryKey, CreatedAt, UpdatedAt, Base):
         CheckConstraint("length(btrim(title)) > 0"),
         CheckConstraint("length(btrim(original_filename)) > 0"),
         CheckConstraint("content_type = 'application/pdf'"),
-        CheckConstraint("size_bytes BETWEEN 1 AND 20971520"),
+        CheckConstraint("size_bytes BETWEEN 1 AND 52428800", name="papers_size_bytes_check"),
         CheckConstraint("sha256 ~ '^[0-9a-f]{64}$'"),
         CheckConstraint("status IN ('uploaded', 'processing', 'ready', 'failed')"),
         CheckConstraint("page_count > 0"),

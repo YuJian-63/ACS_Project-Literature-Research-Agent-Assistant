@@ -97,7 +97,7 @@ def perform_request(
                     if re.fullmatch(r"[0-9]{1,20}", declared) is None:
                         raise invalid_response()
                     if int(declared) > maximum:
-                        raise ArxivError("FILE_TOO_LARGE", "论文文件最大为 20 MiB") if destination else invalid_response()
+                        raise ArxivError("FILE_TOO_LARGE", "论文文件最大为 50 MB") if destination else invalid_response()
                 size = 0
                 body = bytearray()
                 header = b""
@@ -108,7 +108,7 @@ def perform_request(
                     for chunk in response.iter_bytes(chunk_size=64 * 1024):
                         size += len(chunk)
                         if size > maximum:
-                            raise ArxivError("FILE_TOO_LARGE", "论文文件最大为 20 MiB") if destination else invalid_response()
+                            raise ArxivError("FILE_TOO_LARGE", "论文文件最大为 50 MB") if destination else invalid_response()
                         if output is not None:
                             header = (header + chunk)[:5]
                             digest.update(chunk)
@@ -248,7 +248,7 @@ class SupervisedArxivTransport:
                     messages = {
                         "ARXIV_TIMEOUT": "arXiv 请求超时", "ARXIV_UNAVAILABLE": "arXiv 网络服务暂不可用",
                         "ARXIV_INVALID_RESPONSE": "arXiv 返回了不合法的响应", "UNSAFE_SOURCE_URL": "请求地址不符合允许的论文来源",
-                        "FILE_TOO_LARGE": "论文文件最大为 20 MiB", "INVALID_PDF": "下载文件缺少 PDF 文件头",
+                        "FILE_TOO_LARGE": "论文文件最大为 50 MB", "INVALID_PDF": "下载文件缺少 PDF 文件头",
                         "STORAGE_WRITE_FAILED": "导入临时文件写入失败",
                     }
                     if code not in messages:

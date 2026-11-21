@@ -13,6 +13,8 @@
   overflow-wrap: anywhere
 }
 .paper-title-button:hover { color: var(--accent); text-decoration: underline; text-underline-offset: 3px }
+.library-panel-actions { display: flex; flex-shrink: 0; align-items: center; gap: 8px }
+.reader-new-research { display: none }
 .library-workspace.is-reading {
   --reader-height: max(900px, calc(100dvh - 32px));
   display: grid;
@@ -26,8 +28,12 @@
   height: var(--reader-height);
   padding: 20px 16px
 }
-.is-reading .library-panel .panel-heading { gap: 10px; margin-bottom: 16px }
-.is-reading .library-panel .panel-heading h2 { font-size: 17px }
+.is-reading .library-panel .panel-heading { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 10px; margin-bottom: 16px }
+.is-reading .library-panel .panel-heading > div:first-child { display: contents }
+.is-reading .library-panel .panel-heading h2 { font-size: 14px }
+.is-reading .library-panel .panel-heading p { grid-column: 1 / -1 }
+.is-reading .library-panel .library-panel-actions { grid-column: 2; grid-row: 1; gap: 14px }
+.is-reading .library-panel .library-panel-actions .ant-btn { padding-inline: 8px; font-size: 12px }
 .is-reading .library-panel .filter-toolbar { gap: 9px; margin-bottom: 15px }
 .is-reading .library-panel .filter-toolbar .ant-input-search,
 .is-reading .library-panel .filter-toolbar .ant-select { width: 100%; max-width: none }
@@ -70,10 +76,12 @@
 .library-workspace.is-expanded { grid-template-columns: minmax(0, 1fr) }
 .library-workspace.is-expanded .library-panel { display: none }
 .library-workspace.is-expanded .paper-reader-switch { display: flex }
+.library-workspace.is-expanded .reader-new-research { display: inline-flex }
 @media (max-width: 1000px) {
   .library-workspace.is-reading { grid-template-columns: minmax(0, 1fr); --reader-height: max(760px, calc(100dvh - 24px)) }
   .library-workspace.is-reading .library-panel { display: none }
   .paper-reader-switch { display: flex }
+  .reader-new-research { display: inline-flex }
   .paper-reader-actions .reader-expand { display: none }
 }
 @media (max-width: 760px) {

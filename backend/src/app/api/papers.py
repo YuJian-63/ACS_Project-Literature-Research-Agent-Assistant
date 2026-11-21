@@ -73,7 +73,7 @@ def list_papers(
     if q is not None:
         if "\x00" in q:
             raise APIError(422, "INVALID_REQUEST", "q 不能包含空字节")
-        conditions.append(or_(Paper.title.contains(q, autoescape=True), Paper.original_filename.contains(q, autoescape=True)))
+        conditions.append(or_(Paper.title.icontains(q, autoescape=True), Paper.original_filename.icontains(q, autoescape=True)))
     with request.app.state.sessions() as session:
         total = session.scalar(select(func.count()).select_from(Paper).where(*conditions))
         papers = session.scalars(

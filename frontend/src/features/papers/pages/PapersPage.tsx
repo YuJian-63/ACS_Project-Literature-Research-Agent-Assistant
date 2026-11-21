@@ -1,7 +1,7 @@
 import { t, useLocale } from '../../../i18n';
 import { useCallback, useEffect, useRef, useState, type Key } from 'react';
 import { notification as notificationApi, App, Button, Input, Select, Skeleton } from 'antd';
-import { ArrowLeftOutlined, ArrowRightOutlined, ReloadOutlined } from '@ant-design/icons';
+import { ArrowLeftOutlined, ArrowRightOutlined, PlusOutlined, ReloadOutlined } from '@ant-design/icons';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { errorText } from '../../../i18n/diagnostics';
 import { api, asApiError, isCanceled } from '../../../api/client';
@@ -10,7 +10,7 @@ import { ErrorNotice } from '../../../shared/components/ErrorNotice';
 import { PageHeader } from '../../../shared/components/PageHeader';
 import { PaginationBar } from '../../../shared/components/PaginationBar';
 import { PaperTable } from '../components/PaperTable';
-import { canSelectPaper, hasPendingPapers } from '../lib/selection';
+import { canSelectPaper, hasPendingPaper, hasPendingPapers } from '../lib/selection';
 import { PaperUpload } from '../components/PaperUpload';
 import PaperReader from '../components/PaperReader';
 import PaperReadingList from '../components/PaperReadingList';
@@ -44,13 +44,15 @@ export default function PapersPage() {
   const load = useCallback((signal: AbortSignal) => api.papers({ q: query || undefined, status, limit: 20, offset: (page - 1) * 20 }, signal), [page, query, status]);
   const resource = useResource(load, 2000, hasPendingPapers);
   const loadReadingPaper = useCallback((signal: AbortSignal) => readingPaperId ? api.paper(readingPaperId, signal) : Promise.resolve(null), [readingPaperId]);
-  const readerResource = useResource(loadReadingPaper);
+  const readerResource = useResource(loadReadingPaper, 2000, hasPendingPaper);
   const readingPaper = readerResource.data?.id === readingPaperId ? readerResource.data : null;
   const requestedPage = Number(readerParameters.get('pdf_page') || 1);
   const validPage = Number.isSafeInteger(requestedPage) && requestedPage > 0 ? requestedPage : 1;
   const readingPage = Math.min(validPage, readingPaper?.page_count || validPage);
   const parameters = new URLSearchParams();
   selected.forEach((id) => parameters.append('paper_id', id));
+  const newResearchUrl = `/tasks/new${selected.length ? `?${parameters}` : ''}`;
+  const newResearchAction = <Link to={newResearchUrl}><Button type="primary" icon={readingPaperId ? <PlusOutlined aria-hidden="true" /> : <ArrowRightOutlined aria-hidden="true" />} iconPlacement={readingPaperId ? 'start' : 'end'}>{t('新建研究')}</Button></Link>;
   const papers = resource.data?.items || [];
   const latestLibrary = useRef({ parameters: readerParameters, page, papers, query, status });
   latestLibrary.current = { parameters: readerParameters, page, papers, query, status };
@@ -194,12 +196,12 @@ export default function PapersPage() {
 
   return <>
     {notificationHolder}
-    <PageHeader title={t("论文库")} description={t("让每一次研究，从可信的原始资料开始。")} action={<Link to={`/tasks/new${selected.length ? `?${parameters}` : ''}`}><Button type="primary" icon={<ArrowRightOutlined />} iconPlacement="end">{t("新建研究")}</Button></Link>} />
+    <PageHeader title={t("论文库")} description={t("让每一次研究，从可信的原始资料开始。")} action={readingPaperId ? undefined : newResearchAction} />
     {readingPaperId && !readingPaper && <section className="content-panel">{returnToResearch && <Button type="primary" className="reader-task-return" icon={<ArrowLeftOutlined aria-hidden="true" />} onClick={() => navigate(returnToResearch)}>{t('返回研究')}</Button>}{readerResource.error ? <><ErrorNotice error={readerResource.error} retry={readerResource.reload} /><Button onClick={closeReader}>{t('返回论文库')}</Button></> : <Skeleton active paragraph={{ rows: 3 }} />}</section>}
     <div hidden={Boolean(readingPaperId)}><PaperUpload onUploaded={() => { setQuery(''); setDraft(''); setStatus(undefined); setPage(1); resource.reload(); }} /></div>
     <div className={'library-workspace' + (readingPaper ? ' is-reading' : '') + (expanded ? ' is-expanded' : '')}>
     <section ref={libraryPanel} className="content-panel library-panel">
-      <div className="panel-heading"><div><h2 ref={libraryHeading} tabIndex={-1}>{t("我的论文")}</h2><p>{readingPaper ? t('点击标题切换原文，勾选论文可继续创建研究。') : t("选择论文后可创建摘要、问答或跨论文综述任务。")}</p></div><Button icon={<ReloadOutlined />} onClick={resource.reload} loading={resource.loading}>{t("刷新")}</Button></div>
+      <div className="panel-heading"><div><h2 ref={libraryHeading} tabIndex={-1}>{t("我的论文")}</h2><p>{readingPaper ? t('点击标题切换原文，勾选论文可继续创建研究。') : t("选择论文后可创建摘要、问答或跨论文综述任务。")}</p></div><div className="library-panel-actions">{readingPaper && newResearchAction}<Button icon={<ReloadOutlined />} aria-label={t('刷新')} title={t('刷新')} onClick={resource.reload} loading={resource.loading}>{readingPaper ? null : t("刷新")}</Button></div></div>
       <div className="filter-toolbar">
         <Input.Search value={draft} placeholder={t("搜索标题或文件名")} aria-label={t("搜索论文")} maxLength={200} allowClear onChange={(event) => { setDraft(event.target.value); if (!event.target.value) { setQuery(''); setPage(1); } }} onSearch={(value) => { setQuery(value); setPage(1); }} />
         <Select<PaperStatus> value={status} onChange={(value) => { setStatus(value); setPage(1); }} allowClear placeholder={t("全部状态")} aria-label={t("筛选论文状态")} options={Object.entries(paperStatusLabels()).map(([value, label]) => ({ value: value as PaperStatus, label }))} />
@@ -215,7 +217,7 @@ export default function PapersPage() {
       }} />}
       {resource.data && <PaginationBar total={resource.data.total} page={page} onChange={setPage} />}
     </section>
-    {readingPaper && <PaperReader onDelete={deletePaper} deletingId={deletingId} key={readingPaper.id} page={readingPage} returnToResearch={returnToResearch} paper={papers.find((paper) => paper.id === readingPaper.id) || readingPaper} papers={papers} expanded={expanded} onRead={openReader} onExpand={() => setExpanded((value) => !value)} onClose={closeReader} />}
+    {readingPaper && <PaperReader onDelete={deletePaper} deletingId={deletingId} key={readingPaper.id} page={readingPage} returnToResearch={returnToResearch} newResearchUrl={newResearchUrl} paper={papers.find((paper) => paper.id === readingPaper.id) || readingPaper} papers={papers} expanded={expanded} onRead={openReader} onExpand={() => setExpanded((value) => !value)} onClose={closeReader} />}
     </div>
     {!readingPaper && <div className="page-tip"><strong>{t("关于资料与分析")}</strong><span>{t("启动解析 Worker 后会自动提取文本，扫描件暂不支持。解析就绪不代表已完成研究分析；重复上传会生成独立记录。")}</span></div>}
   </>;

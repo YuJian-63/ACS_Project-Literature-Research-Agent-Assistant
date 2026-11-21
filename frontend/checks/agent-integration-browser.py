@@ -103,6 +103,35 @@ class AgentIntegrationBrowserTests(unittest.TestCase):
         expect(self.page.locator('.evidence-quote')).to_have_text('Verbatim evidence 2.')
         self.assertEqual(len(self.context.pages), 1)
 
+    def test_source_evidence_keeps_joined_excerpt_without_original_disclosure(self):
+        self.record['result']['citations'][0]['source_text'] = 'A supported\ncomplete sentence.'
+        self.open_task()
+        self.page.get_by_role('tab', name='Citations and sources', exact=True).click()
+        card = self.page.locator('.research-citation-card').first
+        expect(card.locator('p')).to_have_text('A supported complete sentence.')
+        card.click()
+        drawer = self.page.get_by_role('dialog')
+        expect(drawer).to_be_visible()
+        expect(drawer.locator('.evidence-quote')).to_have_text('A supported complete sentence.')
+        expect(drawer.locator('details')).to_have_count(0)
+        expect(drawer.get_by_text('View original excerpt', exact=True)).to_have_count(0)
+        expect(drawer.get_by_role('button', name='Open PDF page', exact=True)).to_be_enabled()
+
+    def test_source_evidence_falls_back_to_verbatim_when_joining_fails(self):
+        for original in ('continuation without\nterminal punctuation', 'α = β + γ\nn = 42', '没有完整句号的\n原始证据'):
+            with self.subTest(original=original):
+                self.record['result']['citations'][0]['source_text'] = original
+                self.open_task()
+                self.page.get_by_role('tab', name='Citations and sources', exact=True).click()
+                card = self.page.locator('.research-citation-card').first
+                expect(card.locator('p')).to_have_text(original)
+                card.click()
+                drawer = self.page.get_by_role('dialog')
+                expect(drawer).to_be_visible()
+                expect(drawer.locator('.evidence-quote')).to_have_text(original)
+                self.assertEqual(drawer.locator('.evidence-quote').text_content(), original)
+                expect(drawer.locator('details')).to_have_count(0)
+
     def test_interface_language_does_not_rewrite_question(self):
         for question in ('这篇论文提出了什么方法？', 'What method does this paper propose?', '请比较 English benchmark 中的方法。'):
             with self.subTest(question=question):

@@ -12,7 +12,7 @@ from context import PreparedContext, TokenCounter
 from schemas import Task
 
 
-def execute(replies, *, estimate=7900, reader=paper, task_fields=None, **options):
+def execute(replies, *, estimate=8900, reader=paper, task_fields=None, **options):
     model = ScriptedModel(replies)
     histories = []
 
@@ -41,7 +41,7 @@ def triggers(result):
     return [entry for entry in result.trace if entry.get("action") == "finalize"]
 
 
-@pytest.mark.parametrize("estimate,finalizing", [(7899, False), (7900, True)])
+@pytest.mark.parametrize("estimate,finalizing", [(8899, False), (8900, True)])
 def test_soft_boundary_reserves_output_and_finalizes_without_tools(estimate, finalizing):
     result, model, histories = execute(
         [message(calls=[call(call_id="read_original")]), final()],
@@ -55,7 +55,7 @@ def test_soft_boundary_reserves_output_and_finalizes_without_tools(estimate, fin
     assert result.usage.agent_steps == result.usage.model_calls == 2
     assert result.usage.tool_calls == 1
     assert result.usage.total_tokens == 240
-    assert result.configuration["context_finalize_ratio"] == 0.8
+    assert result.configuration["context_finalize_ratio"] == 0.9
     assert [item["bound"] for item in model.invocations] == [True, not finalizing]
     assert len(histories) == 2
     entries = [entry for entry in result.trace if entry["kind"] == "model"]
@@ -95,14 +95,14 @@ def test_disabled_ratio_or_window_keeps_normal_agent_calls(options):
     assert all(entry.get("purpose") != "finalize" for entry in result.trace)
 
 
-@pytest.mark.parametrize("estimate,finalizing", [(7900, False), (8900, True)])
+@pytest.mark.parametrize("estimate,finalizing", [(7899, False), (7900, True)])
 def test_custom_ratio_controls_the_context_threshold(estimate, finalizing):
     result, model, _ = execute(
-        [message(calls=[call()]), final()], estimate=estimate, context_finalize_ratio=0.9
+        [message(calls=[call()]), final()], estimate=estimate, context_finalize_ratio=0.8
     )
 
     assert result.stop_reason == "completed"
-    assert result.configuration["context_finalize_ratio"] == 0.9
+    assert result.configuration["context_finalize_ratio"] == 0.8
     assert len(triggers(result)) == int(finalizing)
     assert model.invocations[-1]["bound"] is not finalizing
 
@@ -136,7 +136,7 @@ def test_ratio_one_accepts_configuration_but_still_checks_the_final_request():
     assert result.trace[-1]["kind"] == "context"
 
 
-@pytest.mark.parametrize("instruction_tokens,expected_calls", [(2000, 2), (2001, 1)])
+@pytest.mark.parametrize("instruction_tokens,expected_calls", [(1000, 2), (1001, 1)])
 def test_finalization_checks_added_instruction_and_output_reserve(
     monkeypatch, instruction_tokens, expected_calls
 ):
@@ -157,7 +157,7 @@ def test_finalization_checks_added_instruction_and_output_reserve(
     assert len(model.inputs) == expected_calls
     assert result.usage.tool_calls == 1
     assert result.trace[-1]["purpose"] == "finalize"
-    assert result.trace[-1]["context"]["input_tokens_estimate"] == 7900 + instruction_tokens
+    assert result.trace[-1]["context"]["input_tokens_estimate"] == 8900 + instruction_tokens
     if expected_calls == 1:
         assert result.stop_reason == "context_limit"
         assert result.trace[-1]["kind"] == "context"
@@ -175,7 +175,7 @@ def test_finalization_uses_prepared_view_once_without_restoring_full_history():
         histories.append(deepcopy(messages))
         return PreparedContext(
             [HumanMessage(content="Prepared research view")],
-            100 if len(histories) == 1 else 7900,
+            100 if len(histories) == 1 else 8900,
             "heuristic",
         )
 
@@ -239,21 +239,26 @@ def test_missing_finalization_usage_stays_unknown():
     assert result.usage.total_tokens is None
 
 
-@pytest.mark.parametrize("summary_estimate,reason", [(7900, "completed"), (9901, "context_limit")])
-def test_summary_pressure_never_triggers_finalization(monkeypatch, summary_estimate, reason):
+@pytest.mark.parametrize("summary_estimate,reason", [(8900, "completed"), (9901, "context_limit")])
+@pytest.mark.parametrize("mode", ["injected", "compact"])
+def test_summary_pressure_never_triggers_finalization(monkeypatch, summary_estimate, reason, mode):
     def estimate(self, messages, tools):
-        assert messages[0].content == SUMMARY_SYSTEM
-        return summary_estimate, "heuristic"
+        if messages[0].content == SUMMARY_SYSTEM:
+            return summary_estimate, "heuristic"
+        assert mode == "compact"
+        return 100, "heuristic"
 
     monkeypatch.setattr(TokenCounter, "estimate", estimate)
     result, model, _ = execute(
         [message(calls=[call("summarize_paper")]), message(f"Summary [{CHUNK}]"), final()],
         estimate=100,
+        **({"context_policy": "compact"} if mode == "compact" else {}),
     )
 
     assert result.stop_reason == reason
     assert not triggers(result)
     assert all(entry.get("purpose") != "finalize" for entry in result.trace)
+    assert not any(entry.get("action") == "compact" for entry in result.trace)
     assert result.usage.tool_calls == 1
     assert result.usage.model_calls == (3 if reason == "completed" else 1)
     assert len(model.inputs) == result.usage.model_calls

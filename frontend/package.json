@@ -8,7 +8,7 @@
     "dev": "vite",
     "typecheck": "tsc --noEmit -p tsconfig.app.json && tsc --noEmit -p tsconfig.node.json",
     "build": "npm run typecheck && vite build",
-    "verify:unit": "node checks/uuid.mjs && node checks/research-source.mjs && node checks/research-draft.mjs",
+    "verify:unit": "node checks/uuid.mjs && node checks/research-source.mjs && node checks/research-draft.mjs && node checks/paper-files.mjs",
     "preview": "vite preview"
   },
   "dependencies": {

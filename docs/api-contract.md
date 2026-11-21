@@ -37,10 +37,10 @@
 | 字段 | 类型 | 说明 |
 | --- | --- | --- |
 | id | UUID | 论文 ID |
-| title | string | 1—255 字符，首版由文件名去掉扩展名生成 |
+| title | string | 1—255 字符；上传时临时使用文件名，解析完成后优先使用 PDF 标题元数据，其次尝试首页显著标题；无法可靠提取时保留文件名兜底。arXiv 导入使用来源标题 |
 | original_filename | string | 1—255 字符，不含路径或控制字符 |
 | content_type | string | 统一为 application/pdf |
-| size_bytes | integer | 实际文件大小，1—20,971,520 |
+| size_bytes | integer | 实际文件大小，1—52,428,800 |
 | sha256 | string | 64 位小写十六进制摘要 |
 | status | string | uploaded / processing / ready / failed |
 | page_count | integer / null | 物理 PDF 页数，已知时为正数 |
@@ -128,11 +128,13 @@ queued → running → succeeded
 
 Content-Type 为 multipart/form-data，仅包含一个必填的 file 字段。
 
-- 文件最大 20 MiB（20,971,520 字节）；服务端分块接收并累计大小，不仅依赖 Content-Length 或前端校验。
+- 上传和 arXiv 导入的 PDF 文件均最大 50 MB（52,428,800 字节，含边界）；服务端分块接收并累计大小，不仅依赖 Content-Length 或前端校验。超出 1 字节也拒绝。
+- 前端文件大小统一显示为 B、KB、MB、GB 等单位，沿用每级 1024 倍换算；API 的 `size_bytes` 始终返回原始字节数。
 - 原始文件名以 `.pdf` 结尾，大小写不敏感；拒绝路径分隔符、空字节及控制字符。
 - 校验 `%PDF-` 文件头，文件 MIME 仅作参考；这不等同于完整解析，损坏/无文本的 PDF 仍可能在后续解析失败。
 - 服务端生成 UUID，写入 `STORAGE_ROOT/uploads/{paper_id}.pdf`；客户端不能指定路径。
 - 重复上传同一内容仍返回 201 和新 paper_id；sha256 用于来源核验，首版不做内容去重。
+- 201 响应的 `title` 是去掉扩展名的临时文件名。Parser Worker 完成解析后会保存识别到的论文标题；客户端轮询论文状态至 `ready` 时同步更新标题。`original_filename`、原 PDF、SHA-256 及原文片段不因标题更新而改变。
 - 文件写入与数据库事务需异常补偿，详见数据库设计。
 
 201 返回完整 Paper：
@@ -158,11 +160,13 @@ Content-Type 为 multipart/form-data，仅包含一个必填的 file 字段。
 
 ### GET /api/v1/papers
 
-参数：limit、offset；可选 status（Paper 状态）、q（1—200 字符，按标题/原文件名做字面子串搜索，不是网络检索）。200 返回分页对象，items 每项为完整 Paper：
+参数：limit、offset；可选 status（Paper 状态）、q（1—200 字符，按标题/原文件名做不区分大小写的字面子串搜索，`%`、`_` 作为普通字符，不是网络检索）。论文库和新建研究中的论文选择器共用此语义，仅检索当前账号的论文。200 返回分页对象，items 每项为完整 Paper：
 
 ```json
 {"items": [], "total": 0, "limit": 20, "offset": 0}
 ```
+
+上传及 arXiv 导入的论文在前端均使用 `title` 展示论文名；`original_filename` 保留为文件元数据及下载文件名，不作为单独的论文名称展示。扫描件或没有可靠标题的 PDF 可能继续使用文件名兜底。
 
 ### GET /api/v1/papers/{paper_id}
 
@@ -612,7 +616,7 @@ Task.error/Paper.error 直接使用内层 `{code,message,details}`，正常为 n
 | 404 | PAPER_NOT_FOUND / TASK_NOT_FOUND | 资源不存在或不属于当前用户 |
 | 409 | PAPER_NOT_READY | 论文状态不允许执行 |
 | 409 | IDEMPOTENCY_CONFLICT | 幂等键已绑定不同请求 |
-| 413 | FILE_TOO_LARGE | 文件超过 20 MiB |
+| 413 | FILE_TOO_LARGE | 文件超过 50 MB（52,428,800 字节） |
 | 415 | UNSUPPORTED_MEDIA_TYPE | 上传请求不是 multipart |
 | 422 | INVALID_REQUEST | 缺字段、非法 UUID/枚举、数量、重复 ID、预算、未知字段等 |
 | 422 | REVIEW_CAPACITY_EXCEEDED | 综述在服务器上下文、累计 Token 或时间上限内无法规划，减少论文或缩短问题 |

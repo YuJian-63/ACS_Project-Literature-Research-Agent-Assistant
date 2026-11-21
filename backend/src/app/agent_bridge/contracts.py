@@ -2,6 +2,7 @@ from typing import Any, Literal
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
+from app.papers.limits import MAX_PDF_BYTES
 
 
 class Contract(BaseModel):
@@ -31,7 +32,7 @@ class SourceFile(Contract):
     title: str = Field(min_length=1)
     path: str
     sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
-    size_bytes: int = Field(gt=0, le=20 * 1024 * 1024, strict=True)
+    size_bytes: int = Field(gt=0, le=MAX_PDF_BYTES, strict=True)
     page_count: int | None = Field(default=None, ge=1, strict=True)
 
     @model_validator(mode="after")

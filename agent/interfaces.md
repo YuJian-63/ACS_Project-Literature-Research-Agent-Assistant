@@ -1,6 +1,6 @@
 # Agent 模块对接
 
-更新：2026-11-20。本文记录本地 baseline 的接口及其他模块的对接约定；跨模块部署尚未联调。研究流程见 [workflow](workflow.md)，具体字段见 [schemas.py](schemas.py)。
+更新：2026-11-21。本文记录本地 baseline 的接口及其他模块的对接约定；跨模块部署尚未联调。研究流程见 [workflow](workflow.md)，具体字段见 [schemas.py](schemas.py)。
 
 ## 模块边界
 
@@ -25,13 +25,17 @@ Backend 管任务生命周期、持久化与平台作业；agent 提供可独立
 
 执行参数位于任务顶层：`max_steps=40` 限制主 agent 调用轮数（含最终回答，不含摘要），`timeout_seconds=600` 限制任务时间（`null` 禁用），`max_output_tokens=4096` 配置单次模型输出额度。旧 `budget` 字段已移除，传入会被拒绝。到轮数或时间上限返回 `step_limit` / `time_limit`，保留已有记录，不补最终答案；时间限制通过调用前后检查和单次请求超时实现。
 
-上下文属于运行配置：`run_task(..., context_window=32000, context_policy=prepare_context, context_finalize_ratio=0.8)`，不放入任务 JSON；CLI 支持 `--context-window INT` 和 `--context-finalize-ratio FLOAT`。每次主模型和摘要调用前，估算输入加本次输出额度超过窗口则直接返回 `context_limit`；服务端容量错误也保留该状态。
+上下文通过运行参数配置。两版均接受 `context_window=32000`、`context_policy="full"`、`context_finalize_ratio=0.9`，对应 CLI 参数为 `--context-window`、`--context-policy full|compact` 和 `--context-finalize-ratio`。Python 也可传入自定义策略函数。
 
-默认 `prepare_context` 原样保留历史，返回 `PreparedContext(messages, input_tokens_estimate, count_method)`，自身不调用模型。主 agent 可注入替代策略，保存历史与模型输入视图分离；摘要使用默认策略。主循环先准备一次上下文，估算输入加输出额度达到窗口的 `context_finalize_ratio` 且未超硬上限时，在准备后的视图追加作答指令，再做容量检查，发起一次无工具收尾。Python 传 `context_finalize_ratio=None` 禁用收尾，`context_window=None` 同时禁用本地上限和压力收尾。不因最后一轮或剩余时间提前收尾；不压缩、不裁剪，超限或失败不重试。
+Extension 另接受布尔运行参数 `planner=False`。通过 `planner=True` 或 CLI 的 `--planner` 开启。结果在 `configuration.planner` 记录开关，在 `kind="planner"` 的 trace 记录计划及处理结果。实际调用标为 `purpose="planner"`，计入模型调用数、用量和整任务耗时。
 
-首次按 ASCII 字符数 / 3、非 ASCII 字符数 × 2，加消息包装和工具定义估算；后续历史前缀及工具定义匹配时，用 API `input_tokens` 校准并估算新增内容，主 agent 与摘要各自维护锚点。计数仍为近似值，TACC 的实际窗口、tokenizer 与消息模板待对齐。累计 token 仅记录 API usage，不参与循环控制；容量估算不用于补齐账单统计。
+同一入口接受独立布尔参数 `reflection=False`，对应 CLI 开关 `--reflection`。结果在 `configuration.reflection` 记录开关。自然交稿后，`kind="reflection"` 记录核对结果，`purpose="reflection"` 标记核对调用，`purpose="reflection_revision"` 标记一次补证后的无工具修订。两者均计入 `usage.model_calls` 和 API 用量，补证计入 `usage.tool_calls`。压力收尾跳过 Reflection。
 
-模型 trace 记录 `context.window/input_tokens_estimate/count_method`；本地容量拦截不产生模型响应，也不增加 `usage.model_calls/agent_steps`。收尾触发另记 `kind="context", action="finalize", reason="context_pressure"`，实际调用记为 `purpose="finalize"` 并计入主 agent 轮数、模型调用及用量；最终结果仍经解析与引用校验，触发原因不是 `stop_reason`。详细运行参数与 trace 结构见 [输入输出接口](agent-io-interface-v1.md)。
+主 agent 默认使用完整历史。`compact` 在估算输入加输出额度达到阈值时精简工具回包，再估算模型输入。准备后仍达到阈值且未超硬窗口时，追加一次无工具作答指令，经容量检查后收尾。准备后的输入超限则返回 `context_limit`，服务端容量错误也保留该状态。摘要使用完整输入，独立做容量检查。Python 传 `context_finalize_ratio=None` 禁用收尾，使 `compact` 仅在达到硬窗口时触发。传 `context_window=None` 则关闭本地容量触发。
+
+首次按 ASCII 字符数 / 4、非 ASCII 字符数 × 2 估算，计入消息包装和工具定义。后续历史前缀及工具定义匹配时，用 API `input_tokens` 校准并估算新增内容。主 agent 与摘要各自维护锚点。TACC 的实际窗口、tokenizer 与消息模板待对齐。累计 token 仅记录 API usage，不参与循环控制。
+
+模型 trace 记录 `context.window/input_tokens_estimate/count_method`。程序精简记录为 `kind="context", action="compact"`，收尾触发记录为 `action="finalize", reason="context_pressure"`。实际收尾调用记为 `purpose="finalize"`，计入主 agent 轮数、模型调用及用量。最终结果仍经解析与引用校验。[输入输出接口](agent-io-interface-v1.md)
 
 `usage.agent_steps` 单独记录主 agent 轮数；`usage.model_calls` 包含摘要调用。API 未返回完整 token 统计时，相关总量为空并标记 `token_usage_complete=false`。每次模型与工具调用的参数、响应、耗时或错误写入 trace。
 

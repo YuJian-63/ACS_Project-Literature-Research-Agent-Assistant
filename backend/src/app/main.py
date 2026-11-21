@@ -43,7 +43,7 @@ class RequestMiddleware:
             if scope["method"] == "POST" and scope["path"].rstrip("/") == "/api/v1/papers":
                 received += len(message.get("body", b""))
                 if received > MAX_FILE_BYTES + 64 * 1024:
-                    raise APIError(413, "FILE_TOO_LARGE", "文件最大为 20 MiB，multipart 元数据最大为 64 KiB")
+                    raise APIError(413, "FILE_TOO_LARGE", "文件最大为 50 MB，multipart 元数据最大为 64 KB")
             return message
 
         async def send_with_id(message):

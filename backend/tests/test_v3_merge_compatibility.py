@@ -33,7 +33,7 @@ class V3MergeCompatibilityTests(unittest.TestCase):
     def test_application_checks_the_isolated_v3_migration_head(self):
         settings = Settings(_env_file=None, database_url='postgresql://unused@localhost/literature_v3_test_unused')
         app = create_app(settings)
-        self.assertEqual(app.state.migration_heads, {'v3_0002'})
+        self.assertEqual(app.state.migration_heads, {'v3_0003'})
         self.assertNotIn('/api/v1/tasks', app.openapi()['paths'])
 
     def test_existing_v3_result_is_readable_through_unified_contract(self):
