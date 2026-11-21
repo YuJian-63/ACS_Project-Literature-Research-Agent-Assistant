@@ -4,12 +4,17 @@
 
 ## 1. 首次启动
 
-准备 Python 3.11+、uv 和 PostgreSQL。使用 Docker Compose 启动本地数据库时，从项目根目录执行以下命令。只在首次配置时复制模板，PowerShell 使用 `Copy-Item .env.example .env`。
+准备 Python 3.11+、uv 和 PostgreSQL。从项目根目录安装依赖并创建本地配置。PowerShell 可用 `if (!(Test-Path .env)) { Copy-Item .env.example .env }` 保留已有配置。
 
 ```sh
 cd backend
 uv sync --locked
 cp -n .env.example .env
+```
+
+先在 `backend/.env` 填好第 10 节的账号配置。要提交研究任务时，同时填好第 8 节的派发配置。以下命令均在 `backend/` 执行。使用已有 PostgreSQL 时，将 `DATABASE_URL` 指向该库，从迁移命令开始。
+
+```sh
 docker compose up -d --wait postgres
 uv run --locked alembic upgrade head
 uv run --locked alembic current
@@ -17,7 +22,7 @@ uv run --locked alembic check
 uv run --locked uvicorn app.main:create_app --factory --host 127.0.0.1 --port 8000
 ```
 
-使用已有 PostgreSQL 时，将 `DATABASE_URL` 指向该数据库，再执行迁移。在 `backend/.env` 填好第 8 节的派发配置和第 10 节的账号配置后，在 `backend/` 下为各 Worker 分别开一个终端。
+保持 API 运行，在 `backend/` 下为各 Worker 分别开一个终端。修改 `.env` 后重启使用该配置的进程。
 
 | 进程 | 启动命令 | 用途 |
 | --- | --- | --- |

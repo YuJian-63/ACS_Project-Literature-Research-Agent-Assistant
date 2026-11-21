@@ -11,7 +11,7 @@
 | Windows PowerShell | `if (!(Test-Path .env)) { Copy-Item .env.example .env }` |
 | macOS / Linux | `test -f .env || cp .env.example .env` |
 
-在 `.env` 中设置 PostgreSQL 用户、库名、密码和端口，让 `DATABASE_URL` 与它们一致。API 和 Worker 共用数据库、`STORAGE_ROOT` 和鉴权配置。注册、验证邮箱及找回密码还需要配置 SMTP 和邮件密钥。[后端配置](../backend/README.md)
+在 `.env` 中设置 PostgreSQL 用户、库名、密码和端口，让 `DATABASE_URL` 与它们一致。API 和 Worker 共用数据库、`STORAGE_ROOT` 和鉴权配置。注册、重发验证邮件和找回密码还需要配置 SMTP 和邮件密钥。[后端配置](../backend/README.md)
 
 在 `backend/` 执行以下命令。若原数据库使用自定义 Compose 项目名，继续使用 `docker compose -p 原项目名` 访问同一数据卷。
 
@@ -51,7 +51,7 @@ uv run --locked python -m app.runner_worker
 
 | 要验证什么 | 操作与判断 |
 | --- | --- |
-| API 和数据库 | 打开 `http://127.0.0.1:8000/health` 和 `/ready`，预期分别返回 `ok` 和 `ready`。 |
+| API 和数据库 | 打开 `http://127.0.0.1:8000/health` 和 `/ready`，响应的 `status` 字段应分别为 `ok` 和 `ready`。 |
 | 论文库 | 登录后上传一篇 PDF，待解析完成，在网页打开原文并核对页数。 |
 | 研究闭环 | 提交有明确原文依据的问题，在研究记录中打开结果，点击引用核对 PDF 页。检查自主检索时，将预选论文留空，网页会随请求启用搜索。 |
 | 任务长时间排队 | 核对 API 和 Worker 的派发配置、Worker 日志及任务详情的 `agent.remote_job_id`。获得作业号后用 `tcloud ps -j JOBID` 查询，最终以回传的结果和任务状态为准。 |
