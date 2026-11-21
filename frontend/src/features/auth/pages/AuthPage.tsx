@@ -171,6 +171,7 @@ export default function AuthPage() {
     {needsToken && !token && !done ? <Alert type="warning" title={t('链接缺少令牌，请从最新邮件重新打开，或重新申请邮件。')} showIcon /> : null}
     {!done ? <form onSubmit={submit} noValidate className="auth-form">
       {login || register ? field('username', '用户名', false, 'username') : null}
+      {login || register ? <p className="auth-hint">{t('用户名区分大小写，登录时请与注册时保持一致。')}</p> : null}
       {register || forgot ? field('email', '邮箱', false, 'email') : null}
       {change ? field('current_password', '当前密码', true, 'current-password') : null}
       {!forgot ? field('password', verify ? '原密码' : reset || change ? '新密码' : '密码', true, register || reset || change ? 'new-password' : 'current-password') : null}

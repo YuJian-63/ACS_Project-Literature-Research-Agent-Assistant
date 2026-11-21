@@ -170,7 +170,7 @@ class AuthService:
         self.limits([("login_ip", ip, 30, 60), ("login_username", username.strip().lower(), 10, 900)])
         with self.sessions.begin() as session:
             user = session.scalar(select(User).where(User.username_key == username.strip().lower()).with_for_update())
-            if not verify_password(user.password_hash if user else None, password):
+            if not verify_password(user.password_hash if user else None, password) or user.username != username.strip():
                 raise invalid_credentials()
             if user.status == "pending":
                 raise APIError(403, "EMAIL_NOT_VERIFIED", "Please verify your email before signing in")

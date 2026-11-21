@@ -282,16 +282,68 @@ class AuthBehaviorTests(unittest.TestCase):
         token = self.register()
         self.auth.verify_email(token, self.password, "127.0.0.1")
 
+    def test_login_requires_registered_username_case(self):
+        from sqlalchemy import func, select
+        from app.db.models import AuthSession
+        from app.errors import APIError
+
+        self.activate()
+        for username in ("alice", "ALICE", "aLiCe"):
+            with self.subTest(username=username):
+                with self.assertRaises(APIError) as caught:
+                    self.auth.login(username, self.password, "127.0.0.1")
+                self.assertEqual(caught.exception.status_code, 401)
+                self.assertEqual(caught.exception.error["code"], "INVALID_CREDENTIALS")
+        with self.sessions() as session:
+            self.assertEqual(session.scalar(select(func.count()).select_from(AuthSession)), 0)
+        user, raw = self.auth.login("Alice", self.password, "127.0.0.1")
+        self.assertEqual(user.username, "Alice")
+        self.assertEqual(self.auth.authenticate(raw)[0].id, user.id)
+
+    def test_http_login_rejects_username_case_mismatch_without_creating_session(self):
+        from fastapi import FastAPI
+        from fastapi.responses import JSONResponse
+        from fastapi.testclient import TestClient
+        from app.auth.api import router
+        from app.auth.security import cookie_name
+        from app.errors import APIError
+
+        self.activate()
+        app = FastAPI()
+        app.state.sessions, app.state.settings = self.sessions, self.settings
+        app.include_router(router)
+
+        @app.exception_handler(APIError)
+        async def errors(request, error):
+            return JSONResponse({"error": error.error}, status_code=error.status_code)
+
+        with TestClient(app) as client:
+            headers = {"Origin": self.settings.frontend_public_url}
+            for username in ("alice", "ALICE", "aLiCe", "Nonexistent"):
+                with self.subTest(username=username):
+                    denied = client.post("/api/v1/auth/login", headers=headers,
+                        json={"username": username, "password": self.password})
+                    self.assertEqual(denied.status_code, 401, denied.text)
+                    self.assertEqual(denied.json()["error"]["code"], "INVALID_CREDENTIALS")
+                    self.assertNotIn("set-cookie", denied.headers)
+            self.assertEqual(client.get("/api/v1/auth/me").status_code, 401)
+            accepted = client.post("/api/v1/auth/login", headers=headers,
+                json={"username": "Alice", "password": self.password})
+            self.assertEqual(accepted.status_code, 200, accepted.text)
+            self.assertEqual(accepted.json()["user"]["username"], "Alice")
+            self.assertIsNotNone(client.cookies.get(cookie_name(self.settings)))
+            self.assertEqual(client.get("/api/v1/auth/me").status_code, 200)
+
     def test_pending_registration_requires_token_and_original_password(self):
         from app.errors import APIError
         token = self.register()
         with self.assertRaises(APIError) as caught:
-            self.auth.login("alice", self.password, "127.0.0.1")
+            self.auth.login("Alice", self.password, "127.0.0.1")
         self.assertEqual(caught.exception.error["code"], "EMAIL_NOT_VERIFIED")
         with self.assertRaises(APIError):
             self.auth.verify_email(token, "wrong password", "127.0.0.1")
         self.auth.verify_email(token, self.password, "127.0.0.1")
-        user, raw = self.auth.login("ALICE", self.password, "127.0.0.1")
+        user, raw = self.auth.login("Alice", self.password, "127.0.0.1")
         self.assertEqual(user.username, "Alice")
         self.assertEqual(self.auth.authenticate(raw)[0].id, user.id)
         with self.assertRaises(APIError):
@@ -322,8 +374,8 @@ class AuthBehaviorTests(unittest.TestCase):
     def test_reset_revokes_every_session_and_consumes_token_once(self):
         from app.errors import APIError
         self.activate()
-        first = self.auth.login("alice", self.password, "127.0.0.1")[1]
-        second = self.auth.login("alice", self.password, "127.0.0.1")[1]
+        first = self.auth.login("Alice", self.password, "127.0.0.1")[1]
+        second = self.auth.login("Alice", self.password, "127.0.0.1")[1]
         self.clear_rates()
         self.auth.email_request("alice@example.com", "reset_password", "127.0.0.1", "en")
         token = self.latest_token("reset_password")
@@ -335,7 +387,7 @@ class AuthBehaviorTests(unittest.TestCase):
                 self.auth.authenticate(raw)
         with self.assertRaises(APIError):
             self.auth.reset_password(token, self.password, "127.0.0.1")
-        self.auth.login("alice", "a different long password", "127.0.0.1")
+        self.auth.login("Alice", "a different long password", "127.0.0.1")
 
     def clear_rates(self):
         from sqlalchemy import delete
@@ -411,7 +463,7 @@ class AuthBehaviorTests(unittest.TestCase):
         from app.errors import APIError
         self.activate()
         other = AuthService(self.sessions, settings(smtp_configured=False, smtp_auth_code=None, mail_outbox_key=None))
-        other.login("alice", self.password, "127.0.0.1")
+        other.login("Alice", self.password, "127.0.0.1")
         with self.assertRaises(APIError) as caught:
             other.email_request("alice@example.com", "reset_password", "127.0.0.1", "en")
         self.assertEqual(caught.exception.status_code, 503)
@@ -431,8 +483,8 @@ class AuthBehaviorTests(unittest.TestCase):
     def test_change_password_keeps_current_session_and_revokes_other_sessions(self):
         from app.errors import APIError
         self.activate()
-        user, raw = self.auth.login("alice", self.password, "127.0.0.1")
-        other = self.auth.login("alice", self.password, "127.0.0.1")[1]
+        user, raw = self.auth.login("Alice", self.password, "127.0.0.1")
+        other = self.auth.login("Alice", self.password, "127.0.0.1")[1]
         with self.assertRaises(APIError) as caught:
             self.auth.change_password(user.id, raw, "incorrect", "a different long password", "127.0.0.1")
         self.assertEqual(caught.exception.status_code, 400)
@@ -442,7 +494,7 @@ class AuthBehaviorTests(unittest.TestCase):
         self.assertEqual(self.auth.authenticate(raw)[0].id, user.id)
         with self.assertRaises(APIError):
             self.auth.authenticate(other)
-        self.assertEqual(self.auth.login("alice", "a different long password", "127.0.0.1")[0].id, user.id)
+        self.assertEqual(self.auth.login("Alice", "a different long password", "127.0.0.1")[0].id, user.id)
 
     def test_expiry_auth_version_disable_and_logout(self):
         from app.auth.service import db_now
@@ -450,12 +502,12 @@ class AuthBehaviorTests(unittest.TestCase):
         from app.errors import APIError
         from sqlalchemy import select
         self.activate()
-        user, raw = self.auth.login("alice", self.password, "127.0.0.1")
+        user, raw = self.auth.login("Alice", self.password, "127.0.0.1")
         self.auth.logout(raw)
         with self.assertRaises(APIError):
             self.auth.authenticate(raw)
         for mode in ("expiry", "version", "disabled"):
-            raw = self.auth.login("alice", self.password, "127.0.0.1")[1]
+            raw = self.auth.login("Alice", self.password, "127.0.0.1")[1]
             with self.sessions.begin() as session:
                 account = session.get(User, user.id)
                 if mode == "expiry":
@@ -1002,7 +1054,7 @@ class AuthPostgresTests(AuthBehaviorTests):
         def login():
             barrier.wait(timeout=5)
             try:
-                return self.auth.login("alice", self.password, "127.0.0.2")[1]
+                return self.auth.login("Alice", self.password, "127.0.0.2")[1]
             except APIError as error:
                 self.assertEqual(error.status_code, 401)
                 return None
