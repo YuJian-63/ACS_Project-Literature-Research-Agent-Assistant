@@ -1,0 +1,111 @@
+name: Deploy main to ECS
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ecs-production
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    env:
+      DEPLOY_SHA: ${{ github.sha }}
+      DEPLOY_RUN: ${{ github.run_id }}-${{ github.run_attempt }}
+    steps:
+      - name: Check out the exact triggering revision
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Set up Node
+        uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+
+      - name: Check deployment helpers
+        run: |
+          set -euo pipefail
+          python -B -m unittest discover -s ops/deploy/tests -v
+          bash -n ops/deploy/deploy-ecs.sh
+          bash -n ops/deploy/setup-ecs.sh
+
+      - name: Build the frontend
+        working-directory: frontend
+        env:
+          VITE_API_BASE_URL: ''
+        run: |
+          npm ci
+          npm run build
+
+      - name: Package an immutable release
+        run: |
+          set -euo pipefail
+          python -m pip install 'uv==0.13.9'
+          package="$RUNNER_TEMP/ecs-package"
+          mkdir -p "$package"
+          uv export --project backend --frozen --no-dev --no-emit-project \
+            --format requirements.txt --output-file "$package/requirements.txt" > /dev/null
+          git bundle create "$package/source.bundle" HEAD
+          tar -czf "$package/frontend.tar.gz" -C frontend/dist .
+          python ops/deploy/release.py manifest "$package" "$DEPLOY_SHA"
+          python ops/deploy/release.py verify "$package" "$DEPLOY_SHA"
+
+      - name: Transfer and deploy
+        env:
+          ECS_HOST: ${{ vars.ECS_HOST || '8.218.149.237' }}
+          ECS_PORT: ${{ vars.ECS_PORT || '22' }}
+          ECS_SSH_PRIVATE_KEY: ${{ secrets.ECS_SSH_PRIVATE_KEY }}
+          ECS_SSH_KNOWN_HOSTS: ${{ secrets.ECS_SSH_KNOWN_HOSTS }}
+        run: |
+          set -euo pipefail
+          test -n "$ECS_SSH_PRIVATE_KEY"
+          test -n "$ECS_SSH_KNOWN_HOSTS"
+          [[ "$ECS_HOST" =~ ^[A-Za-z0-9][A-Za-z0-9.-]*$ ]]
+          [[ "$ECS_PORT" =~ ^[0-9]+$ ]]
+          [[ "$DEPLOY_SHA" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$DEPLOY_RUN" =~ ^[0-9]+-[0-9]+$ ]]
+          umask 077
+          identity="$RUNNER_TEMP/ecs-deploy-key"
+          known_hosts="$RUNNER_TEMP/ecs-known-hosts"
+          printf '%s\n' "$ECS_SSH_PRIVATE_KEY" | tr -d '\r' > "$identity"
+          printf '%s\n' "$ECS_SSH_KNOWN_HOSTS" | tr -d '\r' > "$known_hosts"
+          trap 'rm -f -- "$identity" "$known_hosts"' EXIT
+          ssh-keygen -y -P '' -f "$identity" > /dev/null
+          options=(-i "$identity" -o BatchMode=yes -o IdentitiesOnly=yes
+            -o StrictHostKeyChecking=yes -o "UserKnownHostsFile=$known_hosts"
+            -o ConnectTimeout=15 -o ServerAliveInterval=30 -o ServerAliveCountMax=6)
+          remote="acs@$ECS_HOST"
+          incoming="/home/acs/acs-deploy/auto/incoming/$DEPLOY_SHA/$DEPLOY_RUN"
+          ssh -p "$ECS_PORT" "${options[@]}" "$remote" "umask 077; mkdir -p '$incoming'"
+          package="$RUNNER_TEMP/ecs-package"
+          scp -P "$ECS_PORT" "${options[@]}" \
+            "$package/manifest.json" "$package/source.bundle" \
+            "$package/frontend.tar.gz" "$package/requirements.txt" "$remote:$incoming/"
+          ssh -p "$ECS_PORT" "${options[@]}" "$remote" \
+            "sudo -n /usr/local/sbin/acs-deploy-release '$DEPLOY_SHA' '$DEPLOY_RUN'"
+
+      - name: Write deployment result
+        if: always()
+        env:
+          RESULT: ${{ job.status }}
+        run: |
+          printf '## ECS deployment\n\nCommit: `%s`\n\nRun: `%s`\n\nResult: **%s**\n' \
+            "$DEPLOY_SHA" "$DEPLOY_RUN" "$RESULT" >> "$GITHUB_STEP_SUMMARY"

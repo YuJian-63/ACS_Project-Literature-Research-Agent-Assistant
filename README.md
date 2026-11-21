@@ -12,3 +12,4 @@ HKUST CSIT6000V Advanced AI Computing and Systems 课程项目。用户在网页
 - [前后端 API 契约](docs/api-contract.md) · [数据库设计](docs/database-design.md)
 - [独立 Agent 开发与示例](agent/README.md) · [后端与 Agent 的派发协议](docs/agent-backend-integration.md)
 - [本地运维与测试](docs/terminal-operations.md) · [项目提案](docs/Proposal.md)
+- [main 自动部署到 ECS](docs/ecs-auto-deploy.md)
