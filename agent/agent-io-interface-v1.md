@@ -1,6 +1,6 @@
 # Agent Baseline 输入输出接口 v1
 
-更新：2026-11-20。依据当前 `agent/schemas.py`、`agent/baseline.py`、`agent/context.py` 和 `agent/apis/papers.py` 整理。
+更新：2026-11-21。依据当前 `agent/schemas.py`、`agent/baseline.py`、`agent/context.py` 和 `agent/apis/papers.py` 整理。
 
 本文约定 Agent 的任务输入与结果输出。当前提供 Python 函数和本地 CLI，跨模块调用、传输及部署方式尚未联调；本文不定义 HTTP 路由。
 
@@ -48,9 +48,9 @@ Agent 支持可选的 Neon 持久化：`persist=false`（默认）不写入数�
 - 达到轮数或时间上限直接停止，不追加最终回答调用。最后一轮若仍请求工具，该轮工具不会执行。
 - 时间限制通过调用前后检查及收紧单次请求超时实现，不是到点强杀。`timeout_seconds=null` 不取消各适配器的单次请求超时。
 - 摘要内部每次模型调用的输出上限为 `min(1200, max_output_tokens)`。
-- 当前不设置独立的工具调用次数上限或累计 token 预算。运行参数 `context_window` 默认 `32000`；主模型和摘要调用前，估算输入加本次输出额度超过窗口则停止为 `context_limit`，不发起该次模型调用。服务端可识别的容量错误也记录为 `context_limit`。
-- 默认 `prepare_context` 保留完整历史，自身不调用模型。主循环准备一次输入后，若 `input_tokens_estimate + max_output_tokens >= context_window * context_finalize_ratio` 且未超过硬窗口，改为一次无工具收尾；比例默认 `0.8`。收尾在准备后的视图追加作答指令，再做硬容量检查，基于已有证据回答并说明未解决项。
-- 收尾只由上下文压力触发，不因最后一轮、剩余时间或连续无进展提前触发；原有轮数和时间硬限制仍生效。摘要不触发收尾。已超过硬窗口时直接停止，不尝试收尾；超限或失败不压缩、不裁剪、不循环重试。本地容量拦截不增加 `usage.model_calls/agent_steps`，实际收尾调用计入两项及 API 用量。
+- 当前不设置独立的工具调用次数上限或累计 token 预算。运行参数 `context_window` 默认 `32000`。主模型和摘要调用前，准备后的输入估算加本次输出额度超过窗口则停止为 `context_limit`。服务端可识别的容量错误也记录为 `context_limit`。
+- 主 agent 默认使用完整历史。选择 `compact` 时，估算输入加本次输出额度达到窗口的 `context_finalize_ratio`（默认 `0.9`）就用程序精简工具回包并重估。两种策略都按准备后的视图决定后续动作。仍达到阈值且能放入硬窗口时，追加作答指令，再检查容量，调用一次无工具收尾。
+- 收尾只由上下文压力触发。准备后仍超硬窗口则停止。精简与本地容量拦截均不增加 `usage.model_calls/agent_steps`，实际收尾调用计入两项及 API 用量。分块摘要独立使用完整输入并做容量检查。
 
 最小输入：
 
@@ -245,14 +245,15 @@ Agent 支持可选的 Neon 持久化：`persist=false`（默认）不写入数�
 - `context` 包含运行窗口 `window`（可为 `null`）、本次估算输入 `input_tokens_estimate` 和计数方式 `count_method`。普通调用为 `heuristic` 或 `usage_anchored_estimate`，收尾为 `finalize_conservative_estimate`，均不是精确 tokenizer 计数。
 - 模型调用失败时，保留 `kind`、`purpose`、`output_limit`、`context`、`messages` 和 `elapsed_seconds`，以 `error` 记录异常类型，不包含 `response`。
 
-默认计数先按序列化请求中的 ASCII 字符数 / 3、非 ASCII 字符数 × 2，加消息包装与工具定义估算。已有 API `input_tokens` 且历史前缀、工具定义均匹配时，改用该输入用量加新增消息估算；否则回退为 `heuristic`。主 agent 与摘要分别维护计数锚点。估算仅用于本地容量检查，不替代 API usage；实际 TACC 窗口和 tokenizer 仍待对齐。
+字符估算覆盖模型可见的消息字段和工具定义，按 ASCII 字符数 / 4 加非 ASCII 字符数 × 2 计算，另计消息包装。历史前缀、工具定义均匹配时，沿用 API 的 `input_tokens`，只估新增消息。改写前缀或更换工具后，全量重估并记录为 `heuristic`。主 agent 与摘要分别维护计数锚点。估算用于本地容量检查，累计用量取自 API。TACC 的实际窗口和 tokenizer 仍待对齐。
 
 收尾不对完整输入重新计数：沿用主循环准备后的输入估算，加新增作答指令估算，并保留原工具定义的估算额度；实际模型请求不带工具。`finalize_conservative_estimate` 表示这种保守计算方式，不保证数学上界，不补入 API usage。调用前仍检查该估算加输出额度是否超过硬窗口。
 
-`kind="context"` 有两类事件，均不是模型调用记录：
+`kind="context"` 记录以下控制事件。
 
 - 硬容量拦截包含 `purpose`、`context`、`output_limit`、`stop_reason="context_limit"` 和准备后的 `messages`；没有 `response` 或模型调用耗时。请求尚未发出，与 API 返回上下文超限时的失败 `kind="model"` 记录不同。
 - 收尾触发包含 `action="finalize"`、`reason="context_pressure"`、准备后输入的 `context`、`output_limit` 和阈值 `finalize_ratio`；实际收尾调用另记为 `kind="model", purpose="finalize"`。触发原因不替代最终 `stop_reason`：回答仍经原有解析、引用与未解决项检查，可能为 `completed`、`partial` 或错误状态。
+- 程序精简记为 `action="compact"`。`outcome` 为 `applied` 或 `no_gain`。`before_tokens/after_tokens` 及 `before_method/after_method` 记录精简前与候选视图各自的输入估算。`heuristic_tokens_saved` 采用同一字符法计算。`through_message` 为本次扫描的完整工具轮次边界（不含该位置）。另记三类精简的数量和耗时。原始工具回包可从 `kind="tool"` 的 `observation` 读取。
 
 工具记录：
 
@@ -273,7 +274,7 @@ Agent 支持可选的 Neon 持久化：`persist=false`（默认）不写入数�
 
 记录不一定按 model/tool 两条交替：一次摘要工具内部的 `chunk_summary` 模型记录会先追加，再追加外层 `summarize_paper` 工具记录。工具耗时包含其内部模型调用，不能把所有 trace 耗时相加当作任务总耗时。
 
-后端可将 `trace` 整体作为 JSON 保存；当前随最终结果一次返回，不提供进度事件流。当前收尾使用 `purpose="finalize"`，不产生上下文压缩或 `no_progress` 控制记录。
+后端可将 `trace` 整体作为 JSON 保存，当前随最终结果一次返回。
 
 ### 2.2 运行配置 `configuration`
 
@@ -283,8 +284,8 @@ Agent 支持可选的 Neon 持久化：`persist=false`（默认）不写入数�
 | `model` | 实际使用的模型标识；未取得时为 `null` |
 | `temperature` | 实际使用的温度参数；未取得时为 `null` |
 | `context_window` | 本地估算输入加输出上限，默认 `32000`；`null` 表示关闭本地上限 |
-| `context_policy` | 主 agent 使用的策略函数名，默认 `"prepare_context"`；可调用对象无函数名时记录类名 |
-| `context_finalize_ratio` | 主循环压力收尾阈值，默认 `0.8`；`null` 表示禁用该触发；`context_window=null` 时也不触发 |
+| `context_policy` | 实际策略函数名或类名。内置 `full` 记录为 `"prepare_context"`，`compact` 记录为 `"CompactHistory"` |
+| `context_finalize_ratio` | 主循环压力收尾阈值，默认 `0.9`。`null` 禁用收尾，内置 `compact` 此时使用硬窗口阈值 |
 
 当前结果构造始终包含这六个键。三个上下文参数不属于 `configuration.task`；`persist` 不记录在 `configuration` 中。
 
@@ -343,7 +344,7 @@ result = run_task(
     },
     persist=False,
     context_window=32000,
-    context_finalize_ratio=0.8,
+    context_finalize_ratio=0.9,
 )
 payload = result.model_dump(mode="json")
 ```
@@ -355,17 +356,17 @@ payload = result.model_dump(mode="json")
 | 参数 | 默认值 | 说明 |
 |---|---|---|
 | `context_window: int \| None` | `32000` | 正整数；Python 传 `None` 关闭本地上限，服务端仍校验容量 |
-| `context_policy: Callable` | `prepare_context` | 替换主 agent 的输入准备策略；摘要始终使用默认 `prepare_context` 和容量检查 |
-| `context_finalize_ratio: float \| None` | `0.8` | 有限数值，范围 `(0, 1]`，不接受布尔值；`None` 禁用该触发，`context_window=None` 时也禁用 |
+| `context_policy: str \| Callable` | `prepare_context`（等同 `"full"`） | 主 agent 可选 `"full"`、`"compact"` 或自定义策略。分块摘要始终使用完整输入 |
+| `context_finalize_ratio: float \| None` | `0.9` | 有限数值，范围 `(0, 1]`，不接受布尔值。`None` 关闭收尾，`context_window=None` 关闭本地容量触发 |
 
 策略接口定义在 [context.py](context.py)：
 
 ```text
 prepare_context(messages, *, tools, context_window, max_output_tokens, counter)
-    -> PreparedContext(messages, input_tokens_estimate, count_method)
+    -> PreparedContext(messages, input_tokens_estimate, count_method, compaction=None)
 ```
 
-策略收到历史消息的副本、工具定义、容量配置和本调用流的 `TokenCounter`；返回准备后的模型输入及其估算。保存的原始历史与该输入视图分离；容量判断和压力收尾由调用层执行。当前默认策略不修改历史，不实现压缩；一次收尾复用准备结果，不重复执行该策略。
+策略收到历史消息的副本、工具定义、容量配置和本调用流的 `TokenCounter`，返回模型输入视图、估算及可选的精简记录。内置 `compact` 按运行保存已应用的精简结果。调用层使用准备后的视图检查容量，压力收尾复用同一结果。
 
 CLI 示例，从项目根目录运行：
 
@@ -374,10 +375,11 @@ cd agent
 uv run python baseline.py --task examples/qa.json --output runs/task-001.json
 ```
 
-- `--output` 指定完整结果 JSON 文件；Baseline 省略此参数时写入 `runs/baseline/<task_id>.json`。
+- `--output` 指定完整结果 JSON 的写入路径，默认使用 `runs/<workflow>/<task_id>.json`。重复写入同一路径会覆盖文件，保留多次运行时请分别指定路径。
 - `--persist` 同时保存到 Neon；不影响 CLI 写入本地结果文件。
 - `--context-window INT` 配置本地窗口，默认 `32000`；关闭本地上限需使用 Python `context_window=None`。
-- `--context-finalize-ratio FLOAT` 配置收尾阈值，默认 `0.8`；仅禁用压力收尾需使用 Python `context_finalize_ratio=None`。
+- `--context-policy full|compact` 选择主 agent 的历史策略，默认为 `full`。
+- `--context-finalize-ratio FLOAT` 配置收尾与内置 `compact` 的压力阈值，默认 `0.9`。仅禁用压力收尾可在 Python 中传 `context_finalize_ratio=None`。
 - 标准输出只包含 `task_id/stop_reason/answer/comparison_table/unresolved/usage/errors/output`，其中 `output` 是结果文件路径。标准输出不是完整 `TaskResult`；需要引用和 trace 时，应读取结果文件。
 - 退出码为 0 的条件：`stop_reason` 是 `completed` 或 `partial`，且无持久化错误；否则返回 1。输入、文件等直接抛出的异常也会导致进程失败。
 
@@ -394,7 +396,7 @@ uv run python baseline.py --task examples/qa.json --output runs/task-001.json
 | `usage.budget_tokens` | 删除；新增 `usage.agent_steps` |
 | `model_call_budget/tool_call_budget/token_budget/time_budget/context_budget` | 不再产生；当前执行限制或容量错误使用 `step_limit/time_limit/context_limit`，并非逐项等价替换 |
 | trace 中的 `budget_remaining/estimated_input_tokens/token_estimator` | 旧字段删除；当前容量估算记录在 model/context 事件的 `context` 对象中 |
-| 预留最终回答、压缩上下文、两轮无进展后收尾 | 当前仅有上下文压力触发的一次收尾，不因轮数、时间或无进展提前收尾，未实现压缩 |
+| 预留最终回答、压缩上下文、两轮无进展后收尾 | 通过 `context_policy` 选择程序精简，压力收尾使用 `context_finalize_ratio`，轮数与时间到限直接停止 |
 | `configuration.model/temperature` 可能缺省 | 当前始终含键，未取得时为 `null` |
 
 结果顶层移除 `task_type`，引用证据字段保持不变。v0 的最小输入仍可使用；包含 `budget` 或 `task_type` 的输入需要修改后再提交。
