@@ -1,0 +1,162 @@
+公有 Qwen Agent 服务完整操作手册
+
+模型名固定为：qwen3.8-27b
+接口固定为：OpenAI 兼容 POST /v1/chat/completions
+
+本包是可迁移的服务包。文档中的 `SERVICE_DIR` 指部署者自己电脑上的目录，不是本项目目录，也不是 Agent 客户端代码目录。把本包 ZIP 复制到部署者电脑后，在那里解压，并把 `SERVICE_DIR` 设置成解压后的目录即可。
+
+原始公有服务模板保持只读；私有优化目录不参与本服务。
+
+一、把服务包放到部署者自己的电脑
+
+从本包备份中取得：
+
+qwen-public-serve-agent-20261121.zip
+
+在部署者电脑上解压到任意目录。例如部署者可以自己选择：
+
+SERVICE_DIR=/path/on/their/computer/qwen-public-serve-agent
+
+在 WSL 中确认：
+
+cd "$SERVICE_DIR"
+ls
+
+应该能看到 `tuxiv.conf`、`job.sh`、`service_config.json`、`service_supervisor.py` 等文件。不要把这里的路径改成助手电脑上的 E:\ 路径，也不要引用私有优化目录。
+
+二、从部署者自己的目录提交 GPU 服务
+
+```bash
+cd "$SERVICE_DIR"
+tcloud submit
+read -rp '公有 Agent GPU 作业号: ' GPU_ID
+
+tcloud ps -j "$GPU_ID"
+tcloud cat "slurm_log/qwen-public-serve-agent-${GPU_ID}.log"
+```
+
+这里不需要 build。服务使用课程公有 vLLM 和共享模型权重。参数已经写在服务包的 `service_config.json`：
+
+- 模型：qwen3.8-27b
+- 总上下文：36864 token
+- 单次完整输入：最多32767 token，历史、system、工具 schema、模板 token都算入
+- 输出：最多4096 token
+- TP=2，BF16
+- max_num_batched_tokens=4096
+- max_num_seqs=4
+- gpu_memory_utilization=0.9
+- prefix caching 开启
+- tool parser=qwen3_coder
+
+三、确认服务就绪
+
+不要只看到作业号或 SERVICE_BASE_URL 就开始调用。必须在日志中确认：
+
+```text
+RUNTIME_MODE=public
+AGENT_TELEMETRY_READY=qwen-agent-telemetry-v1
+Application startup complete.
+```
+
+服务仍是独立 GPU 作业；`check.py` 只保活，不会自动发送问答或工具调用。
+
+四、取得并交接 base_url
+
+在服务日志中找到：
+
+```text
+AGENT_BASE_URL=http://10.0.x.x:8000/v1
+```
+
+只把这一行的地址发给 Agent 同学，例如：
+
+```text
+http://10.0.3.10:8000/v1
+```
+
+模型名固定为 `qwen3.8-27b`，不需要额外发现或确认。Agent 客户端固定配置：
+
+```text
+base_url = 该地址
+model = qwen3.8-27b
+api_key = EMPTY
+stream = true
+n = 1
+max_tokens <= 4096
+```
+
+`EMPTY` 只是内部无鉴权服务的 SDK 占位值，不是秘密密钥。
+
+五、Agent 客户端文本测试
+
+Agent 必须在能访问 TACC 内网的环境运行；普通外网电脑不能直接访问 `10.0.x.x`。
+
+```bash
+BASE_URL='http://本轮实际节点IP:8000/v1'
+curl -N -sS -H 'Content-Type: application/json' \\
+  "$BASE_URL/chat/completions" \\
+  --data-binary @text.request.json
+```
+
+请求体中的模型必须固定写为 `qwen3.8-27b`：
+
+```json
+{
+  "model": "qwen3.8-27b",
+  "messages": [{"role": "user", "content": "Reply with exactly: connection_ok"}],
+  "stream": true,
+  "stream_options": {"include_usage": true},
+  "max_tokens": 128,
+  "temperature": 0
+}
+```
+
+流式响应中的普通增量读取 `choices[0].delta.content`。最后可能有一个 `choices=[]` 的 usage 事件，然后才是 `data: [DONE]`；客户端不能对每个事件都直接访问 `choices[0]`。
+
+六、Agent 工具调用测试
+
+工具 schema 和工具执行函数由 Agent 客户端准备，模型服务不会替 Agent 执行函数。
+
+```bash
+curl -N -sS -H 'Content-Type: application/json' \\
+  "$BASE_URL/chat/completions" \\
+  --data-binary @tool.request.json
+```
+
+Agent 需要：
+
+1. 合并多个流式 `delta.tool_calls` 事件。
+2. 等 `function.arguments` 拼成完整 JSON 后执行本地函数。
+3. 把模型返回的 `assistant.tool_calls` 原样追加到 messages。
+4. 把工具结果作为 `role=tool`，使用匹配的 `tool_call_id` 追加。
+5. 再次请求 `/chat/completions`，让模型生成最终回答。
+
+服务端只提供模型推理和流式 tool_calls，不知道 Agent 的本地函数、数据库或外部 API 凭据。
+
+七、指标和结果
+
+流式结束的 usage 事件包含输入、输出、总 token；原生 metrics 包含 TTFT、TPOT/mean_itl、排队时间和 tokens/sec；`metrics.telemetry` 包含服务端耗时、缓存口径、prefill 计算 token、完成时 GPU/KV 快照。
+
+客户端实际收到首包和最后一包的端到端时间必须由 Agent 自己计时。GPU 利用率、显存和 KV 占用是响应结束时的共享快照，不是单个请求的平均值或峰值。
+
+服务端不启动定时 `/metrics` 轮询。请求指标保存到 TACC 用户目录的 `requests.jsonl`；如需下载，由服务作业所有者执行：
+
+```bash
+tcloud download "model-server-results/agent-service-${GPU_ID}/requests.jsonl" \\
+  "agent-service-${GPU_ID}-requests.jsonl"
+```
+
+八、结束服务
+
+Agent 测试完成并保存结果后，服务作业所有者手动执行：
+
+```bash
+tcloud cancel -j "$GPU_ID"
+tcloud ps -j "$GPU_ID"
+```
+
+如果服务启动失败或显存不足，保留完整 GPU 日志，不要终止归属未知的 GPU PID，也不要降低显存比例0.9。
+
+九、客户端需要准备什么
+
+Agent 只需要已有的 Agent 程序和运行环境、固定模型配置 `qwen3.8-27b`、工具 schema 与执行函数、任务输入和结果目录。客户端不需要模型权重、vLLM 安装、构建目录、私有源码或 supervisor。

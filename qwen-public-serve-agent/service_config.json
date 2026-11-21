@@ -1,0 +1,9 @@
+{
+  "profile": "agent-public-integration-v1",
+  "max_model_len": 36864,
+  "max_num_seqs": 4,
+  "max_num_batched_tokens": 4096,
+  "gpu_memory_utilization": 0.9,
+  "enable_prefix_caching": true,
+  "agent_telemetry": true
+}
