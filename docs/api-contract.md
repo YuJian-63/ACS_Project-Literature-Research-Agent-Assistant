@@ -1,6 +1,6 @@
 # Literature Research Agent Assistant — API 契约
 
-> 2026-11-19 Agent 增量：可选 TASK_RUNNER=agent 支持原生结果查询、Markdown 比较表与字符串引用 ID，并新增 manual/local/tacc 传输。任务详情 agent.transport 为 file-exchange-v1、local-process-v1 或 tacc-ssh-slurm-v1，remote_job_id 在提交后更新。业务状态保持四种。详细协议、部署及验收边界见 [后端与独立 Agent 对接](agent-backend-integration.md)。以下历史 Runner 描述适用于原 mock/langgraph 模式；真实 TACC 验收仍须按清单执行。
+> 研究详情中的 `agent.transport` 可为 `file-exchange-v1`、`local-process-v1`、`tacc-ssh-slurm-v1` 或 `tcloud-v1`。提交后 `remote_job_id` 记录平台作业号。课程 CPU 作业的配置与结果回传见 [TACC 联调](../tacc/TACC.md)。下文保留原 mock/langgraph 模式的历史说明。
 
 版本：v1 · 更新日期：2026-11-14。账号契约与集成/验收边界见第 11 节；以下既有业务验收记录保留其原证据范围。已实现 API/Mock Worker、独立 PDF Parser、真实摘要/问答 Runner、多论文综述及第 10 节 arXiv 搜索/导入接口。用户已完成 MVP-3 的隔离原生 PostgreSQL 八组专项验收、真实 arXiv 单版本搜索/下载/解析及浏览器 Mock 任务闭环；另已完成一次 DeepSeek 真实单篇摘要及人工引用/刷新核验，真实问答与多论文综述仍待验收。详细证据范围见实施记录；启动方式见 `backend/README.md`。
 
@@ -894,7 +894,8 @@ V3 前端统一使用以下接口。后端复用 Task、TaskPaper、AgentRun 和
 - `completed`：status=succeeded；`partial`：status=succeeded，保留 stop_reason=partial 和 unresolved，前端须显示未解决项。
 - 失败：status=failed，error 使用统一错误对象；若收到 Agent 的失败结果，result 也保留，不能把它丢弃或伪装为成功；尚未交付的传输失败可为 null。
 - 本地引用：paper_id 为论文 UUID（兼容 source_id 别名），物理页码对应原 PDF；外部引用保持 Agent 原生 `arxiv:...` 标识、版本和 canonical arXiv URL，不伪造本地论文 UUID。
-- 外部引用必须关联 result.sources 中相同来源，绑定合法 arXiv 标识、URL 和页号对应的 chunk_id；清单外本地文件、伪造外链和超额论文会被拒绝。后端旧 Citation 外键表仅投影本地引用，统一接口读取的原生结果保留全部外部证据。
+- 开启搜索时可返回用户论文库中发现的 PDF。后端核对归属、UUID、SHA-256、引用物理页及总篇数，保存任务关联。`paper_ids` 始终表示提交时预选的 ID。
+- 外部引用必须关联 result.sources 中相同来源，绑定合法 arXiv 标识、URL 和页号对应的 chunk_id。后端旧 Citation 外键表仅投影本地引用，统一接口的原生结果保留全部外部证据。
 
 ### DELETE /api/v1/agent-research/{task_id}
 
@@ -904,7 +905,7 @@ V3 前端统一使用以下接口。后端复用 Task、TaskPaper、AgentRun 和
 
 搜索可补充的论文数量由 `AGENT_SEARCH_MAX_PAPERS` 控制，默认 5；开启搜索时 N=min(20, 已选数量+该配置)，关闭时 N=已选数量。max_steps=min(AGENT_MAX_STEPS,16+4N)，timeout_seconds=min(AGENT_TIMEOUT_SECONDS,300+60N)，max_output_tokens=min(AGENT_OUTPUT_TOKENS,AGENT_CONTEXT_TOKENS-2048,4096+768×max(0,N-1))。用户不填写预算，配置是上限，不承诺一定生成或读完 N 篇论文。
 
-API 与 Worker 需一起更新并重启，local/TACC 上的 Agent 也必须更新 `agent_io/contracts.py`、`agent_io/bundle.py`、`apis/sources.py`，否则旧包装器会拒绝空来源/自动搜索。Agent 的搜索能力由自身环境决定；后端 `ARXIV_ENABLED` 仍只控制原有 `/paper-search` 与导入能力。本次无需新增数据库迁移；部署时继续确认数据库处于项目已有 head。
+课程 `tcloud` 模式的 API 与 Worker 使用同一数据库，部署时运行 `alembic upgrade head` 并一起重启。Worker 从当前仓库准备作业源码。Agent 的外部搜索能力取决于作业环境，后端 `ARXIV_ENABLED` 控制网页搜索与导入。[TACC 联调](../tacc/TACC.md)
 
 ### 前端来源阅读与导入
 

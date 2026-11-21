@@ -15,6 +15,7 @@ from app.db.models import Paper
 from app.errors import APIError
 
 router = APIRouter(prefix="/api/v1/agent", tags=["Agent library"], responses={401: {"model": ErrorResponse}})
+read_router = APIRouter()
 LibraryGrant = Annotated[LibraryAccess, Depends(require_library_access)]
 
 
@@ -40,7 +41,7 @@ def create_library_token(request: Request, user: CurrentUser) -> dict:
     return issue_library_token(request, user)
 
 
-@router.get("/papers", response_model=Page[LibraryPaper], responses={403: {"model": ErrorResponse}})
+@read_router.get("/papers", response_model=Page[LibraryPaper], responses={403: {"model": ErrorResponse}})
 def search_library(
     request: Request, access: LibraryGrant, limit: Limit = 20, offset: Offset = 0,
     status: PaperStatus | None = None, q: Annotated[str | None, Query(min_length=1, max_length=200)] = None,
@@ -73,7 +74,7 @@ def search_library(
     return {"items": items, "total": total, "limit": limit, "offset": offset}
 
 
-@router.get(
+@read_router.get(
     "/papers/{paper_id}/pdf", response_class=StreamingResponse,
     responses={200: {"content": {"application/pdf": {}}}},
 )
@@ -82,3 +83,6 @@ def download_library_pdf(request: Request, paper_id: UUID, access: LibraryGrant)
         raise APIError(404, "PAPER_NOT_FOUND", "论文不存在")
     with request.app.state.sessions() as session:
         return stream_paper_file(request, get_paper(session, paper_id, access.user_id), disposition="attachment")
+
+
+router.include_router(read_router)

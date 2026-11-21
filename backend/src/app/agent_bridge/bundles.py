@@ -29,7 +29,8 @@ def exchange_directory(root: Path, area: str, dispatch_id: UUID) -> Path:
     return directory
 
 
-def export_bundle(manifest: DispatchManifest, storage_root: Path, exchange_root: Path) -> Path:
+def export_bundle(manifest: DispatchManifest, storage_root: Path, exchange_root: Path, *, include_pdfs: bool = True) -> Path:
+    attachments = manifest.sources if include_pdfs else []
     directory = exchange_directory(exchange_root, "outbox", manifest.dispatch_id)
     directory.mkdir(parents=True, exist_ok=True)
     target = directory / "input.zip"
@@ -43,7 +44,7 @@ def export_bundle(manifest: DispatchManifest, storage_root: Path, exchange_root:
                 archive.writestr(zipfile.ZipInfo("manifest.json"), canonical_json(manifest.model_dump(mode="json")))
                 archive.writestr(zipfile.ZipInfo("task.json"), canonical_json(manifest.task.model_dump(mode="json")))
                 archive.writestr(zipfile.ZipInfo("sources.json"), canonical_json([source.model_dump(mode="json") for source in manifest.sources]))
-                for source in manifest.sources:
+                for source in attachments:
                     path = controlled_path(storage_root, source.paper_id, f"uploads/{source.paper_id}.pdf")
                     digest = hashlib.sha256()
                     size = 0
@@ -60,7 +61,7 @@ def export_bundle(manifest: DispatchManifest, storage_root: Path, exchange_root:
             os.fsync(output.fileno())
         if target.exists():
             with zipfile.ZipFile(target) as previous:
-                expected = {"manifest.json", "task.json", "sources.json", *(source.path for source in manifest.sources)}
+                expected = {"manifest.json", "task.json", "sources.json", *(source.path for source in attachments)}
                 if len(previous.namelist()) != len(expected) or set(previous.namelist()) != expected:
                     raise ValueError("Existing input bundle contains unexpected entries")
                 if previous.read("manifest.json") != canonical_json(manifest.model_dump(mode="json")):
@@ -69,7 +70,7 @@ def export_bundle(manifest: DispatchManifest, storage_root: Path, exchange_root:
                     raise ValueError("Existing task input has changed")
                 if previous.read("sources.json") != canonical_json([source.model_dump(mode="json") for source in manifest.sources]):
                     raise ValueError("Existing source manifest has changed")
-                for source in manifest.sources:
+                for source in attachments:
                     if previous.getinfo(source.path).file_size != source.size_bytes:
                         raise ValueError("Existing input PDF size has changed")
                     digest = hashlib.sha256()

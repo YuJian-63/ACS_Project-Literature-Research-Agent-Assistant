@@ -12,7 +12,7 @@ class TaccTransportTests(unittest.TestCase):
     def test_task_response_exposes_each_supported_transport(self):
         from app.api.schemas import AgentExecution
 
-        for transport in ("file-exchange-v1", "local-process-v1", "tacc-ssh-slurm-v1"):
+        for transport in ("file-exchange-v1", "local-process-v1", "tacc-ssh-slurm-v1", "tcloud-v1"):
             value = AgentExecution(
                 dispatch_id="00000000-0000-4000-8000-000000000001",
                 transport=transport,

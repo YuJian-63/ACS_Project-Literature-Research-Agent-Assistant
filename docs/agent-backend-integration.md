@@ -1,6 +1,6 @@
 # 后端与独立 Agent 对接
 
-更新：2026-11-20。本文件描述后端适配、Agent 本地 PDF、独立作业入口及第 3.1–3.3 阶段本地/TACC 传输、恢复和清理。离线测试与真实集群验收分开记录；真实 TACC 部署和模型验收由操作者统一执行。
+课程 TACC 使用 `AGENT_TRANSPORT=tcloud`。实际启动命令、在线论文库授权、打包内容和结果回传见 [TACC 联调](../tacc/TACC.md)。下文同时保留历史本地进程及 SSH/Slurm 文件交换协议，其中 `run_dispatch.py` 和 `agent_io/` 属于原部署方案。
 
 V3 增量：`/api/v1/agent-research` 复用本文的派发和结果路径，无需新增迁移。支持 0—20 篇已选 PDF，允许只提问、由 Agent 自主检索；allow_search=false 时仍要求指定论文。详细请求/响应、服务端预算及会话变化见 [API 第 13 节](api-contract.md#13-v3-统一研究接口2026-11-20)。旧 `/tasks` 保持指定来源且关闭搜索的契约。
 
@@ -12,7 +12,7 @@ V3 外部来源阅读：Agent 原生结果继续保留 arXiv 标识和明确版�
 
 `mock` 和 `langgraph` 保留兼容已有部署与历史任务。新模式不会在 Agent 失败时回退到旧实现。后端不导入 Agent 运行环境，因此后端 Python 3.11+ 与 Agent Python 3.12 可以独立部署。
 
-文件交换协议继续作为边界。AGENT_TRANSPORT 可选 manual（兼容外部文件交换）、local（独立进程）和 tacc（SSH/Slurm）。TACC 适配器通过已验证主机密钥的 OpenSSH 调用受控远程桥接；不会解析旧 tcloud CLI 面向人工的查询输出。完成部署配置前保持 AGENT_DISPATCH_ENABLED=false，不能将代码实现视为集群已经验收。
+AGENT_TRANSPORT 可选 manual（外部文件交换）、local（独立进程）、tacc（SSH/Slurm）和 tcloud（课程 SDK）。SSH 适配器使用配置的 OpenSSH 桥接。课程 Worker 使用 `tcloud` 提交 CPU 作业，并从用户持久目录下载结果。
 
 ## 2. 数据流
 
@@ -35,7 +35,7 @@ agent-exchange/
   inbox/<dispatch_id>/result.json
 ```
 
-ZIP 内仅包含明确选中的文件：
+课程 tcloud 模式的 ZIP 只含三个 JSON，预选 PDF 由作业在线读取。携带离线附件的文件交换包结构如下：
 
 ```text
 manifest.json
@@ -113,7 +113,7 @@ papers/<paper_uuid>.pdf
 
 本地引用的 source_id 必须等于清单里的 source_id；paper_id 可为该 source_id 或后端 paper UUID。Agent 的不透明 chunk_id 原样保存；旧产物视图仅把本地引用映射为 C1/C2，原始 Agent 结果不修改。页码指原始 PDF 的物理页，不能使用重新排版后的 PDF。后端不再执行旧逐字片段内容或检索相关性算法。
 
-V3 开启 allow_search 后，额外来源仅接受规范的 arXiv 标识：版本化或带 PDF 哈希前缀的 source_id、匹配的 paper_id、canonical abs URL，以及相同来源/页号的 chunk_id。外部引用必须在 result.sources 中登记；所选加检索论文总数不能超过 task.max_papers。外部证据保留在 AgentRun 原生 JSON 中，不创建虚假的本地 Paper/Citation 外键。本地越权、外链伪造、重复和空引用检查仍生效。
+开启 allow_search 时，作业可以返回在用户论文库中发现的来源。后端核对提交用户、UUID、PDF 摘要及引用页码，再保存任务关联。外部来源继续使用规范 arXiv 标识、对应版本的 URL 及绑定来源和页号的 chunk_id。额外来源须登记在 result.sources，预选和检索的总数受 task.max_papers 限制。外部证据保存在 AgentRun 原生 JSON 中。
 
 仅搜索的 ZIP 只有 manifest.json、task.json、sources.json 三个成员，sources 为 []；混合来源继续携带授权 PDF。清单仍绑定 task.sources 和 PDF SHA-256；不得因为允许外部搜索就允许读取其他本地文件。后端和 local/TACC 上的 Agent 包装器必须一起升级；Agent 研究核心不变。
 

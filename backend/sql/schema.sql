@@ -133,7 +133,7 @@ CREATE TABLE task_papers (
     task_id uuid NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
     paper_id uuid NOT NULL,
     paper_sha256 varchar(64) NOT NULL,
-    selection_order smallint NOT NULL CHECK (selection_order BETWEEN 0 AND 19),
+    selection_order smallint CHECK (selection_order BETWEEN 0 AND 19),
     created_at timestamptz NOT NULL DEFAULT now(),
     PRIMARY KEY (task_id, paper_id),
     CONSTRAINT task_papers_order UNIQUE (task_id, selection_order),

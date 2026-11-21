@@ -145,7 +145,7 @@ class TaskStats(BaseModel):
 
 class AgentExecution(BaseModel):
     dispatch_id: UUID
-    transport: Literal["file-exchange-v1", "local-process-v1", "tacc-ssh-slurm-v1"] = "file-exchange-v1"
+    transport: Literal["file-exchange-v1", "local-process-v1", "tacc-ssh-slurm-v1", "tcloud-v1"] = "file-exchange-v1"
     remote_job_id: str | None = None
     stop_reason: StopReason | None = None
     unresolved: list[str] = Field(default_factory=list)

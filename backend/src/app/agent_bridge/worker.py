@@ -69,7 +69,8 @@ class AgentWorker:
             manifest = execution.manifest
             if execution.transport != transport_name(self.settings):
                 raise TransportError("AGENT_TRANSPORT_CHANGED")
-            bundle = export_bundle(manifest, self.settings.storage_root, self.settings.resolved_agent_exchange_root)
+            bundle = export_bundle(manifest, self.settings.storage_root, self.settings.resolved_agent_exchange_root,
+                include_pdfs=self.settings.agent_transport != "tcloud")
             if self.settings.agent_library_public_url:
                 token = issue_job_library_token(self.settings, manifest.dispatch_id, execution.deadline)
                 atomic_write(bundle.with_name("library-access.json"), canonical_json({
@@ -101,7 +102,7 @@ class AgentWorker:
                             raise ValueError("Agent status and result job identities disagree")
                         if status is not None and status.state != "running" and (status.error is not None or status.stop_reason != envelope.result.stop_reason):
                             raise ValueError("Agent status and result disagree")
-                        complete_delivery(self.sessions, task_id, self.owner, manifest, envelope)
+                        complete_delivery(self.sessions, task_id, self.owner, manifest, envelope, settings=self.settings)
                         return
                     if status is not None and status.state != "running":
                         code = "AGENT_WRAPPER_FAILED" if status.error else "AGENT_RESULT_MISSING"

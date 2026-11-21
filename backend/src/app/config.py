@@ -25,7 +25,10 @@ class Settings(BaseSettings):
     agent_dispatch_enabled: bool = False
     agent_exchange_root: Path | None = None
     agent_library_public_url: str | None = None
-    agent_transport: Literal["manual", "local", "tacc"] = "manual"
+    agent_transport: Literal["manual", "local", "tacc", "tcloud"] = "manual"
+    agent_tcloud_cli: str = Field(default="tcloud", min_length=1)
+    agent_tcloud_submit_timeout_seconds: float = Field(default=180, ge=1, le=1800, allow_inf_nan=False)
+    agent_tcloud_model_env_file: Path | None = None
     agent_local_root: Path | None = None
     agent_local_python: Path | None = None
     agent_tacc_host: str | None = Field(default=None, pattern=r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
@@ -102,7 +105,7 @@ class Settings(BaseSettings):
     def arxiv_configured(self) -> bool:
         return self.arxiv_enabled and bool(self.arxiv_contact_email)
 
-    @field_validator("agent_exchange_root", "agent_local_root", "agent_local_python", "agent_tacc_host", "agent_tacc_helper", "agent_tacc_config", mode="before")
+    @field_validator("agent_exchange_root", "agent_local_root", "agent_local_python", "agent_tacc_host", "agent_tacc_helper", "agent_tacc_config", "agent_tcloud_model_env_file", mode="before")
     @classmethod
     def empty_agent_optional_value(cls, value):
         return None if value == "" else value

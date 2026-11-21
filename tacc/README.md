@@ -1,9 +1,10 @@
 # TACC 参考入口
 
-本目录保留老师 2026-11-05 提供的两份发布包及独立 API 探测脚本。两个包从 Git `alpha` 快照原样取出，当前不修改或部署。
+网页研究使用课程 TACC 的 CPU 批作业。[本机启动、网页提交和查看结果](TACC.md)。本目录也保留 2026-11-05 的两份课程 GPU 发布包及独立探测脚本。
 
 | 入口 | 用途 |
 |---|---|
+| [网页研究作业](research/job.sh) | 运行完整 Baseline，通过 HTTPS 读取论文库并调用百炼 |
 | [Public 发布包](qwen27b-student-release/README.md) | 默认路线，复用平台环境和模型，开发调用客户端 |
 | [Private vLLM 发布包](qwen27b-private-vllm-student-release/README.md) | 修改 vLLM Python 源码时使用，先构建再启动服务 |
 | [探测工具](probe/README.md) | CPU 作业内访问百炼、Tavily、arXiv/PDF、Neon 与 embedding |
@@ -31,7 +32,7 @@ tcloud cancel -j JOBID                         # 取消指定作业
 
 提交会同步当前目录，包括隐藏文件；Git 忽略规则不影响上传。`TACC_WORKDIR` 是可被再次提交覆盖的运行目录，`TACC_USERDIR` 用于保存结果。作业从队列消失不等于成功，应查看最终日志和结果文件。
 
-当前按外部后端提交、查询与取回结果，TACC worker 在作业内出站调用 API 的方式设计，不依赖 SSH 或外部连接 worker 端口。CPU 作业 `29413` 已验证 TACC → Cloudflare Worker 的 HTTPS/JSON/PDF 连通性；正式后端与 `tcloud` 作业提交器仍待实现。本次由本机提交作业，Cloudflare Worker 只提供测试接口。
+网页任务由后端 Worker 用 SDK 提交、查询和取回结果。TACC CPU 作业主动访问模型和论文库。早期作业 `29413` 单独验证了经 Cloudflare 访问 HTTPS/JSON/PDF。
 
 ## 发布包约定
 
@@ -47,9 +48,3 @@ tcloud cancel -j JOBID                         # 取消指定作业
 | 文件位置 | `TACC_WORKDIR` 用于作业同步与执行；`TACC_USERDIR` 保存持久结果 |
 
 以上是发布包配置。实际 checkpoint、精度、并行方式和运行效果在接入时核实。
-
-## 与项目的关系
-
-拟由 client job 运行 `agent/` 的 worker；源码同步、依赖和 backend 作业桥接尚待实现。现有 `qwen_client.chat()` 仅封装非流式文本应答，后续需要适配工具调用；示例的 `elapsed_seconds` 是完整请求耗时，TTFT/TPOT 需另行采集。
-
-整体连接方式见 [TACC 联调说明](TACC.md)，研究循环见 [Agent workflow](../agent/workflow.md)。

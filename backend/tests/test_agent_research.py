@@ -102,3 +102,26 @@ class AgentResearchContractTests(unittest.TestCase):
         bad.result.citations[0].url = "https://example.com/foreign"
         with self.assertRaises(ValueError):
             validate_delivery(manifest, bad)
+
+    def test_discovered_library_source_budget_and_identity_are_checked_before_import(self):
+        from app.agent_bridge.bundles import manifest_digest
+        from app.agent_bridge.contracts import ResultEnvelope
+        from app.agent_bridge.policy import build_research_manifest
+        from app.agent_bridge.results import validate_delivery
+
+        settings = Settings(_env_file=None, database_url="postgresql://unused@127.0.0.1/unused", agent_search_max_papers=1)
+        manifest = build_research_manifest(uuid4(), uuid4(), "Explain", [], settings, allow_search=True)
+        paper_id, sha = uuid4(), "a" * 64
+        source = {"source_id": f"local:{paper_id}@{sha}", "paper_id": str(paper_id), "url": "", "title": "Found"}
+        envelope = ResultEnvelope.model_validate({"schema_version": "agent-result-v1",
+            "dispatch_id": str(manifest.dispatch_id), "input_sha256": manifest_digest(manifest),
+            "result": {"task_id": manifest.task.task_id, "question": manifest.task.question, "sources": [source],
+                "answer": "Answer", "stop_reason": "completed", "usage": {}}})
+        self.assertEqual(validate_delivery(manifest, envelope), {paper_id: sha})
+        external = {"source_id": "arxiv:1706.03762v1", "paper_id": "arxiv:1706.03762",
+            "title": "External", "url": "https://arxiv.org/abs/1706.03762v1"}
+        for invalid in ([source, external], [source, source], [source | {"paper_id": str(uuid4())}],
+                        [source | {"url": "https://example.com/document"}]):
+            with self.subTest(invalid=invalid), self.assertRaises(ValueError):
+                envelope.result.sources = invalid
+                validate_delivery(manifest, envelope)

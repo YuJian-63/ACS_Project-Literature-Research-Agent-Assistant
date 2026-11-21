@@ -228,6 +228,58 @@ class AgentPostgresTests(unittest.TestCase):
                 "usage": {"model_calls": 2, "tool_calls": 3},
                 "unresolved": ["missing evidence"] if reason == "partial" else []}})
 
+    def test_discovered_library_citation_checks_owner_digest_and_page_without_changing_selection(self):
+        from io import BytesIO
+        from uuid import UUID
+        from pypdf import PdfWriter
+        from app.db.models import TaskPaper
+
+        client = self.research_client()
+        data = BytesIO()
+        writer = PdfWriter()
+        writer.add_blank_page(width=200, height=200)
+        writer.write(data)
+        upload = {"file": ("discovery.pdf", data.getvalue(), "application/pdf")}
+        paper = client.post("/api/v1/papers", files=upload).json()
+        foreign = self.research_client(self.other_user).post("/api/v1/papers", files=upload).json()
+        self.assertIsNone(paper["page_count"])
+
+        for selected in ([], [str(self.paper_id)]):
+            task_id = UUID(client.post("/api/v1/agent-research",
+                json={"question": "Explain", "paper_ids": selected}).json()["task_id"])
+            self.assertEqual(claim_task(self.sessions, self.owner), task_id)
+            self.assertTrue(set_task_stage(self.sessions, task_id, self.owner, "agent_packaging", "agent_waiting", "waiting"))
+            with self.sessions() as session:
+                run = session.get(AgentRun, task_id)
+                manifest = DispatchManifest.model_validate(run.manifest)
+                envelope = self.envelope(manifest, run.input_sha256)
+
+            def deliver(id_string, sha, page):
+                source = f"local:{id_string}@{sha}"
+                metadata = {"source_id": source, "paper_id": id_string, "url": "", "title": "Discovered"}
+                chunk = f"{source}:p{page}:c1"
+                envelope.result.sources = [metadata]
+                envelope.result.citations = [AgentEvidence(**metadata, page=page, source_text="Evidence", chunk_id=chunk)]
+                envelope.result.answer = f"Evidence [{chunk}]"
+                return complete_delivery(self.sessions, task_id, self.owner, manifest, envelope, settings=self.settings)
+
+            with self.assertRaisesRegex(ValueError, "owner"):
+                deliver(foreign["id"], foreign["sha256"], 1)
+            with self.assertRaisesRegex(ValueError, "changed"):
+                deliver(paper["id"], "0" * 64, 1)
+            with self.assertRaisesRegex(ValueError, "pages"):
+                deliver(paper["id"], paper["sha256"], 2)
+            self.assertTrue(deliver(paper["id"], paper["sha256"], 1))
+            response = client.get(f"/api/v1/agent-research/{task_id}").json()
+            self.assertEqual(response["paper_ids"], selected)
+            self.assertEqual(response["result"], envelope.result.model_dump(mode="json"))
+            with self.sessions() as session:
+                stored = session.get(TaskPaper, (task_id, UUID(paper["id"])))
+                self.assertIsNone(stored.selection_order)
+                self.assertEqual(stored.paper_sha256, paper["sha256"])
+                self.assertEqual(session.scalar(select(Citation.paper_id).where(Citation.task_id == task_id)), UUID(paper["id"]))
+                self.assertIn("[C1]", session.scalar(select(Artifact.content_markdown).where(Artifact.task_id == task_id)))
+
     def test_uploaded_pdf_without_backend_chunks_can_be_dispatched_and_replayed(self):
         from app.db.models import PaperChunk
 

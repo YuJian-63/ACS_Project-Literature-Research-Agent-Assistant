@@ -510,6 +510,7 @@ class OwnershipPostgresTests(unittest.TestCase):
 
     def test_job_with_search_disabled_can_only_read_its_selected_pdfs(self):
         from app.auth.agent_library import issue_job_library_token
+        from app.main import create_library_app
         from app.tasks.lifecycle import claim_task
 
         selected = self.upload()
@@ -520,12 +521,13 @@ class OwnershipPostgresTests(unittest.TestCase):
         deadline = datetime.now(timezone.utc).timestamp() + 60
         token = issue_job_library_token(self.settings, dispatch_id, deadline)
         base = "/api/v1/agent/papers"
-        with TestClient(self.clients[0].app, headers={"Authorization": f"Bearer {token}"}) as agent:
-            self.assertEqual(agent.get(base).status_code, 403)
-            self.assertEqual(agent.get(f"{base}/{selected}/pdf").content, b"%PDF-fixture")
-            for paper_id in (unselected, foreign):
-                with self.subTest(paper_id=paper_id):
-                    self.assertEqual(agent.get(f"{base}/{paper_id}/pdf").status_code, 404)
+        for app in (self.clients[0].app, create_library_app(self.settings, self.engine)):
+            with TestClient(app, headers={"Authorization": f"Bearer {token}"}) as agent:
+                self.assertEqual(agent.get(base).status_code, 403)
+                self.assertEqual(agent.get(f"{base}/{selected}/pdf").content, b"%PDF-fixture")
+                for paper_id in (unselected, foreign):
+                    with self.subTest(paper_id=paper_id):
+                        self.assertEqual(agent.get(f"{base}/{paper_id}/pdf").status_code, 404)
 
     def task(self, paper, index=0, key="same-key"):
         return self.clients[index].post("/api/v1/tasks", json={"task_type": "summary", "question": "Summarize", "paper_ids": [paper]}, headers={"Idempotency-Key": key})
@@ -829,7 +831,7 @@ class OwnershipPostgresTests(unittest.TestCase):
                 body = decrypt_payload(self.settings, mail.payload_ciphertext)["body"]
                 return unquote(body.split("#token=", 1)[1].split()[0])
         self.assertEqual(client.post("/api/v1/auth/verify-email", json={"token": latest("verify_email"), "password": password}).status_code, 200)
-        response = client.post("/api/v1/auth/login", json={"username": "registereduser", "password": password})
+        response = client.post("/api/v1/auth/login", json={"username": credentials["username"], "password": password})
         self.assertEqual(response.status_code, 200, response.text)
         self.assertIn("HttpOnly", response.headers["set-cookie"])
         csrf = response.json()["csrf_token"]
