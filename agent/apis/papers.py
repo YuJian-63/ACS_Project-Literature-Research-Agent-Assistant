@@ -20,6 +20,9 @@ ARXIV_ID = re.compile(
     r"(?P<base>(?:\d{2}(?:0[1-9]|1[0-2])\.\d{4,5}|[A-Za-z][A-Za-z.-]*/\d{2}(?:0[1-9]|1[0-2])\d{3}))"
     r"(?P<version>v[1-9]\d*)?"
 )
+LOCAL_SOURCE = re.compile(
+    r"local:(?P<paper_id>[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12})@(?P<sha256>[0-9a-f]{64})"
+)
 MAX_PDF_BYTES = 25 * 1024 * 1024
 CHUNK_CHARS = 3000
 
@@ -48,6 +51,16 @@ def normalize_arxiv_id(source: str) -> str:
     if not ARXIV_ID.fullmatch(value):
         raise ValueError("Invalid arXiv identifier")
     return value
+
+
+def normalize_source(source: str) -> str:
+    """Return a bare arXiv identifier or the content-pinned library source."""
+    value = source.strip()
+    if value.startswith("local:"):
+        if not LOCAL_SOURCE.fullmatch(value):
+            raise ValueError("Expected local:<UUID>@<SHA-256> in lowercase")
+        return value
+    return normalize_arxiv_id(value)
 
 
 def _download_pdf(
@@ -118,19 +131,19 @@ def _split_page(text: str, chunk_chars: int = CHUNK_CHARS) -> list[str]:
     return chunks
 
 
-def parse_pdf(path: Path, arxiv_id: str) -> dict:
-    """Extract text and stable citations from an already downloaded PDF."""
-    arxiv_id = normalize_arxiv_id(arxiv_id)
-    match = ARXIV_ID.fullmatch(arxiv_id)
-    assert match is not None
-    base = match["base"]
-    version = match["version"]
-    digest = hashlib.sha256(path.read_bytes()).hexdigest()
-    with pymupdf.open(path) as document:
+def parse_pdf(path: Path, arxiv_id: str, *, title: str | None = None) -> dict:
+    """Extract text and stable citations for an arXiv or library source."""
+    source = normalize_source(arxiv_id)
+    library = LOCAL_SOURCE.fullmatch(source)
+    content = path.read_bytes()
+    digest = hashlib.sha256(content).hexdigest()
+    if library and digest != library["sha256"]:
+        raise ValueError("PDF SHA-256 does not match the library source")
+    with pymupdf.open(stream=content, filetype="pdf") as document:
         if document.needs_pass:
             raise ValueError("Password-protected PDF is unsupported")
         pages = [{"page": page.number + 1, "text": page.get_text(sort=True)} for page in document]
-        title = (document.metadata.get("title") or "").strip() or f"arXiv:{arxiv_id}"
+        title = (title or "").strip() or (document.metadata.get("title") or "").strip()
         outline = [
             {"title": heading, "level": level, "page_start": page}
             for level, heading, page in document.get_toc()
@@ -138,14 +151,27 @@ def parse_pdf(path: Path, arxiv_id: str) -> dict:
         ]
     if not any(page["text"].strip() for page in pages):
         raise ValueError("PDF has no extractable text")
-    watermark = re.search(r"arXiv:\s*" + re.escape(base) + r"(v[1-9]\d*)\b", pages[0]["text"])
-    if watermark:
-        if version and version != watermark[1]:
-            raise ValueError("PDF version does not match the requested arXiv version")
-        version = watermark[1]
-    paper_id = f"arxiv:{base}"
-    source_id = f"{paper_id}{version}" if version else f"{paper_id}@{digest[:12]}"
-    resolved_id = base + (version or "")
+    if library:
+        paper_id = library["paper_id"]
+        source_id = source
+        version = None
+        url = pdf_url = ""
+        title = title or paper_id
+    else:
+        match = ARXIV_ID.fullmatch(source)
+        assert match is not None
+        base, version = match["base"], match["version"]
+        watermark = re.search(r"arXiv:\s*" + re.escape(base) + r"(v[1-9]\d*)\b", pages[0]["text"])
+        if watermark:
+            if version and version != watermark[1]:
+                raise ValueError("PDF version does not match the requested arXiv version")
+            version = watermark[1]
+        paper_id = f"arxiv:{base}"
+        source_id = f"{paper_id}{version}" if version else f"{paper_id}@{digest[:12]}"
+        resolved_id = base + (version or "")
+        url = f"https://arxiv.org/abs/{resolved_id}"
+        pdf_url = f"https://arxiv.org/pdf/{resolved_id}"
+        title = title or f"arXiv:{source}"
     chunks = [
         {
             "source_id": source_id,
@@ -163,8 +189,8 @@ def parse_pdf(path: Path, arxiv_id: str) -> dict:
         "paper_id": paper_id,
         "source_id": source_id,
         "title": title,
-        "url": f"https://arxiv.org/abs/{resolved_id}",
-        "pdf_url": f"https://arxiv.org/pdf/{resolved_id}",
+        "url": url,
+        "pdf_url": pdf_url,
         "version": version,
         "sha256": digest,
         "pdf_path": str(path.resolve()),
