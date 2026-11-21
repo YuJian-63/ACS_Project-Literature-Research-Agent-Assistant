@@ -191,6 +191,7 @@ export const english: Record<string, string> = {
   '密码已更新，请重新登录。': 'Password updated. Sign in again.',
   '密码为 6–128 个字符，可使用数字、字母、下划线等符号，无需混合字符种类，中文和空格也会保留。': 'Use 6–128 characters: digits, letters, underscores and other symbols are allowed, with no required character mix. Spaces and non-Latin characters are preserved.',
   '用户名须为 3–32 个 ASCII 字母、数字或下划线。': 'Use 3–32 ASCII letters, digits, or underscores for your username.',
+  '用户名区分大小写，登录时请与注册时保持一致。': 'Usernames are case-sensitive. Use the same capitalization you registered with.',
   '请输入有效的邮箱地址。': 'Enter a valid email address.',
   '密码须为 6–128 个字符，空格会保留。': 'Use 6–128 characters. Spaces are preserved.',
   '两次输入的密码不一致。': 'Passwords do not match.',
