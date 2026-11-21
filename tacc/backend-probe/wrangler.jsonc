@@ -1,0 +1,10 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "acs-tacc-backend-probe",
+  "main": "src/index.js",
+  "compatibility_date": "2026-11-17",
+  "workers_dev": true,
+  "rules": [
+    { "type": "Data", "globs": ["**/*.pdf"], "fallthrough": true }
+  ]
+}
