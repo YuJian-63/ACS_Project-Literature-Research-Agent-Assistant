@@ -21,12 +21,3 @@ export function fileSize(bytes: number): string {
   }
   return `${unit < 2 ? Math.round(value) : value.toFixed(1)} ${units[unit]}`;
 }
-
-export function duration(milliseconds: number | null): string {
-  if (milliseconds === null) return '—';
-  return milliseconds < 1000 ? `${milliseconds} ms` : `${(milliseconds / 1000).toFixed(1)} s`;
-}
-
-export function isTerminal(status: TaskStatus): boolean {
-  return status === 'succeeded' || status === 'failed';
-}

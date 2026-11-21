@@ -1167,49 +1167,9 @@ ssh -o BatchMode=yes tacc-research "command -v python3; command -v sbatch; comma
 
 预期：五个程序均存在，SSH 无需交互密码。桥接解释器需 Python 3.11+；若登录节点系统 python3 较旧，可将 AGENT_TACC_PYTHON 配置为远程 Agent 的 .venv/bin/python（3.12）。sacct 必须允许查询本人作业，以便已离开队列的任务和提交结果不明时恢复。登录 shell 需要能找到这些 Slurm 命令；仅交互 shell 的 alias 不生效。
 
-### 4. 打包、上传并部署 Agent
+### 4. 课程 TACC 作业部署
 
-本机从根目录生成白名单部署包，包含当前工作区的运行代码和锁文件，排除 .env、虚拟环境、数据、测试及密钥；不会上传整个仓库。Windows：
-
-~~~powershell
-uv run --project .\backend --locked python -m app.agent_bridge.deploy --output .\runtime\agent-runtime.tar.gz
-scp .\runtime\agent-runtime.tar.gz tacc-research:agent-runtime.tar.gz
-ssh tacc-research
-~~~
-
-macOS：
-
-~~~bash
-uv run --project ./backend --locked python -m app.agent_bridge.deploy --output ./runtime/agent-runtime.tar.gz
-scp ./runtime/agent-runtime.tar.gz tacc-research:agent-runtime.tar.gz
-ssh tacc-research
-~~~
-
-进入远程 Linux 终端后执行，第一行必须替换为平台确认的共享绝对目录；以下变量仅用于一次部署：
-
-~~~bash
-export AGENT_REMOTE_BASE="<登录节点和计算节点共享的绝对目录>"
-mkdir -p "$AGENT_REMOTE_BASE/acs-agent" "$AGENT_REMOTE_BASE/acs-agent-jobs"
-tar -xzf "$HOME/agent-runtime.tar.gz" -C "$AGENT_REMOTE_BASE/acs-agent"
-cd "$AGENT_REMOTE_BASE/acs-agent"
-uv sync --frozen --no-dev
-cp .env.example .env
-cp tacc.example.json tacc.local.json
-chmod 600 .env tacc.local.json
-~~~
-
-在远程 .env 填写模型配置；确保计算节点能够访问该地址，不能把登录节点的 127.0.0.1 误作计算节点可访问的模型地址。配置 tacc.local.json：workspace_root 为共享的 acs-agent-jobs，agent_root 为共享的 acs-agent，python 为其 .venv/bin/python；partition/account/qos 按平台授权填写，不需要时保留 null。cpus/memory_mb 是 CPU Agent 客户端进程资源，本桥接不启动 GPU 模型服务。模型服务需事先独立部署。
-
-检查路径及入口（不调用模型或提交作业）：
-
-~~~bash
-.venv/bin/python -B -c 'import json,pathlib; c=json.load(open("tacc.local.json")); print("Agent:", pathlib.Path(c["agent_root"]).is_dir()); print("Python:", pathlib.Path(c["python"]).is_file()); print("Workspace:", pathlib.Path(c["workspace_root"]).is_dir())'
-.venv/bin/python -B run_dispatch.py --help
-.venv/bin/python -B tacc_bridge.py --help
-pwd
-~~~
-
-预期三个检查均为 True，两个入口显示帮助。保存 pwd 输出，供本机 backend/.env 填写远程绝对路径；这属于远程配置，不能写成本机项目相对路径。
+课程平台的 CPU 作业通过 `tcloud` 提交，运行文件、输入与私有配置由服务端按次准备。操作步骤见 [TACC 联调说明](../tacc/TACC.md)。下节的 SSH 配置适用于仍维护独立 Slurm helper 的已有部署。
 
 ### 5. 本机切换 TACC 模式
 
