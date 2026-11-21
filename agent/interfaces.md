@@ -12,13 +12,13 @@
 
 Backend 管任务生命周期、持久化与平台作业；agent 提供可独立运行的任务入口。当前本地 baseline 直接导入工具实现。具体由哪位组员实现适配器，在分工时确认。
 
-暂定部署时，由 TACC 内的 agent 主动调用外部后端的论文检索、PDF 下载两个 API；具体路由、字段和鉴权待对齐，整体部署见 [系统设计](../docs/design.md)。
+Agent 通过后端的论文库 API 检索和下载当前用户的 PDF。Python 调用按任务传入 `library=LibraryClient(base_url, token)`，CLI 从环境读取后端地址和令牌。签发和鉴权约定见 [API 契约](../docs/api-contract.md)。
 
 ## 任务与证据
 
-- 当前输入：`task_id`、`question`、arXiv ID/URL 列表 `sources`、`allow_search`、`max_papers`，以及下述执行参数。`question` 直接表达问答、总结、比较或混合要求；其他材料类型及模式切换待扩展。
+- 当前输入包括 `task_id`、`question`、来源列表 `sources`、`allow_search`、`max_papers`，以及下述执行参数。`sources` 支持 arXiv ID/URL 和库内 `local:<UUID>@<sha256>` 标识。`question` 直接表达问答、总结、比较或混合要求。
 - 输出：正文、比较表（适用时）、引用与证据定位、未解决项、`stop_reason` 和运行统计；运行异常单独返回错误。
-- 搜索候选：来源 ID、标题、URL/文件引用、全文获取状态；仅有摘要时标明可用范围。
+- 两种搜索的候选都包含 `source` 和标题。arXiv 候选还带 URL 和搜索片段，库内候选带原始文件名。
 - 证据块：`source_id`、`paper_id`（适用时）、`chunk_id`、章节/页码、`source_text`；摘要和引用关联原文块。
 
 材料引用必须能被实际执行 worker 读取。搜索、读取与引用均限定在任务允许的来源范围内。

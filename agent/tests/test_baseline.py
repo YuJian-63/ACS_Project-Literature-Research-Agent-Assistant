@@ -488,6 +488,7 @@ def test_search_admits_only_returned_arxiv_sources():
         return {
             "results": [
                 {"url": "https://arxiv.org/abs/1706.03762v7", "title": "Paper"},
+                {"url": "https://arxiv.org/pdf/1706.03762v7.pdf", "title": "Paper PDF"},
                 {"url": "https://example.com/paper", "title": "Not arXiv"},
             ]
         }
@@ -504,8 +505,10 @@ def test_search_admits_only_returned_arxiv_sources():
     )
     assert result.stop_reason == "completed"
     assert requests[0][1]["include_domains"] == ["arxiv.org"]
-    assert len(observations(result)[0]["results"]) == 1
-    assert "search_papers" in {item.name for item in model.bound_tools[0]}
+    [candidate] = observations(result)[0]["results"]
+    assert candidate["source"] == "1706.03762v7"
+    tools = {item.name for item in model.bound_tools[0]}
+    assert "search_papers" in tools and "search_library" not in tools
 
 
 def test_unknown_or_disabled_tool_error_is_returned_then_agent_can_recover():

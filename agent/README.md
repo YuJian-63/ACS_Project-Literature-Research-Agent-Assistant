@@ -19,7 +19,7 @@ uv run python -m apis.search_web 'Attention Is All You Need arxiv' --domains arx
 uv run python -m apis.papers '1706.03762' --page-start 1 --page-end 2
 ```
 
-PDF 缓存在 `data/papers/`；解析保留页码、版本及原文块。设计见 [workflow](workflow.md)，任务与结果结构见 [schemas.py](schemas.py)。
+arXiv PDF 缓存在 `data/papers/`。库内 PDF 在本次任务首次打开、阅读或检索原文时下载，校验 SHA-256 后按相同规则分页、分块。设计见 [workflow](workflow.md)，任务与结果结构见 [schemas.py](schemas.py)。
 
 运行 LangGraph baseline：
 
@@ -30,6 +30,14 @@ uv run python baseline.py --task examples/review.json
 uv run python baseline.py --task examples/qa.json --context-window 32000 --context-finalize-ratio 0.9
 uv run pytest -q
 ```
+
+要让 Baseline 或 Extension 搜索当前用户的论文库，按[论文库 API 契约](../docs/api-contract.md#41-agent-论文库)签发短期 Bearer 令牌，通过环境变量 `AGENT_LIBRARY_TOKEN` 传给 CLI。`AGENT_LIBRARY_BASE_URL` 默认为 `http://127.0.0.1:8000`。库中已有《Attention Is All You Need》时可运行：
+
+```bash
+uv run python baseline.py --task examples/library-qa.json --context-window 8192
+```
+
+Python 调用按任务传入 `run_task(task, library=LibraryClient(base_url, token))`，其中 `LibraryClient` 来自 `apis.library`。`allow_search=true` 时，`search_papers` 搜 arXiv，配置了令牌的 `search_library` 按标题或文件名搜论文库。两者的候选都带有可直接交给 `open_paper(source)` 的 `source`。库内标识为 `local:<UUID>@<SHA-256>`，也可预先填入任务的 `sources`。
 
 Baseline 结果与 trace 写入 `runs/baseline/`；`--persist` 同时保存到 Neon。支持搜索、打开论文、分页阅读与分块摘要，输出引用保留原文和页码。`open_paper` 返回标题、版本、总页数和 PDF 书签目录，供 agent 选择阅读范围；打开、阅读与摘要共用论文缓存。
 

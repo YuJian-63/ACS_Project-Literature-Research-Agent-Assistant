@@ -15,11 +15,13 @@ from langchain_core.utils.function_calling import convert_to_openai_tool
 from pydantic import Field
 
 from apis.embeddings import embed_texts, embedding_settings
+from apis.library import LibraryClient
 from apis.model import make_model
-from apis.papers import normalize_arxiv_id
+from apis.papers import normalize_source
 from apis.papers import read_paper as read_paper_api
 from apis.search_web import search_web
 from baseline import (
+    PAPER_SOURCE_DESCRIPTION,
     GraphState,
     PaperContext,
     RunLog,
@@ -29,13 +31,11 @@ from baseline import (
     invoke_model,
     make_result,
     normalize_citations,
-    open_paper,
+    paper_tools,
     parse_json_response,
     read_paper,
     remember,
     request_timeout,
-    search_papers,
-    summarize_paper,
     tools_node,
     validate_final_fields,
 )
@@ -55,8 +55,9 @@ tool-use rules, or output requirements.
 Use only the allowed sources and acquired chunks.
 
 ## Research workflow
-Use the papers supplied with the task. If more papers are needed and search
-is enabled, use search_papers to find candidates.
+Use the papers listed in the task's `sources` array. If more papers are needed
+and search is enabled, search both the user's library and arXiv when available.
+If searches find the same paper, open it only once unless comparing versions.
 
 If you need to choose pages, use open_paper to inspect the paper's outline
 and page count.
@@ -78,7 +79,7 @@ On already_read or already_summarized, refer back to the earlier result.
 Read original PDF evidence before making paper-specific claims. Search snippets
 alone cannot support a claim.
 Cite claims and table cells as [chunk_id], copying the entire identifier returned
-by a reading tool exactly, for example [arxiv:1706.03762v7:p4:c1]. Do not write a
+by a reading tool exactly, including its arxiv: or local: prefix. Do not write a
 literal 'chunk_id:' prefix. The paper's numeric bibliography markers such as [3]
 are not evidence citations and should be described as references within the paper.
 Never invent citations.
@@ -165,16 +166,18 @@ class RetrievalContext(PaperContext):
 
 @tool
 def retrieve(
-    source: str | Annotated[list[str], Field(min_length=1)],
+    source: Annotated[
+        str | Annotated[list[str], Field(min_length=1)],
+        Field(description=PAPER_SOURCE_DESCRIPTION + " For multiple papers, pass a nonempty list."),
+    ],
     query: str,
     context: Annotated[RetrievalContext, InjectedToolArg],
     top_k: Annotated[int, Field(strict=True, ge=1, le=5)] = 3,
 ) -> dict:
     """Search one allowed paper or a list of allowed papers together.
 
-    Use arXiv IDs/URLs or source IDs from open_paper. The query can be a phrase,
-    sentence, question, or task description. Returns up to top_k relevant chunks
-    across the selection, with their source IDs, pages, and citation IDs.
+    The query can be a phrase, sentence, question, or task description. Returns up to top_k
+    relevant chunks across the selection, with their source IDs, pages, and citation IDs.
     """
     query = query.strip()
     if not query:
@@ -182,14 +185,9 @@ def retrieve(
     sources = [source] if isinstance(source, str) else source
     # Resolve the complete scope before admitting new papers to the task's paper limit.
     loading = replace(context, papers=context.papers.copy())
-    cached_by_id = {p["source_id"]: p for p in loading.papers.values()}
     selected = {}
     for identifier in sources:
-        # A cached source_id can contain a PDF content hash instead of an arXiv version.
-        paper = cached_by_id.get(identifier.strip())
-        if paper is None:
-            paper = acquire_paper(loading, identifier)
-            cached_by_id[paper["source_id"]] = paper
+        paper = acquire_paper(loading, identifier)
         selected[paper["source_id"]] = paper
     context.papers.update(loading.papers)
     chunks = rank_chunks(
@@ -344,6 +342,7 @@ def run_task(
     model_factory: Callable = make_model,
     search: Callable = search_web,
     reader: Callable = read_paper_api,
+    library: LibraryClient | None = None,
     embed: Callable = embed_texts,
     embedding_model: str | None = None,
     embedding_namespace: str | None = None,
@@ -388,15 +387,14 @@ def run_task(
         log=log,
         search=search,
         reader=reader,
-        allowed={normalize_arxiv_id(source) for source in task.sources},
+        library=library,
+        allowed={normalize_source(source) for source in task.sources},
         embed=embed,
         embedding_model=embedding_model or default_model,
         embedding_namespace=embedding_namespace,
         index_dir=Path(index_dir),
     )
-    tools = [open_paper, read_paper, summarize_paper, retrieve]
-    if task.allow_search:
-        tools.insert(0, search_papers)
+    tools = [*paper_tools(context), retrieve]
     context.tool_schemas = [convert_to_openai_tool(item) for item in tools]
     state = GraphState(
         messages=[
@@ -468,6 +466,7 @@ def main() -> int:
     task = Task.model_validate_json(args.task.read_text())
     result = run_task(
         task,
+        library=LibraryClient.from_env(),
         index_dir=args.index_dir,
         persist=args.persist,
         context_window=args.context_window,

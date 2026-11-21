@@ -27,7 +27,7 @@ Agent 支持可选的 Neon 持久化：`persist=false`（默认）不写入数�
 |---|---|---|---|
 | `task_id` | string | 否 | 默认自动生成 UUID 十六进制字符串；后端可传入自己的任务 ID |
 | `question` | string | 是 | 用户问题或任务要求，可表达问答、总结、比较或混合要求；长度至少为 1，当前不自动去除首尾空白 |
-| `sources` | string[] | 条件必填 | arXiv ID 或 URL；默认 `[]` |
+| `sources` | string[] | 条件必填 | arXiv ID、arXiv URL 或库内来源标识，默认 `[]` |
 | `allow_search` | boolean | 否 | 是否允许搜索补充论文；默认 `false` |
 | `max_papers` | integer | 否 | 最多获取的不同论文数量，范围 1–20；默认 3 |
 | `max_steps` | integer | 否 | 主 agent 最多调用轮数，至少为 1；默认 40 |
@@ -37,7 +37,7 @@ Agent 支持可选的 Neon 持久化：`persist=false`（默认）不写入数�
 输入约束：
 
 - `allow_search=false` 时，`sources` 必须非空；设为 `true` 时可以不提供论文。
-- 当前来源支持 arXiv ID、带版本 ID，以及 arXiv 的 abs/pdf/html URL；暂不支持本地 PDF 路径或任意网站 URL。
+- arXiv 支持带版本或未指定版本的 ID 及 abs/pdf/html URL。库内来源使用 `local:<UUID>@<64 位小写 SHA-256>`，下载使用本次运行的论文库令牌。
 - `task_id` 长度 1–101，首字符为英文字母或数字，其余允许英文字母、数字、`.`、`_`、`-`。
 - 任务对象不接受未定义字段。旧版 `budget`、`task_type` 已移除，传入会抛出校验错误。
 - `max_papers` 限制实际获取的不同论文数量，不限制输入列表长度或搜索候选数量。
@@ -266,9 +266,12 @@ Agent 支持可选的 Neon 持久化：`persist=false`（默认）不写入数�
 | 工具 | 模型输入 | 成功时的 `observation` |
 |---|---|---|
 | `search_papers` | `query` | `results`（每项含 `source/title/url/snippet`）、`evidence_status="discovery_only"`；仅允许搜索时提供 |
+| `search_library` | `query` 可省略以列出论文，`match=all\|any`，`offset=0` | 允许搜索且配置论文库时提供。每页最多 5 项，返回 `results`（`source/title/original_filename`）、`total/limit/offset` 和 `evidence_status="discovery_only"` |
 | `open_paper` | `source` | `source_id/title/version/page_count/outline`；`outline` 为 PDF 书签目录，每项含 `title/level/page_start`，无目录时为 `[]` |
 | `read_paper` | `source/page_start/page_end`；1–3 页 | `source_id/title/page_count/pages_read/chunks/previously_read_chunk_ids/status`；状态为 `complete` 或 `already_read` |
 | `summarize_paper` | `source/page_start/page_end`；1–6 页 | `source_id/title/page_count/pages_summarized/summaries/previously_summarized_chunk_ids/status`；每项摘要含 `summary/chunk_ids`，状态为 `complete` 或 `already_summarized` |
+
+阅读工具的参数 `source` 可取任务 `sources` 数组中的一项，或搜索结果中一条候选的 `source` 字段。论文打开后也可复用返回的 `source_id`。这些取值说明位于模型可见的工具定义 `parameters.properties.source.description`。
 
 搜索片段只用于发现论文，不能直接作为引用证据。打开论文返回导航信息，不登记引用证据；打开、阅读与摘要共用论文缓存。阅读和摘要分别去重；摘要后仍可读取原文。工具的 `complete` 表示本次返回了新块或摘要，不表示整篇论文已读完。
 
@@ -312,7 +315,7 @@ Agent 支持可选的 Neon 持久化：`persist=false`（默认）不写入数�
 - 达到硬执行上限或运行失败时不补最终答案；上下文压力收尾只在尚未超过硬窗口时触发，仍须通过轮数、时间和最终请求容量检查。已有来源、trace 和错误记录保留；最终未引用的证据不会额外填入 `citations`，阅读原文等可从 trace 查看。
 - `errors` 可能包含已恢复的工具错误，非空不一定表示最终失败。未知工具、禁用工具或无效参数通常返回工具错误供模型继续处理，不直接设置 `invalid_tool_call`。
 - 摘要输出截断或引用无效通常作为工具错误返回；主模型输出截断才直接设置 `output_truncated`。摘要内部模型调用失败可能直接终止任务。
-- 输入校验失败直接抛出 `ValidationError`；非法 arXiv 来源或非法上下文运行参数可能直接抛出 `ValueError`。调用方需捕获异常并映射为自己的错误响应；并非所有运行环境或文件错误都会包装成 `TaskResult`。
+- 输入校验失败直接抛出 `ValidationError`。非法来源标识或非法上下文运行参数可能直接抛出 `ValueError`。调用方需捕获异常并映射为自己的错误响应。
 - Neon 保存失败时，结果追加 `stage="persistence"` 的错误，保留研究结果，且不改变 `stop_reason`。
 
 错误摘要示例：
