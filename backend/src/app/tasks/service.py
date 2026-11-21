@@ -79,7 +79,7 @@ def ensure_task_deletable(session: Session, task: Task) -> None:
     ):
         raise APIError(409, "TASK_RUNNING", "研究正在执行，请等待完成后再删除")
     if (task.runner_type == "agent" and task.status == "failed"
-        and task.run_config.get("transport") in {"local-process-v1", "tacc-ssh-slurm-v1"}
+        and task.run_config.get("transport") in {"local-process-v1", "tacc-ssh-slurm-v1", "tcloud-v1"}
         and not task.run_config.get("agent_cancel_confirmed")):
         run = session.get(AgentRun, task.id)
         if run is not None and run.result is None:
@@ -98,7 +98,7 @@ def selected_papers(session: Session, task_ids: list[UUID]) -> dict[UUID, list[U
     if task_ids:
         rows = session.execute(
             select(TaskPaper.task_id, TaskPaper.paper_id)
-            .where(TaskPaper.task_id.in_(task_ids)).order_by(TaskPaper.paper_id)
+            .where(TaskPaper.task_id.in_(task_ids), TaskPaper.selection_order.is_not(None)).order_by(TaskPaper.paper_id)
         )
         for task_id, paper_id in rows:
             result[task_id].append(paper_id)

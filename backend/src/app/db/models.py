@@ -233,7 +233,7 @@ class TaskPaper(CreatedAt, Base):
     task_id: Mapped[UUID] = mapped_column(ForeignKey("tasks.id", ondelete="CASCADE"), primary_key=True)
     paper_id: Mapped[UUID] = mapped_column(primary_key=True)
     paper_sha256: Mapped[str] = mapped_column(String(64))
-    selection_order: Mapped[int] = mapped_column(SmallInteger)
+    selection_order: Mapped[int | None] = mapped_column(SmallInteger)
 
     __table_args__ = (
         CheckConstraint("selection_order BETWEEN 0 AND 19"),

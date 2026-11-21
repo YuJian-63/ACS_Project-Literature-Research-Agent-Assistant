@@ -314,8 +314,16 @@ Desktop.ini
 /agent/.venv-private/
 /agent/tacc.local.json
 
+# TACC local credentials, run output, and vLLM source/build files
+/tacc/**/*.key
+/tacc/**/*.pem
+/tacc/runs/
+/tacc/**/result-*.json
+/tacc/qwen27b-private-vllm-student-release/vllm-v0.26.0.tar.gz
+/tacc/qwen27b-private-vllm-student-release/vllm-src/
+/tacc/qwen27b-private-vllm-student-release/qwen-private-build/vllm-source.tar.gz
+
 # Local root agent notes
 /AGENTS.md
 /PROGRESS.md
 /PLAN.md
-/TACC.md

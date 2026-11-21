@@ -24,7 +24,11 @@ class Settings(BaseSettings):
     task_runner: Literal["agent"] = "agent"
     agent_dispatch_enabled: bool = False
     agent_exchange_root: Path | None = None
-    agent_transport: Literal["manual", "local", "tacc"] = "manual"
+    agent_library_public_url: str | None = None
+    agent_transport: Literal["manual", "local", "tacc", "tcloud"] = "manual"
+    agent_tcloud_cli: str = Field(default="tcloud", min_length=1)
+    agent_tcloud_submit_timeout_seconds: float = Field(default=180, ge=1, le=1800, allow_inf_nan=False)
+    agent_tcloud_model_env_file: Path | None = None
     agent_local_root: Path | None = None
     agent_local_python: Path | None = None
     agent_tacc_host: str | None = Field(default=None, pattern=r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
@@ -86,11 +90,22 @@ class Settings(BaseSettings):
             raise ValueError("FRONTEND_PUBLIC_URL must be an HTTP(S) origin without credentials")
         return value.rstrip("/")
 
+    @field_validator("agent_library_public_url", mode="before")
+    @classmethod
+    def validate_job_library_url(cls, value: str | None) -> str | None:
+        if not value:
+            return None
+        parsed = urlsplit(value)
+        if (parsed.scheme != "https" or not parsed.hostname or parsed.port == 0 or parsed.username is not None
+            or parsed.password is not None or parsed.query or parsed.fragment or parsed.path not in {"", "/"}):
+            raise ValueError("AGENT_LIBRARY_PUBLIC_URL must be an HTTPS origin without credentials")
+        return value.rstrip("/")
+
     @property
     def arxiv_configured(self) -> bool:
         return self.arxiv_enabled and bool(self.arxiv_contact_email)
 
-    @field_validator("agent_exchange_root", "agent_local_root", "agent_local_python", "agent_tacc_host", "agent_tacc_helper", "agent_tacc_config", mode="before")
+    @field_validator("agent_exchange_root", "agent_local_root", "agent_local_python", "agent_tacc_host", "agent_tacc_helper", "agent_tacc_config", "agent_tcloud_model_env_file", mode="before")
     @classmethod
     def empty_agent_optional_value(cls, value):
         return None if value == "" else value

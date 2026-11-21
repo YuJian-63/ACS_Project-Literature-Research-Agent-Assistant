@@ -2,12 +2,17 @@ from dataclasses import dataclass
 from datetime import timedelta
 from uuid import UUID
 
+from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.agent_bridge.bundles import manifest_digest
 from app.agent_bridge.contracts import DispatchManifest, ResultEnvelope
 from app.agent_bridge.results import present_result, validate_delivery
-from app.db.models import AgentRun, Artifact, Citation
+from app.config import Settings
+from app.db.models import AgentRun, Artifact, Citation, Paper, Task, TaskPaper
+from app.papers.pdf_parser import ParseFailure
+from app.papers.storage import controlled_path
+from app.workers.parser import ParserWorker
 from app.tasks.lifecycle import (
     append_event,
     database_time,
@@ -41,11 +46,6 @@ def load_execution(sessions: sessionmaker[Session], task_id: UUID, owner: UUID) 
         return Execution(manifest, run.remote_job_id, task.run_config.get("transport", "file-exchange-v1"), deadline)
 
 
-def load_manifest(sessions: sessionmaker[Session], task_id: UUID, owner: UUID) -> DispatchManifest | None:
-    execution = load_execution(sessions, task_id, owner)
-    return execution.manifest if execution else None
-
-
 def record_job(sessions: sessionmaker[Session], task_id: UUID, owner: UUID, manifest: DispatchManifest, job_id: str) -> bool:
     if not job_id.strip() or len(job_id) > 256 or "\x00" in job_id:
         raise ValueError("Invalid remote job ID")
@@ -66,11 +66,39 @@ def record_job(sessions: sessionmaker[Session], task_id: UUID, owner: UUID, mani
         return True
 
 
+def read_missing_page_counts(sessions, task_id, settings, discovered, cited_pages):
+    # A newly uploaded PDF may be cited before the parser Worker processes it.
+    # Read its metadata outside the commit transaction so the task can still heartbeat.
+    with sessions() as session:
+        papers = session.execute(
+            select(Paper.id, Paper.storage_key, Paper.sha256, Paper.size_bytes)
+            .where(Paper.id.in_(cited_pages), Paper.page_count.is_(None),
+                Paper.user_id == select(Task.user_id).where(Task.id == task_id).scalar_subquery())
+        ).all()
+    counts = {}
+    parser = ParserWorker(sessions, settings)
+    for paper in papers:
+        if paper.sha256 != discovered[paper.id]:
+            raise ValueError("Discovered library PDF has changed")
+        controlled_path(settings.storage_root, paper.id, paper.storage_key)
+        try:
+            metadata = parser.extract(paper.id, paper.sha256, paper.size_bytes, maintain_lease=False)
+        except ParseFailure as error:
+            raise ValueError("Cannot verify cited PDF page count") from error
+        counts[paper.id] = metadata.page_count
+    return counts
+
+
 def complete_delivery(sessions: sessionmaker[Session], task_id: UUID, owner: UUID,
-    manifest: DispatchManifest, envelope: ResultEnvelope) -> bool:
-    validate_delivery(manifest, envelope)
+    manifest: DispatchManifest, envelope: ResultEnvelope, *, settings: Settings | None = None) -> bool:
+    discovered = validate_delivery(manifest, envelope)
     result = envelope.result
-    presentation = present_result(manifest, result)
+    presentation = present_result(manifest, result, discovered)
+    cited_pages = {}
+    for citation in presentation.citations:
+        if citation.paper_id in discovered:
+            cited_pages[citation.paper_id] = max(citation.page_number, cited_pages.get(citation.paper_id, 0))
+    counts = read_missing_page_counts(sessions, task_id, settings, discovered, cited_pages) if settings and cited_pages else {}
     with sessions.begin() as session:
         task = locked_task(session, task_id)
         now = database_time(session)
@@ -83,6 +111,23 @@ def complete_delivery(sessions: sessionmaker[Session], task_id: UUID, owner: UUI
             raise ValueError("Agent delivery belongs to another job")
         if run.result is not None:
             return False
+        if discovered:
+            papers = session.execute(
+                select(Paper.id, Paper.sha256, Paper.page_count)
+                .where(Paper.user_id == task.user_id, Paper.id.in_(discovered))
+                .order_by(Paper.id).with_for_update(read=True)
+            ).all()
+            if len(papers) != len(discovered):
+                raise ValueError("Discovered PDF is not in the task owner's library")
+            for paper in papers:
+                if paper.sha256 != discovered[paper.id]:
+                    raise ValueError("Discovered library PDF has changed")
+                if paper.id in cited_pages:
+                    page_count = paper.page_count or counts.get(paper.id)
+                    if page_count is None or cited_pages[paper.id] > page_count:
+                        raise ValueError("Citation exceeds verified library PDF pages")
+                session.add(TaskPaper(task_id=task_id, user_id=task.user_id, paper_id=paper.id,
+                    paper_sha256=paper.sha256, selection_order=None))
         run.result = result.model_dump(mode="json")
         run.stop_reason = result.stop_reason
         run.remote_job_id = envelope.remote_job_id

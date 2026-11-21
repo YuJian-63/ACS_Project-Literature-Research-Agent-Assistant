@@ -37,7 +37,7 @@ def research_references(session, task_ids: list[UUID], user_id: UUID):
         rows = session.execute(
             select(TaskPaper.task_id, Paper.id, Paper.title)
             .join(Paper, (Paper.id == TaskPaper.paper_id) & (Paper.user_id == TaskPaper.user_id))
-            .where(TaskPaper.task_id.in_(task_ids), TaskPaper.user_id == user_id)
+            .where(TaskPaper.task_id.in_(task_ids), TaskPaper.user_id == user_id, TaskPaper.selection_order.is_not(None))
             .order_by(TaskPaper.selection_order)
         )
         for task_id, paper_id, title in rows:

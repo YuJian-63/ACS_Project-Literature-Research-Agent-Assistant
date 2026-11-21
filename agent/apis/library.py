@@ -5,7 +5,7 @@ import os
 from dataclasses import dataclass, field
 from pathlib import Path
 from tempfile import TemporaryDirectory
-from typing import Literal, Self
+from typing import Literal
 from uuid import UUID
 
 import httpx
@@ -23,7 +23,7 @@ class LibraryClient:
     token: str = field(repr=False)
 
     @classmethod
-    def from_env(cls) -> Self | None:
+    def from_env(cls) -> "LibraryClient | None":
         load_env()
         token = os.getenv("AGENT_LIBRARY_TOKEN", "").strip()
         if not token:

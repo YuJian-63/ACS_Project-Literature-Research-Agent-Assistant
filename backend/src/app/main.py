@@ -83,7 +83,8 @@ class ErrorMiddleware:
             }}, status_code=500)(scope, receive, send)
 
 
-def create_app(settings: Settings | None = None, engine: Engine | None = None, *, arxiv_client=None) -> FastAPI:
+def create_app(settings: Settings | None = None, engine: Engine | None = None, *, arxiv_client=None,
+    library_only: bool = False) -> FastAPI:
     from app.sources.arxiv import ArxivClient, ArxivError
     from app.sources.arxiv_transport import SupervisedArxivTransport
     from app.api.imports import router as import_router
@@ -96,11 +97,11 @@ def create_app(settings: Settings | None = None, engine: Engine | None = None, *
         application.state.engine = database
         application.state.sessions = create_session_factory(database)
         application.state.arxiv_client = arxiv_client
-        if arxiv_client is None and settings.arxiv_configured:
+        if not library_only and arxiv_client is None and settings.arxiv_configured:
             application.state.arxiv_client = ArxivClient(SupervisedArxivTransport(
                 settings.arxiv_contact_email, lambda: source_permit(application.state.sessions),
             ))
-        monitor = TaskMonitor(application.state.sessions) if settings.task_monitor_enabled else None
+        monitor = TaskMonitor(application.state.sessions) if not library_only and settings.task_monitor_enabled else None
         try:
             if monitor is not None:
                 await run_in_threadpool(monitor.start)
@@ -111,10 +112,12 @@ def create_app(settings: Settings | None = None, engine: Engine | None = None, *
             if engine is None:
                 await run_in_threadpool(database.dispose)
 
-    application = FastAPI(title="Literature Research Agent Assistant", version="0.1.0", lifespan=lifespan)
+    application = FastAPI(title="Literature Research Agent Assistant", version="0.1.0", lifespan=lifespan,
+        openapi_url=None if library_only else "/openapi.json")
     application.state.settings = settings
-    application.state.arxiv_cache = SearchCache()
-    application.state.migration_heads = set(ScriptDirectory(str(Path(__file__).resolve().parents[2] / "alembic")).get_heads())
+    if not library_only:
+        application.state.arxiv_cache = SearchCache()
+        application.state.migration_heads = set(ScriptDirectory(str(Path(__file__).resolve().parents[2] / "alembic")).get_heads())
 
     @application.exception_handler(APIError)
     async def api_error_handler(request: Request, error: APIError):
@@ -149,16 +152,29 @@ def create_app(settings: Settings | None = None, engine: Engine | None = None, *
             "code": "SERVICE_NOT_READY", "message": "数据库暂不可用", "details": {}
         }}, status_code=503)
 
-    application.include_router(auth_router)
-    application.include_router(router)
-    application.include_router(import_router)
     application.add_middleware(ErrorMiddleware)
-    application.add_middleware(
-        CORSMiddleware, allow_origins=settings.cors_origins, allow_methods=["GET", "POST", "DELETE"],
-        allow_credentials=True,
-        allow_headers=["Content-Type", "Idempotency-Key", "X-CSRF-Token"],
-        expose_headers=["X-Request-ID", "Location", "Idempotency-Replayed", "Retry-After"],
-    )
+    if library_only:
+        from app.api.agent_library import read_router, router as library_router
+        from app.api.health import health
+        from app.api.schemas import HealthResponse
+
+        application.add_api_route("/health", health, methods=["GET"], response_model=HealthResponse)
+        application.include_router(read_router, prefix=library_router.prefix)
+    else:
+        application.include_router(auth_router)
+        application.include_router(router)
+        application.include_router(import_router)
+        application.add_middleware(
+            CORSMiddleware, allow_origins=settings.cors_origins, allow_methods=["GET", "POST", "DELETE"],
+            allow_credentials=True,
+            allow_headers=["Content-Type", "Idempotency-Key", "X-CSRF-Token"],
+            expose_headers=["X-Request-ID", "Location", "Idempotency-Replayed", "Retry-After"],
+        )
     application.add_middleware(AuthResponseMiddleware)
     application.add_middleware(RequestMiddleware)
     return application
+
+
+def create_library_app(settings: Settings | None = None, engine: Engine | None = None) -> FastAPI:
+    """Read-only HTTP entry point for Agent jobs reaching the library through a tunnel."""
+    return create_app(settings, engine, library_only=True)

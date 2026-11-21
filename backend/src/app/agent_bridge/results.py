@@ -11,26 +11,42 @@ ARXIV_SOURCE = re.compile(
     r"[A-Za-z][A-Za-z.-]*/\d{2}(?:0[1-9]|1[0-2])\d{3}))"
     r"(?:(?P<version>v[1-9]\d*)|@[0-9a-f]{12})"
 )
+LIBRARY_SOURCE = re.compile(
+    r"local:(?P<paper>[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12})@(?P<sha>[0-9a-f]{64})"
+)
 
 
 def _search_sources(manifest, result):
     selected = {source.source_id for source in manifest.sources}
+    selected_ids = {source.paper_id for source in manifest.sources}
     external = {}
+    discovered = {}
     for source in result.sources:
         identity = source.get("source_id")
         if isinstance(identity, str) and identity in selected:
             continue
-        match = ARXIV_SOURCE.fullmatch(identity) if isinstance(identity, str) else None
-        if not manifest.task.allow_search or match is None:
+        if not manifest.task.allow_search or not isinstance(identity, str) or identity in external:
             raise ValueError("Result source is outside authorized inputs")
-        paper_id = "arxiv:" + match["base"]
-        url = "https://arxiv.org/abs/" + match["base"] + (match["version"] or "")
-        if source.get("paper_id") != paper_id or source.get("url") != url or identity in external:
-            raise ValueError("Search source identity or URL does not match arXiv")
+        library = LIBRARY_SOURCE.fullmatch(identity)
+        if library:
+            paper_id = library["paper"]
+            local_id = UUID(paper_id)
+            if local_id in discovered or local_id in selected_ids:
+                raise ValueError("Conflicting library source for one PDF")
+            discovered[local_id] = library["sha"]
+            url = ""
+        else:
+            match = ARXIV_SOURCE.fullmatch(identity)
+            if match is None:
+                raise ValueError("Unknown search source")
+            paper_id = "arxiv:" + match["base"]
+            url = "https://arxiv.org/abs/" + match["base"] + (match["version"] or "")
+        if source.get("paper_id") != paper_id or source.get("url") != url:
+            raise ValueError("Search source identity or URL does not match")
         external[identity] = source
     if len(selected) + len({source["paper_id"] for source in external.values()}) > manifest.task.max_papers:
         raise ValueError("Result exceeds the authorized paper limit")
-    return external
+    return external, discovered
 
 
 def _validate_search_citation(citation, external):
@@ -56,14 +72,15 @@ class PresentedResult:
     citations: list[PresentedCitation]
 
 
-def validate_delivery(manifest: DispatchManifest, envelope: ResultEnvelope) -> None:
+def validate_delivery(manifest: DispatchManifest, envelope: ResultEnvelope) -> dict[UUID, str]:
+    """Validate the wire result and return discovered PDFs for database ownership checks."""
     if envelope.dispatch_id != manifest.dispatch_id or envelope.input_sha256 != manifest_digest(manifest):
         raise ValueError("Result belongs to a different dispatch input")
     result = envelope.result
     if result.task_id != manifest.task.task_id or result.question != manifest.task.question:
         raise ValueError("Result task identity does not match dispatch")
     sources = {source.source_id: source for source in manifest.sources}
-    external = _search_sources(manifest, result)
+    external, discovered = _search_sources(manifest, result)
     chunks = set()
     for citation in result.citations:
         source = sources.get(citation.source_id)
@@ -78,6 +95,7 @@ def validate_delivery(manifest: DispatchManifest, envelope: ResultEnvelope) -> N
         chunks.add(citation.chunk_id)
     if result.stop_reason in {"completed", "partial"} and not (result.answer.strip() or result.comparison_table.strip()):
         raise ValueError("Successful Agent result has no displayable content")
+    return discovered
 
 
 def normalize_citation_references(markdown: str, keys: dict[str, str]) -> str:
@@ -91,13 +109,15 @@ def normalize_citation_references(markdown: str, keys: dict[str, str]) -> str:
     return re.sub(r"\[([^\]\n]+)\](?!\()", replace_reference, markdown)
 
 
-def present_result(manifest: DispatchManifest, result: AgentResult) -> PresentedResult:
-    sources = {source.source_id: source for source in manifest.sources}
+def present_result(manifest: DispatchManifest, result: AgentResult, discovered: dict[UUID, str] | None = None) -> PresentedResult:
+    sources = {source.source_id: source.paper_id for source in manifest.sources}
+    if discovered:
+        sources.update({f"local:{paper_id}@{sha}": paper_id for paper_id, sha in discovered.items()})
     local_citations = [citation for citation in result.citations if citation.source_id in sources]
     keys = {citation.chunk_id: f"C{index}" for index, citation in enumerate(local_citations, 1)}
     markdown = normalize_citation_references(
         "\n\n".join(part.strip() for part in (result.answer, result.comparison_table) if part.strip()), keys)
-    citations = [PresentedCitation(citation_key=keys[item.chunk_id], paper_id=sources[item.source_id].paper_id,
+    citations = [PresentedCitation(citation_key=keys[item.chunk_id], paper_id=sources[item.source_id],
         page_number=item.page, quote=item.source_text, agent_chunk_id=item.chunk_id,
         agent_source_id=item.source_id) for item in local_citations]
     return PresentedResult(content_markdown=markdown, citations=citations)

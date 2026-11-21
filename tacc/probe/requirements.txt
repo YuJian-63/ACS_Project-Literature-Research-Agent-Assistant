@@ -1,0 +1,5 @@
+httpx==0.28.1
+psycopg[binary]==3.3.8
+# TACC nodes use glibc 2.27; this release provides a manylinux2014 wheel.
+PyMuPDF==1.24.14
+python-dotenv==1.2.4

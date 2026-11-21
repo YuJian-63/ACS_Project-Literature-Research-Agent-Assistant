@@ -384,6 +384,10 @@ class LocalTransport(ManualTransport):
 
 
 def create_transport(settings: Settings) -> Transport:
+    if settings.agent_transport == "tcloud":
+        from app.agent_bridge.tcloud import TcloudTransport
+
+        return TcloudTransport(settings)
     if settings.agent_transport == "local":
         return LocalTransport(settings)
     if settings.agent_transport == "tacc":
@@ -398,4 +402,5 @@ def transport_name(settings: Settings) -> str:
         "manual": "file-exchange-v1",
         "local": "local-process-v1",
         "tacc": "tacc-ssh-slurm-v1",
+        "tcloud": "tcloud-v1",
     }[settings.agent_transport]

@@ -19,7 +19,7 @@ uv run --locked alembic check
 uv run --locked uvicorn app.main:create_app --factory --host 127.0.0.1 --port 8000
 ```
 
-Linux/macOS 将复制命令替换为 `cp .env.example .env`。已有旧数据库先备份并检查迁移要求，尤其是拒绝非空匿名业务库升级的 `20261114_0004`，见第 10 节。当前迁移 head 为 `20261121_0008`；本次 Agent-only 清理不改变迁移图或 schema。
+Linux/macOS 将复制命令替换为 `cp .env.example .env`。已有旧数据库先备份并检查迁移要求，尤其是拒绝非空匿名业务库升级的 `20261114_0004`，见第 10 节。当前迁移 head 为 `20261121_0009`，用于区分用户预选论文与 Agent 在库内检索到的论文。
 
 分别打开终端，在 `backend` 目录运行所需进程：
 
@@ -51,7 +51,9 @@ Parser 只提取 PDF 元数据。邮件 Worker 需要完整 SMTP 配置。研究
 | PARSER_TIMEOUT_SECONDS | 默认 120 秒，范围 1—600；限制每份 PDF 的元信息提取子进程时间 |
 | TASK_RUNNER | 默认 agent，仅支持独立 Agent |
 | AGENT_DISPATCH_ENABLED | 默认 false；完成传输配置后启用 |
-| AGENT_TRANSPORT | manual、local 或 tacc |
+| AGENT_TRANSPORT | manual（文件交换）、local（本地进程）、tacc（SSH/Slurm）或 tcloud（课程 SDK） |
+| AGENT_TCLOUD_MODEL_ENV_FILE | Worker 私有的百炼配置文件路径，作业使用独立的临时 key。见 [TACC 联调](../tacc/TACC.md)。 |
+| AGENT_LIBRARY_PUBLIC_URL | 可选，计算节点可访问的后端 HTTPS 地址。设置后，Worker 在每个派发的 outbox 写入作业私有的 `library-access.json`。课程 CPU 联调见 [TACC 说明](../tacc/TACC.md)。 |
 | CORS_ORIGINS | JSON 字符串数组；默认允许 localhost:5173 和 127.0.0.1:5173，不接受逗号分隔的裸字符串 |
 
 应用在宿主机运行，示例 DATABASE_URL 连接 `127.0.0.1:5432`。若已有独立 PostgreSQL 17+，可直接配置其 DATABASE_URL，跳过 Compose。修改用户、密码、端口或数据库名时，必须同步修改 DATABASE_URL；已初始化的数据卷不会因为更改 POSTGRES_* 自动修改已有数据库账号。
@@ -346,7 +348,7 @@ uv run --locked python tests/test_ownership.py --postgres
 
 ## 2026-11-18 导入元数据复用
 
-当前唯一迁移 head 为 `20261121_0008`：保留导入元数据、Agent 派发及 50 MB 大小限制迁移。Agent-only 清理不新增迁移，也不改写历史迁移。仍使用 `alembic upgrade head` / `alembic check`，无需清库或手工 stamp。部署说明见 [后端与 Agent 对接](../docs/agent-backend-integration.md)。
+截至 `20261121_0008`，迁移已涵盖导入元数据、Agent 派发及 50 MB 大小限制。继续使用 `alembic upgrade head` / `alembic check`。部署说明见 [后端与 Agent 对接](../docs/agent-backend-integration.md)。
 
 更新后先执行 `uv run --locked alembic upgrade head`（新增可空 `paper_imports.source_metadata`，不改写历史记录），再重启 Import Worker。API 如未开启热重载也需重启。
 

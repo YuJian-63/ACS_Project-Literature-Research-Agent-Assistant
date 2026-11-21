@@ -10,12 +10,13 @@ from starlette.responses import StreamingResponse
 from app.api.pagination import Limit, Offset
 from app.api.papers import CurrentUser, get_paper, stream_paper_file
 from app.api.schemas import ErrorResponse, Page, PaperStatus
-from app.auth.agent_library import issue_library_token, require_library_user
+from app.auth.agent_library import LibraryAccess, issue_library_token, require_library_access
 from app.db.models import Paper
 from app.errors import APIError
 
 router = APIRouter(prefix="/api/v1/agent", tags=["Agent library"], responses={401: {"model": ErrorResponse}})
-LibraryUser = Annotated[UUID, Depends(require_library_user)]
+read_router = APIRouter()
+LibraryGrant = Annotated[LibraryAccess, Depends(require_library_access)]
 
 
 class LibraryToken(BaseModel):
@@ -40,13 +41,15 @@ def create_library_token(request: Request, user: CurrentUser) -> dict:
     return issue_library_token(request, user)
 
 
-@router.get("/papers", response_model=Page[LibraryPaper])
+@read_router.get("/papers", response_model=Page[LibraryPaper], responses={403: {"model": ErrorResponse}})
 def search_library(
-    request: Request, user_id: LibraryUser, limit: Limit = 20, offset: Offset = 0,
+    request: Request, access: LibraryGrant, limit: Limit = 20, offset: Offset = 0,
     status: PaperStatus | None = None, q: Annotated[str | None, Query(min_length=1, max_length=200)] = None,
     match_mode: Annotated[Literal["all", "any"], Query(alias="match")] = "all",
 ) -> dict:
-    conditions = [Paper.user_id == user_id]
+    if access.selected_only is not None:
+        raise APIError(403, "AGENT_LIBRARY_SEARCH_DISABLED", "此任务只允许读取预选论文")
+    conditions = [Paper.user_id == access.user_id]
     if status is not None:
         conditions.append(Paper.status == status)
     if q is not None:
@@ -71,10 +74,15 @@ def search_library(
     return {"items": items, "total": total, "limit": limit, "offset": offset}
 
 
-@router.get(
+@read_router.get(
     "/papers/{paper_id}/pdf", response_class=StreamingResponse,
     responses={200: {"content": {"application/pdf": {}}}},
 )
-def download_library_pdf(request: Request, paper_id: UUID, user_id: LibraryUser) -> StreamingResponse:
+def download_library_pdf(request: Request, paper_id: UUID, access: LibraryGrant) -> StreamingResponse:
+    if access.selected_only is not None and paper_id not in access.selected_only:
+        raise APIError(404, "PAPER_NOT_FOUND", "论文不存在")
     with request.app.state.sessions() as session:
-        return stream_paper_file(request, get_paper(session, paper_id, user_id), disposition="attachment")
+        return stream_paper_file(request, get_paper(session, paper_id, access.user_id), disposition="attachment")
+
+
+router.include_router(read_router)
