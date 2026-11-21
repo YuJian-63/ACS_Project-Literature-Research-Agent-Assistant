@@ -124,7 +124,11 @@ def test_window_includes_output_reserve_and_stops_before_model_call(estimate, ex
         return PreparedContext(messages, estimate, "heuristic")
 
     result, model = execute(
-        [final()], max_output_tokens=10, context_window=50, context_policy=fixed_policy
+        [final()],
+        max_output_tokens=10,
+        context_window=50,
+        context_policy=fixed_policy,
+        context_finalize_ratio=None,
     )
 
     assert len(model.inputs) == result.usage.model_calls == expected_calls
@@ -180,6 +184,7 @@ def test_summary_checks_its_own_output_reserve(monkeypatch, output_limit, excess
         [message(calls=[call("summarize_paper")]), message(f"Summary [{CHUNK}]"), final()],
         max_output_tokens=output_limit,
         context_window=window,
+        context_finalize_ratio=None,
     )
 
     entries = [entry for entry in result.trace if entry.get("purpose") == "chunk_summary"]
@@ -236,6 +241,7 @@ def test_context_stop_preserves_previous_tool_result_and_source():
         max_output_tokens=64,
         context_window=200,
         context_policy=stop_after_read,
+        context_finalize_ratio=None,
     )
 
     assert result.stop_reason == "context_limit"

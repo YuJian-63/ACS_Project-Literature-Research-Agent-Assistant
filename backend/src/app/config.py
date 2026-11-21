@@ -19,7 +19,45 @@ class Settings(BaseSettings):
     database_url: SecretStr
     storage_root: Path = Path(__file__).resolve().parents[2] / "runtime" / "v3" / "storage"
     cors_origins: list[str] = ["http://localhost:5175", "http://127.0.0.1:5175"]
+    task_monitor_enabled: bool = True
+    mock_step_delay_seconds: float = Field(default=0.5, ge=0, le=10, allow_inf_nan=False)
     parser_timeout_seconds: float = Field(default=120, ge=1, le=600, allow_inf_nan=False)
+    task_runner: Literal["mock", "langgraph", "agent"] = "mock"
+    agent_dispatch_enabled: bool = False
+    agent_exchange_root: Path | None = None
+    agent_transport: Literal["manual", "local", "tacc"] = "manual"
+    agent_local_root: Path | None = None
+    agent_local_python: Path | None = None
+    agent_tacc_host: str | None = Field(default=None, pattern=r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
+    agent_tacc_helper: str | None = None
+    agent_tacc_config: str | None = None
+    agent_tacc_python: str = Field(default="python3", min_length=1, max_length=1024)
+    agent_transport_timeout_seconds: float = Field(default=30, ge=1, le=300, allow_inf_nan=False)
+    agent_retention_seconds: int = Field(default=604800, ge=86400, le=31536000)
+    agent_max_steps: int = Field(default=100, ge=1, le=100)
+    agent_search_max_papers: int = Field(default=5, ge=1, le=20)
+    agent_timeout_seconds: int = Field(default=1800, ge=60, le=1800)
+    agent_output_tokens: int = Field(default=8192, ge=1024, le=32768)
+    agent_context_tokens: int = Field(default=32000, ge=4096, le=1000000)
+    agent_result_max_bytes: int = Field(default=16 * 1024 * 1024, ge=1024, le=64 * 1024 * 1024)
+    agent_poll_seconds: float = Field(default=2, ge=0.1, le=30, allow_inf_nan=False)
+    llm_base_url: str | None = None
+    llm_model_id: str | None = None
+    llm_api_key: SecretStr | None = None
+    llm_thinking_mode: Literal["provider_default", "disabled", "enabled"] = "provider_default"
+    llm_timeout_seconds: float = Field(default=60, ge=1, le=300, allow_inf_nan=False)
+    evidence_context_chars: int = Field(default=24000, ge=1000, le=100000)
+    retrieval_snapshot_bytes: int = Field(default=8 * 1024 * 1024, ge=100000, le=64 * 1024 * 1024)
+    research_context_tokens: int = Field(default=32768, ge=4096, le=1000000)
+    research_output_tokens: int = Field(default=8192, ge=1024, le=32768)
+    research_task_tokens: int = Field(default=100000, ge=1000, le=100000)
+    research_call_timeout_seconds: float = Field(default=180, ge=5, le=300, allow_inf_nan=False)
+    review_context_tokens: int = Field(default=32768, ge=4096, le=1000000)
+    review_output_tokens: int = Field(default=4096, ge=1024, le=32768)
+    review_task_tokens: int = Field(default=100000, ge=1000, le=100000)
+    review_timeout_seconds: int = Field(default=1800, ge=60, le=1800)
+    review_call_timeout_seconds: float = Field(default=90, ge=5, le=300, allow_inf_nan=False)
+    review_evidence_chars: int = Field(default=4000, ge=1000, le=4000)
     frontend_public_url: str = "http://127.0.0.1:5175"
     auth_cookie_name: str = "lra_v3_session"
     auth_cookie_secure: bool = False
@@ -35,7 +73,9 @@ class Settings(BaseSettings):
     smtp_from: str | None = None
     smtp_timeout_seconds: float = Field(default=15, ge=1, le=60)
     mail_outbox_key: SecretStr | None = None
+    user_active_tasks: int = Field(default=2, ge=1, le=100)
     user_active_imports: int = Field(default=2, ge=1, le=100)
+    user_daily_tasks: int = Field(default=20, ge=1, le=10000)
     arxiv_enabled: bool = False
     arxiv_contact_email: str | None = None
 
@@ -68,6 +108,45 @@ class Settings(BaseSettings):
     @property
     def arxiv_configured(self) -> bool:
         return self.arxiv_enabled and bool(self.arxiv_contact_email)
+
+    @field_validator("llm_base_url")
+    @classmethod
+    def validate_llm_base_url(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        value = value.rstrip("/")
+        parsed = urlsplit(value)
+        if parsed.scheme not in {"http", "https"} or not parsed.netloc or parsed.username or parsed.password or parsed.query or parsed.fragment:
+            raise ValueError("LLM_BASE_URL must be an HTTP(S) URL without credentials, query, or fragment")
+        return value
+
+    @field_validator("llm_model_id")
+    @classmethod
+    def validate_llm_model_id(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        value = value.strip()
+        if not value or len(value) > 256:
+            raise ValueError("LLM_MODEL_ID must contain 1–256 characters")
+        return value
+
+    @property
+    def real_runner_configured(self) -> bool:
+        return bool(self.llm_base_url and self.llm_model_id and self.llm_api_key and self.llm_api_key.get_secret_value())
+
+    @field_validator("agent_exchange_root", "agent_local_root", "agent_local_python", "agent_tacc_host", "agent_tacc_helper", "agent_tacc_config", mode="before")
+    @classmethod
+    def empty_agent_optional_value(cls, value):
+        return None if value == "" else value
+
+    @property
+    def resolved_agent_exchange_root(self) -> Path:
+        value = self.agent_exchange_root
+        if value is None:
+            return self.storage_root / "agent-exchange"
+        if not value.is_absolute():
+            value = Path(__file__).resolve().parents[2] / value
+        return value.absolute()
 
     @field_validator("storage_root")
     @classmethod

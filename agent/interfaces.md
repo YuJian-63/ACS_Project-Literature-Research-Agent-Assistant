@@ -1,6 +1,6 @@
 # Agent 模块对接
 
-更新：2026-11-17。本文记录本地 baseline 的接口及其他模块的对接约定；跨模块部署尚未联调。研究流程见 [workflow](workflow.md)，具体字段见 [schemas.py](schemas.py)。
+更新：2026-11-20。本文记录本地 baseline 的接口及其他模块的对接约定；跨模块部署尚未联调。研究流程见 [workflow](workflow.md)，具体字段见 [schemas.py](schemas.py)。
 
 ## 模块边界
 
@@ -25,11 +25,13 @@ Backend 管任务生命周期、持久化与平台作业；agent 提供可独立
 
 执行参数位于任务顶层：`max_steps=40` 限制主 agent 调用轮数（含最终回答，不含摘要），`timeout_seconds=600` 限制任务时间（`null` 禁用），`max_output_tokens=4096` 配置单次模型输出额度。旧 `budget` 字段已移除，传入会被拒绝。到轮数或时间上限返回 `step_limit` / `time_limit`，保留已有记录，不补最终答案；时间限制通过调用前后检查和单次请求超时实现。
 
-上下文窗口属于运行配置：`run_task(..., context_window=32000, context_policy=prepare_context)`，不放入任务 JSON；CLI 支持 `--context-window INT`，Python 传 `None` 可关闭本地上限。每次主模型和摘要调用前，估算输入加本次输出额度超过窗口则直接返回 `context_limit`；服务端容量错误也保留该状态。
+上下文属于运行配置：`run_task(..., context_window=32000, context_policy=prepare_context, context_finalize_ratio=0.8)`，不放入任务 JSON；CLI 支持 `--context-window INT` 和 `--context-finalize-ratio FLOAT`。每次主模型和摘要调用前，估算输入加本次输出额度超过窗口则直接返回 `context_limit`；服务端容量错误也保留该状态。
 
-默认 `prepare_context` 原样保留历史，返回 `PreparedContext(messages, input_tokens_estimate, count_method)`。主 agent 可注入替代策略，保存历史与模型输入视图分离；摘要使用默认策略。当前没有压缩或自动收尾，也无额外模型调用。首次按 ASCII 字符数 / 3、非 ASCII 字符数 × 2，加消息包装和工具定义估算；后续历史前缀及工具定义匹配时，用 API `input_tokens` 校准并估算新增内容，主 agent 与摘要各自维护锚点。计数仍为近似值，TACC 的实际窗口、tokenizer 与消息模板待对齐。
+默认 `prepare_context` 原样保留历史，返回 `PreparedContext(messages, input_tokens_estimate, count_method)`，自身不调用模型。主 agent 可注入替代策略，保存历史与模型输入视图分离；摘要使用默认策略。主循环先准备一次上下文，估算输入加输出额度达到窗口的 `context_finalize_ratio` 且未超硬上限时，在准备后的视图追加作答指令，再做容量检查，发起一次无工具收尾。Python 传 `context_finalize_ratio=None` 禁用收尾，`context_window=None` 同时禁用本地上限和压力收尾。不因最后一轮或剩余时间提前收尾；不压缩、不裁剪，超限或失败不重试。
 
-累计 token 仅记录 API usage，不参与循环控制；容量估算不用于补齐账单统计。模型 trace 记录 `context.window/input_tokens_estimate/count_method`；本地拦截记录 `kind="context"`，不产生模型响应，也不增加 `usage.model_calls/agent_steps`。详细运行参数与 trace 结构见 [输入输出接口](agent-io-interface-v1.md)。
+首次按 ASCII 字符数 / 3、非 ASCII 字符数 × 2，加消息包装和工具定义估算；后续历史前缀及工具定义匹配时，用 API `input_tokens` 校准并估算新增内容，主 agent 与摘要各自维护锚点。计数仍为近似值，TACC 的实际窗口、tokenizer 与消息模板待对齐。累计 token 仅记录 API usage，不参与循环控制；容量估算不用于补齐账单统计。
+
+模型 trace 记录 `context.window/input_tokens_estimate/count_method`；本地容量拦截不产生模型响应，也不增加 `usage.model_calls/agent_steps`。收尾触发另记 `kind="context", action="finalize", reason="context_pressure"`，实际调用记为 `purpose="finalize"` 并计入主 agent 轮数、模型调用及用量；最终结果仍经解析与引用校验，触发原因不是 `stop_reason`。详细运行参数与 trace 结构见 [输入输出接口](agent-io-interface-v1.md)。
 
 `usage.agent_steps` 单独记录主 agent 轮数；`usage.model_calls` 包含摘要调用。API 未返回完整 token 统计时，相关总量为空并标记 `token_usage_complete=false`。每次模型与工具调用的参数、响应、耗时或错误写入 trace。
 

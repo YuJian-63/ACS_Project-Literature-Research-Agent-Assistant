@@ -52,6 +52,11 @@
 .research-source-list { list-style: none; padding: 0; }
 .research-source-list li { display: flex; align-items: center; gap: 16px; padding: 18px 0; border-top: 1px solid var(--line); }
 .research-source-list small { display: block; color: var(--muted); margin-top: 6px; }
+.research-source-list > li > span { min-width: 0; }
+.research-source-link { border: 0; padding: 0; background: transparent; color: var(--accent); font: inherit; text-align: left; overflow-wrap: anywhere; cursor: pointer; }
+.research-source-link:hover { text-decoration: underline; }
+.source-import-title { font-weight: 600; overflow-wrap: anywhere; }
+.source-import-status { display: flex; align-items: center; gap: 12px; margin-block: 16px; }
 .research-pdf-placeholder { margin-top: 20px; padding: 38px 22px; background: var(--bg); border: 1px dashed #a5bbb0; text-align: center; }
 .research-pdf-placeholder > .anticon { display: block; font-size: 40px; color: var(--accent); margin-bottom: 18px; }
 .research-pdf-placeholder p { color: var(--muted); font-size: 12px; line-height: 1.8; }

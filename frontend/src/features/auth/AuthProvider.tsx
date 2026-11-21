@@ -2,6 +2,8 @@ import { createContext, useCallback, useContext, useEffect, useRef, useState, ty
 import { asApiError, isCanceled } from '../../api/client';
 import { authPost, readSession, type AuthSession, type User } from '../../api/auth';
 import { invalidateSession, registerUnauthorized, sessionSnapshot, setCsrfToken } from '../../api/session';
+import { createUuid } from '../../shared/lib/uuid';
+import { clearResearchDrafts } from '../../shared/lib/researchDraft';
 
 interface AuthState { user: User | null; status: 'loading' | 'ready' | 'error'; generation: number; logoutFailed?: boolean }
 interface AuthContextValue extends AuthState {
@@ -18,13 +20,14 @@ export default function AuthProvider({ children }: { children: ReactNode }) {
   const channel = useRef<BroadcastChannel | null>(null);
   const pending = useRef<AbortController | null>(null);
   const notify = useCallback(() => {
-    const eventId = crypto.randomUUID();
+    const eventId = createUuid();
     channel.current?.postMessage(eventId);
     try { localStorage.setItem(channelName, eventId); } catch {}
   }, []);
 
   const endSession = useCallback(() => {
     pending.current?.abort();
+    clearResearchDrafts();
     const generation = invalidateSession();
     setState({ user: null, status: 'ready', generation });
     notify();
@@ -52,6 +55,7 @@ export default function AuthProvider({ children }: { children: ReactNode }) {
     const changed = (eventId: unknown) => {
       if (typeof eventId !== 'string' || eventId === lastEvent) return;
       lastEvent = eventId;
+      clearResearchDrafts();
       reload();
     };
     try {
@@ -76,6 +80,7 @@ export default function AuthProvider({ children }: { children: ReactNode }) {
   const login = useCallback(async (username: string, password: string, signal: AbortSignal) => {
     const session = await authPost<AuthSession>('login', { username, password }, signal);
     pending.current?.abort();
+    clearResearchDrafts();
     const generation = invalidateSession();
     setCsrfToken(session.csrf_token);
     setState({ user: session.user, status: 'ready', generation });
@@ -84,6 +89,7 @@ export default function AuthProvider({ children }: { children: ReactNode }) {
 
   const logout = useCallback(async () => {
     pending.current?.abort();
+    clearResearchDrafts();
     const token = sessionSnapshot().csrfToken;
     const generation = invalidateSession();
     if (token) setCsrfToken(token);

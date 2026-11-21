@@ -116,8 +116,8 @@ def load_paper(paper_id: str, source_id: str | None = None) -> dict[str, Any] | 
         return row[0] if row else None
 
 
-def save_run(result: dict[str, Any]) -> None:
-    """Save a task result, including citations, evidence, usage and trace."""
+def save_run(result: dict[str, Any], *, storage_key: str | None = None) -> None:
+    """Save a result under its task ID or an explicitly namespaced storage key."""
     task_id = _identifier(result, "task_id")
     with _connect() as connection:
         _ensure_schema(connection)
@@ -125,7 +125,7 @@ def save_run(result: dict[str, Any]) -> None:
             """INSERT INTO agt_baseline.runs (task_id, result) VALUES (%s, %s)
                ON CONFLICT (task_id) DO UPDATE
                SET result = EXCLUDED.result, updated_at = now()""",
-            (task_id, Jsonb(result)),
+            (storage_key if storage_key is not None else task_id, Jsonb(result)),
         )
 
 

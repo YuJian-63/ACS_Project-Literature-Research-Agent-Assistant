@@ -2,16 +2,17 @@
 import os
 import re
 from pathlib import Path
+from uuid import UUID
 from urllib.parse import parse_qs, urlparse
 
 from playwright.sync_api import Error, expect, sync_playwright
 
 ROOT = Path(__file__).resolve().parents[2]
-os.environ['PLAYWRIGHT_BROWSERS_PATH'] = str(ROOT / 'runtime/pw-browsers')
+os.environ.setdefault('PLAYWRIGHT_BROWSERS_PATH', str(ROOT / 'runtime/pw-browsers'))
 BASE = os.environ.get('LIBRARY_PREVIEW_URL', 'http://127.0.0.1:5196')
 SCREENSHOTS = ROOT / 'runtime/library-reader-preview'
 PAPERS = [{
-    'id': 'paper-' + str(index), 'title': title, 'original_filename': 'research-' + str(index) + '.pdf',
+    'id': str(UUID(int=index, version=4)), 'title': title, 'original_filename': 'research-' + str(index) + '.pdf',
     'content_type': 'application/pdf', 'size_bytes': 1200, 'sha256': 'a' * 64,
     'status': 'ready', 'page_count': 1, 'parser_version': 'fixture-v1', 'error': None, 'source': None,
     'created_at': '2026-11-15T00:00:00Z', 'updated_at': '2026-11-15T00:00:00Z',
@@ -71,13 +72,13 @@ def main():
                 parameters = parse_qs(parsed.query)
                 query = parameters.get('q', [''])[0]
                 offset = int(parameters.get('offset', ['0'])[0])
-                dataset = PAPERS + ([{**PAPERS[0], 'id': 'extra-' + str(index), 'title': 'Additional research paper ' + str(index)} for index in range(20)] if state['paged'] else [])
+                dataset = PAPERS + ([{**PAPERS[0], 'id': str(UUID(int=100 + index, version=4)), 'title': 'Additional research paper ' + str(index)} for index in range(20)] if state['paged'] else [])
                 papers = [paper for paper in dataset if query.lower() in paper['title'].lower()]
                 return route.fulfill(json={'items': papers[offset:offset + 20], 'total': len(papers), 'limit': 20, 'offset': offset})
             if parsed.path.startswith('/api/v1/papers/') and not parsed.path.endswith('/file'):
                 if state['details_failure']:
                     return route.fulfill(status=503, json={'error': {'code': 'PAPER_UNAVAILABLE', 'message': 'Paper details unavailable', 'details': {}}})
-                known = PAPERS + [{**PAPERS[0], 'id': 'extra-' + str(index), 'title': 'Additional research paper ' + str(index)} for index in range(20)]
+                known = PAPERS + [{**PAPERS[0], 'id': str(UUID(int=100 + index, version=4)), 'title': 'Additional research paper ' + str(index)} for index in range(20)]
                 paper = next((paper for paper in known if parsed.path.endswith('/' + paper['id'])), None)
                 if paper is None:
                     return route.fulfill(status=404, json={'error': {'code': 'PAPER_NOT_FOUND', 'message': 'Paper not found', 'details': {}}})
@@ -119,7 +120,7 @@ def main():
         expect(reader.get_by_role('heading', name=PAPERS[0]['title'], exact=True)).to_be_visible()
         page.go_back()
         expect(page).to_have_url(BASE + '/tasks/new')
-        expect(page.get_by_role('heading', name='Select research sources', exact=True)).to_be_visible()
+        expect(page.get_by_role('heading', name='Reference papers (optional)', exact=True)).to_be_visible()
         state['paged'] = True
         page.reload()
         page.get_by_role('checkbox', name='Select paper ' + PAPERS[0]['title'], exact=True).check()
@@ -152,7 +153,7 @@ def main():
         page.locator('.paper-picker .ant-pagination-item-2').click()
         expect(page.get_by_role('checkbox', name='Select paper Additional research paper 19', exact=True)).to_be_checked()
         state['paged'] = False
-        page.goto(BASE + '/papers?paper_id=extra-19')
+        page.goto(BASE + '/papers?paper_id=' + str(UUID(int=119, version=4)))
         expect(reader.get_by_role('heading', name='Additional research paper 19', exact=True)).to_be_visible()
         expect(reader.locator('iframe')).to_be_visible()
         assert page.get_by_role('button', name='Read Additional research paper 19', exact=True).count() == 0
@@ -162,12 +163,12 @@ def main():
         expect(page.get_by_role('heading', name='My papers', exact=True)).to_be_visible()
         expect(reader).to_have_count(0)
         state['details_failure'] = True
-        page.goto(BASE + '/papers?paper_id=paper-1')
+        page.goto(BASE + '/papers?paper_id=' + PAPERS[0]['id'])
         expect(page.get_by_text('Paper details unavailable', exact=True)).to_be_visible()
         state['details_failure'] = False
         page.get_by_role('button', name='Try again', exact=True).click()
         expect(reader.locator('iframe')).to_be_visible()
-        page.goto(BASE + '/papers?paper_id=missing-paper')
+        page.goto(BASE + '/papers?paper_id=' + str(UUID(int=999, version=4)))
         expect(page.get_by_text('Paper not found', exact=True)).to_be_visible()
         expect(reader).to_have_count(0)
         page.get_by_role('button', name='Back to library', exact=True).click()
@@ -218,7 +219,7 @@ def main():
         page.locator('.library-panel .panel-heading button').click()
         expect(page.locator('.paper-title-button')).to_have_count(2)
         expect(page.get_by_role('checkbox', name='Select paper ' + PAPERS[0]['title'], exact=True)).to_be_checked()
-        query = page.get_by_label('Find papers', exact=True)
+        query = page.get_by_role('searchbox', name='Find papers', exact=True)
         query.fill('Evidence-Grounded')
         query.press('Enter')
         expect(page.locator('.paper-title-button')).to_have_count(1)
@@ -244,7 +245,7 @@ def main():
         expect(reader.locator('iframe')).to_be_visible()
         reader.get_by_role('button', name='Close reader', exact=True).click()
         state['hold'] = True
-        with page.expect_request(lambda request: request.url.endswith('/paper-1/file')):
+        with page.expect_request(lambda request: request.url.endswith('/' + PAPERS[0]['id'] + '/file')):
             page.locator('.paper-title-button').first.click()
         expect(reader.get_by_text('Loading PDF…', exact=True)).to_be_visible()
         assert held, 'The first download must remain pending to exercise stale-response fencing'

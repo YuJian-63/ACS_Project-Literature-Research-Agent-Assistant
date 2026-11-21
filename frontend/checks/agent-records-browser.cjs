@@ -1,8 +1,8 @@
 // Offline workspace integration check. All API responses are mocked.
-const {chromium}=require(process.env.PLAYWRIGHT_MODULE || 'playwright');
+const {launchBrowser}=require('./browser.cjs');
 const BASE = process.env.AGENT_WORKSPACE_URL || 'http://127.0.0.1:5174';
 (async()=>{
-const browser=await chromium.launch({channel:'chrome',headless:true});
+const browser=await launchBrowser();
 const page=await browser.newPage({viewport:{width:1440,height:1000}});const errors=[],calls=[];page.on('pageerror',e=>errors.push(e.message));
 await page.addInitScript(()=>localStorage.setItem('literature-v3-ui-locale','zh-CN'));
 const id='11111111-1111-4111-8111-111111111111', taskid='22222222-2222-4222-8222-222222222222';

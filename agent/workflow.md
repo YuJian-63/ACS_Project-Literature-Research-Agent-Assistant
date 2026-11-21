@@ -29,11 +29,11 @@
 
 打开、阅读与摘要共用论文加载和缓存；打开论文只返回导航信息，原文证据在读取或成功摘要后登记。PDF 本地缓存；启用持久化时，论文及结果保存到数据库。原文与摘要分别去重，摘要后可再读取原文核实。摘要工具的现有策略暂保留，后续单独评估。
 
-模型调用前经 `prepare_context` 准备输入视图并估算容量；默认保留完整历史，不压缩、不追加收尾调用。`run_task` 可注入主 agent 的 `context_policy`，返回的模型视图与保存的历史分离；摘要独立准备输入，只使用默认策略。默认策略不增加模型调用。
+主模型调用前经 `prepare_context` 准备一次输入视图并估算容量；默认保留完整历史，不压缩。`run_task` 可注入主 agent 的 `context_policy`，返回的模型视图与保存的历史分离；摘要独立准备输入，只使用默认策略。输入估算加本次输出额度达到窗口的 `context_finalize_ratio`（默认 `0.8`）且未超过硬上限时，使用该视图追加作答指令，经过硬容量检查后发起一次无工具收尾，基于已有证据作答并说明缺口。超限或失败不裁剪、不循环重试。
 
 ## Extensions
 
-拟在同一 ReAct 循环上加入显式规划、RAG 和结果检查。Planner 与 Reflection 可通过同一模型的独立调用实现；历史压缩等上下文策略可通过已有 `prepare_context` 接口继续扩展，当前尚未实现。
+第一版 Extension 复用现有 ReAct 图、论文工具与 context 策略，新增 `retrieve`。该工具在指定的一篇或多篇论文中联合检索。首次检索时复用已打开论文的解析结果，逐篇按需为原文块建索引并缓存在本地。每次调用生成一个查询向量，在全部选中论文中按余弦相似度取全局前 `top_k` 个块，仅登记实际返回的原文块为检索证据。后续 Planner 与 Reflection 可通过同一模型的独立调用实现，届时再确定构图。历史压缩等策略可通过已有 `prepare_context` 接口继续扩展。
 
 | 模块 | 职责与返回内容 |
 |---|---|
@@ -61,18 +61,21 @@
 | Progress | 工具历史、候选输出、未解决项；扩展另含覆盖清单与检查反馈 |
 | Usage | 时间、API 返回的 token、主 agent 轮数、模型/工具调用数与错误 |
 
-整任务限制为最大主 agent 轮数与时间，默认分别为 40 轮和 600 秒；最终回答占一轮，摘要调用另计入模型用量。到限直接停止并保存 `stop_reason`、证据和 trace，不预留最终回答额度，不根据无进展或上下文压力强制作答。时间在调用前后检查，并限制单次请求超时。
+整任务限制为最大主 agent 轮数与时间，默认分别为 40 轮和 600 秒；自然最终回答和压力收尾都占一轮，摘要调用另计入模型用量。到限直接停止并保存 `stop_reason`、证据和 trace；不因最后一轮、剩余时间或无进展提前收尾。时间在调用前后检查，并限制单次请求超时。
 
-运行参数 `context_window` 默认 `32000`，不是任务字段；每次调用的估算输入加本次输出额度超过窗口时，记录 `kind="context"` 并停止为 `context_limit`，不增加实际模型调用数或主 agent 轮数。Python 传 `None` 可关闭本地上限；服务端容量错误仍记录 `context_limit`。本地计数先按字符、消息包装和工具定义估算，后续在历史前缀及工具定义匹配时，以 API 输入用量校准并估算新增内容；主 agent 与摘要分别计数。该估算不等于服务端 tokenizer，不补入 API usage。模型自然作答后的引用校验可标记证据不足或 `partial`，执行失败另行记录。
+运行参数 `context_window` 默认 `32000`，不是任务字段；每次调用的估算输入加本次输出额度超过窗口时，记录 `kind="context"` 并停止为 `context_limit`，不增加实际模型调用数或主 agent 轮数。Python 传 `context_window=None` 关闭本地上限及压力收尾；仅禁用收尾可传 `context_finalize_ratio=None`。服务端容量错误仍记录 `context_limit`。本地计数先按字符、消息包装和工具定义估算，后续在历史前缀及工具定义匹配时，以 API 输入用量校准并估算新增内容；主 agent 与摘要分别计数。该估算不等于服务端 tokenizer，不补入 API usage。
+
+收尾触发记录为 `kind="context", action="finalize", reason="context_pressure"`，实际模型调用为 `purpose="finalize"` 并计入主 agent 轮数和模型成本。触发原因与最终结果分开：收尾回答仍经原有解析、引用与未解决项检查，可能为 `completed`、`partial` 或错误状态。
 
 ## 实现顺序
 
 1. 固定输入、输出和证据结构，接通模型客户端，用单篇 QA 跑通 ReAct 调用、补读、引用和停止。
 2. 接入 Source Search 与长文分块摘要，覆盖论文总结、综述和比较表；保留可复现的 baseline 配置与 trace。
-3. 接入 Chunk & Embed、Vector DB 和 Retrieval，再加入 Planner 与 Reflection，保持两版可切换。
-4. 用相同任务与允许资料检查遗漏、无证据回答、不同实验条件和全文不可得等情况，按结果调整实现。
+3. 验证 context 压力收尾，先在独立的 Extension 入口接入按需建索引与 Retrieval，沿用 Baseline 的执行与收尾。
+4. 跑通并完善 Extension 后，根据实际差异决定模块化范围与后续 context 策略。Planner 与 Reflection 留待后续讨论。
+5. 用相同任务与允许资料检查遗漏、无证据回答、不同实验条件和全文不可得等情况，记录策略与成本差异，按结果调整实现。
 
-Baseline 已使用 LangGraph、搜索 API、PDF parser 和 PostgreSQL；embedding、pgvector 等扩展组件待接入。优先复用基础组件，小组实现工具集成、证据关联、运行记录、执行上限和后续规划/检查。
+Baseline 使用 LangGraph、搜索 API、PDF parser 和 PostgreSQL。首版 Extension 使用百炼 embedding 与本地向量索引，后续再评估 pgvector。
 
 ## 评测接口与相关文档
 

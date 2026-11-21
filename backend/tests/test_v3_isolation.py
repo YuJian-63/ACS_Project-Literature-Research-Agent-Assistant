@@ -7,8 +7,8 @@ import app.db.models
 from app.auth.security import cookie_name
 
 class V3IsolationTests(unittest.TestCase):
-    def test_schema_has_no_legacy_research_tables(self):
-        self.assertFalse({'tasks','task_papers','task_events','artifacts','citations'} & set(Base.metadata.tables))
+    def test_schema_retains_v3_records_and_adds_agent_execution_tables(self):
+        self.assertTrue({'tasks','task_papers','task_events','artifacts','citations','agent_runs'} <= set(Base.metadata.tables))
         self.assertIn('agent_research', Base.metadata.tables)
 
     def test_v2_database_is_rejected(self):

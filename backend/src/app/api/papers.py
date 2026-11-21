@@ -1,5 +1,5 @@
 import os
-from typing import Annotated
+from typing import Annotated, Literal
 from urllib.parse import quote
 from uuid import UUID
 
@@ -15,7 +15,7 @@ from starlette.responses import StreamingResponse
 from app.api.pagination import Limit, Offset
 from app.api.schemas import Page, PaperResponse, PaperStatus
 from app.api.views import paper_view
-from app.db.models import Paper, PaperImport, PaperSource, ResearchPaper
+from app.db.models import Paper, PaperImport, PaperSource, TaskPaper, ResearchPaper
 from app.errors import APIError
 from app.papers.storage import controlled_path, remove_file, save_paper
 
@@ -95,7 +95,8 @@ def delete_paper(request: Request, paper_id: UUID, user: CurrentUser) -> None:
         paper = session.scalar(select(Paper).where(Paper.id == paper_id, Paper.user_id == user.id).with_for_update())
         if paper is None:
             raise APIError(404, "PAPER_NOT_FOUND", "论文不存在")
-        if session.scalar(select(ResearchPaper.paper_id).where(ResearchPaper.paper_id == paper_id).limit(1)) is not None:
+        if (session.scalar(select(TaskPaper.paper_id).where(TaskPaper.paper_id == paper_id).limit(1)) is not None
+                or session.scalar(select(ResearchPaper.paper_id).where(ResearchPaper.paper_id == paper_id).limit(1)) is not None):
             raise APIError(409, "PAPER_IN_USE", "论文已被研究任务引用，无法删除")
         if paper.status == "processing":
             raise APIError(409, "PAPER_PROCESSING", "论文正在解析，请稍后再删除")
@@ -109,14 +110,22 @@ def delete_paper(request: Request, paper_id: UUID, user: CurrentUser) -> None:
 @router.get("/api/v1/papers/{paper_id}/file", response_class=StreamingResponse, responses={200: {"content": {"application/pdf": {}}}})
 def paper_file(request: Request, paper_id: UUID, user: CurrentUser) -> StreamingResponse:
     with request.app.state.sessions() as session:
-        paper = get_paper(session, paper_id, user.id)
-        try:
-            path = controlled_path(request.app.state.settings.storage_root, paper_id, paper.storage_key)
-            source = path.open("rb")
-            size = os.fstat(source.fileno()).st_size
-        except (OSError, ValueError):
-            raise APIError(500, "FILE_UNAVAILABLE", "论文文件不可用") from None
-        filename = paper.original_filename
+        return stream_paper_file(request, get_paper(session, paper_id, user.id))
+
+
+def stream_paper_file(
+    request: Request, paper: Paper, *, disposition: Literal["inline", "attachment"] = "inline",
+) -> StreamingResponse:
+    source = None
+    try:
+        path = controlled_path(request.app.state.settings.storage_root, paper.id, paper.storage_key)
+        source = path.open("rb")
+        size = os.fstat(source.fileno()).st_size
+    except (OSError, ValueError):
+        if source is not None:
+            source.close()
+        raise APIError(500, "FILE_UNAVAILABLE", "论文文件不可用") from None
+    filename = quote(paper.original_filename, safe="")
 
     def chunks():
         try:
@@ -128,7 +137,7 @@ def paper_file(request: Request, paper_id: UUID, user: CurrentUser) -> Streaming
     return StreamingResponse(
         chunks(), media_type="application/pdf", background=BackgroundTask(source.close),
         headers={
-            "Content-Disposition": f"inline; filename*=utf-8''{quote(filename, safe='')}",
+            "Content-Disposition": f"{disposition}; filename*=utf-8''{filename}",
             "Content-Length": str(size), "X-Content-Type-Options": "nosniff",
         },
     )

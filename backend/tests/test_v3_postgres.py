@@ -72,6 +72,7 @@ class V3PostgresTests(unittest.TestCase):
                     session.add(AgentResearch(id=research,user_id=owner,question='Evidence?',status='succeeded',result={'answer':'Result'}));session.flush()
                     session.add(ResearchPaper(research_id=research,paper_id=paper,user_id=owner,selection_order=0))
                 self.assertEqual(first.get('/api/v1/agent-research').json()['total'],1)
+                self.assertEqual(first.get('/api/v1/agent-research/'+str(research)).json()['result']['answer'], 'Result')
                 self.assertEqual(second.get('/api/v1/agent-research').json()['total'],0)
                 self.assertEqual(second.get('/api/v1/agent-research/'+str(research)).status_code,404)
                 self.assertEqual(second.delete('/api/v1/agent-research/'+str(research)).status_code,404)

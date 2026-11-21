@@ -6,7 +6,7 @@ from urllib.parse import parse_qs, urlparse
 from playwright.sync_api import expect, sync_playwright
 
 ROOT = Path(__file__).resolve().parents[2]
-os.environ['PLAYWRIGHT_BROWSERS_PATH'] = str(ROOT / 'runtime/pw-browsers')
+os.environ.setdefault('PLAYWRIGHT_BROWSERS_PATH', str(ROOT / 'runtime/pw-browsers'))
 BASE = os.environ.get('SEARCH_PREVIEW_URL', 'http://127.0.0.1:5194')
 SCREENSHOTS = ROOT / 'runtime/search-preview'
 ABSTRACT = 'We study repository-level issue resolution with language-model agents. ' * 24
@@ -57,7 +57,7 @@ def main():
         page.on('pageerror', lambda error: errors.append(str(error)))
         page.goto(BASE + '/papers/search')
         page.get_by_label('arXiv keywords', exact=True).fill('rust agents')
-        page.locator('.arxiv-search-form button').click()
+        page.locator('.arxiv-search-form button[type="submit"]').click()
         papers = page.locator('.search-paper')
         expect(papers).to_have_count(10)
         long_paper = papers.nth(1)
@@ -109,10 +109,13 @@ def main():
         state['fail'] = True
         pagination.locator('.ant-pagination-next').click()
         expect(page.get_by_role('alert')).to_be_visible()
-        expect(papers.first).to_contain_text('Research Paper 1:')
-        assert page.locator('#search-results-heading').bounding_box()['y'] < 0
+        expect(papers).to_have_count(0)
+        expect(page.get_by_label('arXiv keywords', exact=True)).to_have_value('')
         state['fail'] = False
-        page.get_by_role('button', name='Try again', exact=True).click()
+        page.get_by_label('arXiv keywords', exact=True).fill('rust agents')
+        page.locator('.arxiv-search-form button[type="submit"]').click()
+        expect(papers.first).to_contain_text('Research Paper 1:')
+        pagination.locator('.ant-pagination-next').click()
         expect(papers.first).to_contain_text('Research Paper 11:')
         assert requests[-1]['offset'] == ['10']
         assert_top()
@@ -148,10 +151,12 @@ def main():
         state['fail'] = True
         size_control.select_option('50')
         expect(page.get_by_role('alert')).to_be_visible()
-        expect(papers).to_have_count(25)
-        expect(pagination.locator('p')).to_contain_text('25 papers per page')
+        expect(papers).to_have_count(0)
+        expect(size_control).to_have_value('10')
         state['fail'] = False
-        page.get_by_role('button', name='Try again', exact=True).click()
+        page.get_by_label('arXiv keywords', exact=True).fill('rust agents')
+        size_control.select_option('50')
+        page.locator('.arxiv-search-form button[type="submit"]').click()
         expect(papers).to_have_count(50)
         assert requests[-1]['limit'] == ['50']
         size_control.select_option('10')
@@ -174,11 +179,11 @@ def main():
         assert_top()
         page.set_viewport_size({'width': 1440, 'height': 1000})
         state['empty'] = True
-        page.locator('.arxiv-search-form button').click()
+        page.locator('.arxiv-search-form button[type="submit"]').click()
         expect(papers).to_have_count(0)
         expect(pagination).to_be_visible()
         state['total'] = 0
-        page.locator('.arxiv-search-form button').click()
+        page.locator('.arxiv-search-form button[type="submit"]').click()
         expect(pagination).to_have_count(0)
         assert not errors, errors
         assert not external, external

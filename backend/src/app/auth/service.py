@@ -27,6 +27,14 @@ def usable_token(token, now) -> bool:
     return not token.consumed_at and not token.revoked_at and aware(token.expires_at) > now
 
 
+def active_session(user: User | None, current: AuthSession | None, now: datetime) -> bool:
+    return bool(
+        user and user.status == "active" and user.email_verified_at and current
+        and current.user_id == user.id and current.revoked_at is None
+        and aware(current.expires_at) > now and current.auth_version == user.auth_version
+    )
+
+
 def unauthorized() -> APIError:
     return APIError(401, "AUTH_REQUIRED", "Please sign in")
 
@@ -183,8 +191,7 @@ class AuthService:
         user = session.scalar(statement.with_for_update() if lock else statement)
         statement = select(AuthSession).where(AuthSession.token_hash == token_hash(raw))
         current = session.scalar(statement.with_for_update() if lock else statement)
-        if (not user or user.status != "active" or not user.email_verified_at or not current or current.revoked_at
-                or aware(current.expires_at) <= db_now(session) or current.auth_version != user.auth_version):
+        if not active_session(user, current, db_now(session)):
             raise unauthorized()
         return user, current
 
@@ -229,7 +236,5 @@ class AuthService:
             if not verify_password(user.password_hash, current_password):
                 raise APIError(400, "CURRENT_PASSWORD_INCORRECT", "当前密码不正确，请重新输入。")
             self.replace_password(session, user, encoded, db_now(session))
-            # Keep this authenticated session; other sessions remain revoked.
-            session.execute(update(AuthSession).where(AuthSession.id == current.id).values(
-                revoked_at=None, auth_version=user.auth_version,
-            ))
+            current.revoked_at = None
+            current.auth_version = user.auth_version
