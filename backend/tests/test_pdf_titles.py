@@ -1,7 +1,8 @@
 import io
 import unittest
+from unittest.mock import patch
 
-from pypdf import PdfReader, PdfWriter
+from pypdf import PdfWriter
 from pypdf.generic import DecodedStreamObject, DictionaryObject, NameObject
 
 from app.papers.pdf_parser import parse_pdf
@@ -55,10 +56,10 @@ class PDFTitleTests(unittest.TestCase):
         self.assertNotIn('\x00', title)
         self.assertNotIn('\x01', title)
 
-    def test_title_extraction_preserves_original_evidence(self):
-        source = paper_pdf('Research title')
-        original = PdfReader(io.BytesIO(source)).pages[0].extract_text().strip()
-        self.assertEqual(''.join(chunk.content for chunk in parse_pdf(source).chunks), original)
+    def test_embedded_title_remains_available_when_text_extraction_is_unavailable(self):
+        with patch('pypdf._page.PageObject.extract_text', side_effect=ValueError('Unsupported text stream')):
+            result = parse_pdf(paper_pdf('Research title'))
+        self.assertEqual(result.title, 'Research title')
 
 
 if __name__ == '__main__':

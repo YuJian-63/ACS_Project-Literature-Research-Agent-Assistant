@@ -4,7 +4,7 @@ from uuid import UUID
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session, sessionmaker
 
-from app.db.models import Paper, PaperChunk
+from app.db.models import Paper
 from app.tasks.lifecycle import LEASE_SECONDS, database_time
 from app.papers.pdf_parser import ParseResult
 
@@ -70,9 +70,8 @@ def finish_parse(sessions: sessionmaker[Session], paper_id: UUID, owner: UUID, s
         now = database_time(session)
         if not owns_parse(paper, owner, now):
             return False
-        if paper.sha256 != source_hash or session.scalar(select(PaperChunk.id).where(PaperChunk.paper_id == paper_id).limit(1)):
-            raise ValueError("Source changed or evidence already exists")
-        session.add_all([PaperChunk(paper_id=paper_id, parser_version=result.parser_version, **chunk.model_dump()) for chunk in result.chunks])
+        if paper.sha256 != source_hash:
+            raise ValueError("Source changed during metadata extraction")
         paper.page_count = result.page_count
         if result.title and paper.source is None and paper.title == paper.original_filename[:-4].strip():
             paper.title = result.title

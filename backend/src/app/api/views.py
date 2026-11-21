@@ -1,7 +1,7 @@
 from datetime import datetime
 
 from app.db.models import Paper, Task
-from app.research.task_policy import automatic_budget
+from app.tasks.policy import automatic_budget
 
 
 def resource_error(resource: Paper | Task) -> dict | None:
@@ -62,21 +62,6 @@ def task_view(task: Task, paper_ids: list) -> dict:
     agent_outcome = (task.review_state or {}).get("agent_outcome", {})
     if task.runner_type == "agent":
         total_tokens = agent_outcome.get("total_tokens")
-    search = (task.review_state or {}).get("search", {})
-    selection = search.get("selection", {}).get("diagnostic", {})
-    outcome = search.get("outcome", {})
-    retrieval = None
-    if task.run_config.get("search_policy"):
-        columns = {column["key"]: column["label"] for column in task.run_config.get("review_policy", {}).get("columns", [])}
-        titles = {paper["paper_id"]: paper["paper_title"] for paper in (task.review_state or {}).get("source_snapshot", {}).get("papers", [])}
-        selected_ids = {str(paper_id) for paper_id in paper_ids}
-        missing_papers = [{"paper_id": item["paper_id"], "paper_title": titles.get(item["paper_id"], ""),
-            "columns": [columns.get(key, key) for key in item["columns"]]} for item in outcome.get("papers", [])
-            if item["columns"] and item["paper_id"] in selected_ids]
-        retrieval = {"status": outcome.get("status", selection.get("status", "pending")),
-            "expansion_degraded": bool(search.get("query", {}).get("degraded")),
-            "selected_chunks": selection.get("selected_chunks", 0), "lexical_matches": selection.get("lexical_matches", 0),
-            "missing_aspects": outcome.get("missing_aspects", []), "papers": missing_papers}
     return {
         **summary_view(task, paper_ids),
         "budget_mode": "automatic" if automatic_budget(task) else "manual",
@@ -97,5 +82,5 @@ def task_view(task: Task, paper_ids: list) -> dict:
             )},
         },
         "last_event_seq": task.last_event_seq,
-        "retrieval": retrieval,
+        "retrieval": None,
     }

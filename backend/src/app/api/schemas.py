@@ -143,21 +143,6 @@ class TaskStats(BaseModel):
     tool_calls: int | None
 
 
-class MissingPaperEvidence(BaseModel):
-    paper_id: UUID
-    paper_title: str
-    columns: list[str]
-
-
-class RetrievalDiagnostics(BaseModel):
-    status: str
-    expansion_degraded: bool = False
-    selected_chunks: int = 0
-    lexical_matches: int = 0
-    missing_aspects: list[str] = Field(default_factory=list)
-    papers: list[MissingPaperEvidence] = Field(default_factory=list)
-
-
 class AgentExecution(BaseModel):
     dispatch_id: UUID
     transport: Literal["file-exchange-v1", "local-process-v1", "tacc-ssh-slurm-v1"] = "file-exchange-v1"
@@ -182,7 +167,7 @@ class TaskResponse(TaskSummary):
     versions: Versions
     stats: TaskStats
     last_event_seq: int
-    retrieval: RetrievalDiagnostics | None = None
+    retrieval: None = None
     agent: AgentExecution | None = None
 
 

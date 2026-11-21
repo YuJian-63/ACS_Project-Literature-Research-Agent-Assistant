@@ -4,11 +4,22 @@ from sqlalchemy.orm import Session
 
 from app.agent_bridge.bundles import manifest_digest
 from app.agent_bridge.policy import WORKFLOW_VERSION, build_manifest, build_research_manifest
-from app.agent_bridge.transport import transport_name
+from app.agent_bridge.transport import create_transport, transport_name
 from app.api.schemas import TaskCreate
 from app.api.views import accepted_view
 from app.config import Settings
 from app.db.models import AgentRun, Paper, Task, TaskEvent, TaskPaper
+from app.errors import APIError
+
+
+def ensure_agent_ready(settings: Settings, *, unavailable_code: str = "RUNNER_NOT_CONFIGURED",
+    unavailable_message: str = "Agent 派发尚未启用，请先完成传输配置") -> None:
+    if settings.task_runner != "agent" or not settings.agent_dispatch_enabled:
+        raise APIError(503, unavailable_code, unavailable_message)
+    try:
+        create_transport(settings)
+    except ValueError:
+        raise APIError(503, "RUNNER_NOT_CONFIGURED", "Agent 传输配置不完整，请检查部署配置") from None
 
 
 def create_agent_task(session: Session, settings: Settings, request: TaskCreate, papers: list[Paper],

@@ -50,7 +50,7 @@ class PDFLimitTests(unittest.TestCase):
     def test_parser_accepts_pdf_at_50_mb(self):
         result = parse_pdf(self.pdf)
         self.assertEqual(result.page_count, 1)
-        self.assertIn('PDF size boundary evidence', result.chunks[0].content)
+        self.assertNotIn('chunks', result.model_dump())
 
     def test_parser_rejects_pdf_above_50_mb(self):
         with self.assertRaises(ParseFailure) as caught:
@@ -73,7 +73,7 @@ class PDFLimitTests(unittest.TestCase):
             self.assertEqual(result.returncode, 0, result.stderr.decode('utf-8', errors='replace'))
             parsed = json.loads(target.read_text(encoding='utf-8'))
             self.assertEqual(parsed['page_count'], 1)
-            self.assertIn('PDF size boundary evidence', parsed['chunks'][0]['content'])
+            self.assertNotIn('chunks', parsed)
 
     def test_download_receipt_accepts_50_mb_but_rejects_one_more_byte(self):
         self.assertEqual(DownloadReceipt(size_bytes=52_428_800, sha256='a' * 64).size_bytes, 52_428_800)

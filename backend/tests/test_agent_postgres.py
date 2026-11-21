@@ -6,7 +6,7 @@ import tempfile
 import unittest
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from unittest.mock import Mock, patch
+from unittest.mock import Mock
 from uuid import uuid4
 
 from alembic import command
@@ -228,20 +228,63 @@ class AgentPostgresTests(unittest.TestCase):
                 "usage": {"model_calls": 2, "tool_calls": 3},
                 "unresolved": ["missing evidence"] if reason == "partial" else []}})
 
-    def test_uploaded_pdf_submission_skips_old_retrieval_and_ignores_client_budget(self):
-        with patch("app.tasks.service.source_snapshot", side_effect=AssertionError("Old retrieval must not run")), \
-            patch("app.tasks.service.build_search_plan", side_effect=AssertionError("Old research must not run")):
-            first, replayed = submit_task(self.sessions, self.settings, self.request, "same", user_id=self.user_id)
-            self.assertFalse(replayed)
-            changed_budget = self.request.model_copy(update={"budget": self.request.budget.model_copy(update={"max_steps": 1})})
-            second, replayed = submit_task(self.sessions, self.settings, changed_budget, "same", user_id=self.user_id)
-            self.assertTrue(replayed)
-            self.assertEqual(first["id"], second["id"])
+    def test_uploaded_pdf_without_backend_chunks_can_be_dispatched_and_replayed(self):
+        from app.db.models import PaperChunk
+
+        first, replayed = submit_task(self.sessions, self.settings, self.request, "same", user_id=self.user_id)
+        self.assertFalse(replayed)
+        changed_budget = self.request.model_copy(update={"budget": self.request.budget.model_copy(update={"max_steps": 1})})
+        second, replayed = submit_task(self.sessions, self.settings, changed_budget, "same", user_id=self.user_id)
+        self.assertTrue(replayed)
+        self.assertEqual(first["id"], second["id"])
         with self.sessions() as session:
             task = session.get(Task, first["id"])
             self.assertEqual(task.runner_type, "agent")
             self.assertNotIn("search_policy", task.run_config)
             self.assertIsNotNone(session.get(AgentRun, task.id))
+            self.assertIsNone(session.scalar(select(PaperChunk.id)))
+
+    def test_monitor_retires_pending_local_runs_and_preserves_terminal_history(self):
+        from app.db.models import TaskEvent
+
+        now = datetime.now(timezone.utc)
+        pending, history = [], uuid4()
+        with self.sessions.begin() as session:
+            for runner in ("mock", "langgraph"):
+                for status in ("queued", "running"):
+                    task = Task(id=uuid4(), user_id=self.user_id, task_type="summary", runner_type=runner,
+                        workflow_version="langgraph-v1", status=status, stage=status, request_hash="a" * 64,
+                        created_at=now - timedelta(seconds=20), updated_at=now)
+                    if status == "running":
+                        task.started_at = now
+                        task.worker_id = uuid4()
+                        task.lease_expires_at = now + timedelta(seconds=60)
+                    session.add(task)
+                    pending.append(task.id)
+            session.add(Task(id=history, user_id=self.user_id, task_type="summary", runner_type="langgraph",
+                workflow_version="langgraph-v1", status="succeeded", stage="completed", request_hash="b" * 64,
+                created_at=now - timedelta(seconds=20), updated_at=now,
+                started_at=now - timedelta(seconds=10), finished_at=now))
+            session.flush()
+            session.add(Artifact(task_id=history, title="Historical result", content_markdown="Preserved research"))
+        self.assertIsNone(claim_task(self.sessions, self.owner))
+        self.assertEqual(reap_expired(self.sessions), 4)
+        self.assertEqual(reap_expired(self.sessions), 0)
+        with self.sessions() as session:
+            for task_id in pending:
+                task = session.get(Task, task_id)
+                self.assertEqual((task.status, task.error_code), ("failed", "RUNNER_RETIRED"))
+                self.assertIsNone(task.worker_id)
+                self.assertIsNone(task.lease_expires_at)
+                self.assertEqual(session.scalar(select(TaskEvent).where(TaskEvent.task_id == task_id)).event_type, "error")
+            self.assertEqual(session.get(Task, history).status, "succeeded")
+        client = self.research_client()
+        response = client.get(f"/api/v1/tasks/{history}")
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertIsNone(response.json()["retrieval"])
+        response = client.get(f"/api/v1/tasks/{history}/artifacts")
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(response.json()["items"][0]["content_markdown"], "Preserved research")
 
     def test_other_user_cannot_dispatch_selected_paper(self):
         with self.assertRaises(APIError) as caught:
@@ -353,7 +396,8 @@ class AgentPostgresTests(unittest.TestCase):
         with self.sessions.begin() as session:
             task = session.get(Task, task_id)
             task.created_at = datetime.now(timezone.utc) - timedelta(seconds=40)
-            task.started_at = datetime.now(timezone.utc) - timedelta(seconds=30)
+            original_start = datetime.now(timezone.utc) - timedelta(seconds=30)
+            task.started_at = original_start
             task.lease_expires_at = datetime.now(timezone.utc) - timedelta(seconds=1)
         self.assertEqual(reap_expired(self.sessions), 1)
         new_owner = uuid4()
@@ -364,6 +408,7 @@ class AgentPostgresTests(unittest.TestCase):
         self.assertTrue(complete_delivery(self.sessions, task_id, new_owner, manifest, envelope))
         with self.sessions() as session:
             self.assertEqual(session.get(AgentRun, task_id).dispatch_id, manifest.dispatch_id)
+            self.assertEqual(session.get(Task, task_id).started_at, original_start)
 
     def test_native_citation_does_not_require_old_backend_chunk(self):
         task_id, manifest, digest = self.create_and_claim()

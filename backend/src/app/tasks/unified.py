@@ -5,8 +5,7 @@ from uuid import UUID
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 
-from app.agent_bridge.submission import create_research_task
-from app.agent_bridge.transport import create_transport
+from app.agent_bridge.submission import create_research_task, ensure_agent_ready
 from app.api.agent_research_schemas import AgentResearchCreate
 from app.db.models import Paper, Task, TaskPaper
 from app.db.ownership import check_task_capacity, lock_active_user
@@ -68,12 +67,8 @@ def submit_research(sessions, settings, request: AgentResearchCreate, key: str |
                 existing = session.scalar(select(Task).where(Task.user_id == user_id, Task.idempotency_key == key))
                 if existing is not None:
                     return _replay(existing, digest)
-            if settings.task_runner != "agent" or not settings.agent_dispatch_enabled:
-                raise APIError(503, "AGENT_NOT_CONNECTED", "研究服务暂未连接，请稍后再试。")
-            try:
-                create_transport(settings)
-            except ValueError:
-                raise APIError(503, "RUNNER_NOT_CONFIGURED", "Agent 传输配置不完整，请检查部署配置") from None
+            ensure_agent_ready(settings, unavailable_code="AGENT_NOT_CONNECTED",
+                unavailable_message="研究服务暂未连接，请稍后再试。")
             check_task_capacity(session, user_id, settings.user_active_tasks, settings.user_daily_tasks)
             rows = list(session.scalars(select(Paper).where(
                 Paper.user_id == user_id, Paper.id.in_(request.paper_ids),

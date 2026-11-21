@@ -17,7 +17,7 @@ from app.db.models import Paper
 from app.db.session import create_database_engine, create_session_factory
 from app.tasks.lifecycle import HEARTBEAT_SECONDS, MONITOR_SECONDS
 from app.papers.lifecycle import claim_parse, fail_parse, finish_parse, reap_parses, renew_parse
-from app.papers.pdf_parser import MAX_TEXT_BYTES, ParseFailure, ParseResult
+from app.papers.pdf_parser import MAX_RESULT_BYTES, ParseFailure, ParseResult
 
 logger = logging.getLogger(__name__)
 
@@ -66,7 +66,7 @@ class ParserWorker:
                     raise ParseFailure("PARSER_STOPPED", "解析 Worker 已停止，请重新上传以重试")
                 if time.monotonic() - started >= self.settings.parser_timeout_seconds:
                     raise ParseFailure("PDF_PARSE_TIMEOUT", "PDF 解析超过时间限制，请重新上传其他版本")
-                if child.returncode != 0 or not result_path.exists() or result_path.stat().st_size > MAX_TEXT_BYTES * 8:
+                if child.returncode != 0 or not result_path.exists() or result_path.stat().st_size > MAX_RESULT_BYTES:
                     raise ParseFailure("PDF_PARSE_FAILED", "PDF 解析进程异常退出或结果超限")
                 output = json.loads(result_path.read_text(encoding="utf-8"))
                 if "error" in output:
