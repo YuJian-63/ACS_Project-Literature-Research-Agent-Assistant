@@ -52,4 +52,4 @@ tcloud cancel -j JOBID                         # 取消指定作业
 
 拟由 client job 运行 `agent/` 的 worker；源码同步、依赖和 backend 作业桥接尚待实现。现有 `qwen_client.chat()` 仅封装非流式文本应答，后续需要适配工具调用；示例的 `elapsed_seconds` 是完整请求耗时，TTFT/TPOT 需另行采集。
 
-整体连接方式见 [TACC 联调说明](../TACC.md)，研究循环见 [Agent workflow](../agent/workflow.md)。
+整体连接方式见 [TACC 联调说明](TACC.md)，研究循环见 [Agent workflow](../agent/workflow.md)。
