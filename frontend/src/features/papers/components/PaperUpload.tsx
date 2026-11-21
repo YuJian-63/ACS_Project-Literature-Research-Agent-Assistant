@@ -58,10 +58,9 @@ export function PaperUpload({ onUploaded }: { onUploaded: () => void }) {
         }
         return true;
       }}>
-      <div className="upload-content"><div className="upload-file-icon"><FilePdfOutlined /></div><div className="upload-copy"><h2>{busy ? t("正在上传并保存论文") : t("将论文放入你的研究资料库")}</h2><p>{t("拖放 PDF 到这里，或点击选择。单个文件最大 20 MiB。")}</p></div><Button type="primary" icon={<UploadOutlined />} loading={busy}>{busy ? t("正在上传") : t("选择 PDF")}</Button></div>
+      <div className="upload-content"><div className="upload-file-icon"><FilePdfOutlined /></div><div className="upload-copy"><h2>{busy ? t("正在上传并保存论文") : t("将论文放入你的研究资料库")}</h2><p>{t("拖放 PDF 到这里，或点击选择。单个文件最大 50 MB。")}</p></div><Button type="primary" icon={<UploadOutlined />} loading={busy}>{busy ? t("正在上传") : t("选择 PDF")}</Button></div>
     </Upload.Dragger>
     {busy && <div className="upload-progress" aria-live="polite"><Progress percent={progress} size="small" />{progress >= 99 && <span>{t("正在确认文件保存结果…")}</span>}</div>}
     {error && <Alert type="error" showIcon title={t("上传未完成")} description={<>{errorText(error)}{error.requestId && <small className="request-id">{t("请求编号：{0}", [error.requestId])}</small>}</>} closable onClose={() => setError(undefined)} />}
-    <details className="upload-explanation"><summary>{t("上传与解析说明")}</summary><p className="section-footnote">{t("上传后由独立解析 Worker 提取文本；未启动时保持“已上传”。上传成功或解析就绪均不代表已完成研究分析。")}</p></details>
   </section>;
 }

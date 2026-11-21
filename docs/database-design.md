@@ -55,7 +55,7 @@ UUID 为主键；时间使用 timestamptz，应用会话按 UTC 读写，API 转
 | title, original_filename | varchar(255) | 非空文本；API 另校验文件名 |
 | storage_key | text | 非空且唯一，必须等于 uploads/{id}.pdf |
 | content_type | text | 固定 application/pdf |
-| size_bytes | bigint | 1—20971520 |
+| size_bytes | bigint | 1—52428800（50 MB），`papers_size_bytes_check` 约束 |
 | sha256 | varchar(64) | 小写十六进制，不做全局唯一 |
 | status | text | uploaded / processing / ready / failed |
 | page_count | integer, nullable | 正数；ready 必须有值 |
@@ -68,6 +68,8 @@ UUID 为主键；时间使用 timestamptz，应用会话按 UTC 读写，API 转
 MVP-0 上传后为 uploaded；启动独立 Parser Worker 后，从 uploaded 领取解析工作，按 processing → ready/failed 更新，使用独立于研究任务的租约；无需把内部 parse 类型混入对外 summary/qa/review。当前实现仅提取文本型 PDF，不支持 OCR。
 
 相同文件允许重复上传为不同论文 ID，用于未来解析版本隔离。文件与解析结果一旦被任务引用，服务层禁止原地改写；数据库复合外键另外防止修改已被 task_papers 固定的 SHA-256。
+
+手动上传的 `title` 初始为原文件名去掉扩展名，解析完成后从 PDF 标题元数据或首页显著标题补齐。只替换仍等于初始文件名的标题，不覆盖独立设置的标题或 arXiv 来源标题；无法可靠识别时保留兜底值。该过程不修改原文件、SHA-256、原文片段和已冻结的研究任务来源快照。既有 `ready` 记录可用 `app.papers.refresh_titles` 单独补齐标题，无需新增列或重建数据库。
 
 ### 2.2 paper_chunks：可回溯原文片段
 

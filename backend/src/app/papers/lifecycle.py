@@ -74,6 +74,8 @@ def finish_parse(sessions: sessionmaker[Session], paper_id: UUID, owner: UUID, s
             raise ValueError("Source changed or evidence already exists")
         session.add_all([PaperChunk(paper_id=paper_id, parser_version=result.parser_version, **chunk.model_dump()) for chunk in result.chunks])
         paper.page_count = result.page_count
+        if result.title and paper.source is None and paper.title == paper.original_filename[:-4].strip():
+            paper.title = result.title
         paper.parser_version = result.parser_version
         paper.status = "ready"
         paper.parse_worker_id = None

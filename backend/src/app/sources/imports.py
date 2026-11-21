@@ -131,7 +131,7 @@ def complete_import(
         while chunk := source.read(64 * 1024):
             size += len(chunk)
             if size > MAX_PDF_BYTES:
-                raise ArxivError("FILE_TOO_LARGE", "论文文件最大为 20 MiB")
+                raise ArxivError("FILE_TOO_LARGE", "论文文件最大为 50 MB")
             header = (header + chunk)[:5]
             digest.update(chunk)
     if header != b"%PDF-" or size != receipt.size_bytes or digest.hexdigest() != receipt.sha256:

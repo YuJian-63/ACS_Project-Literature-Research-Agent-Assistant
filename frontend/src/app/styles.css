@@ -512,17 +512,6 @@ main {
   color: var(--muted)
 }
 
-.upload-explanation {
-  font-size: 10px;
-  color: var(--muted);
-  margin-top: 9px
-}
-
-.upload-explanation summary {
-  cursor: pointer;
-  width: fit-content
-}
-
 .section-footnote {
   color: var(--muted);
   font-size: 11px;

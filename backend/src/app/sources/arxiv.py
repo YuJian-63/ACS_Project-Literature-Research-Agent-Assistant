@@ -10,10 +10,10 @@ from typing import Literal, Protocol
 from urllib.parse import urljoin, urlsplit
 
 from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, field_validator, model_validator
+from app.papers.limits import MAX_PDF_BYTES
 
 API_URL = "https://export.arxiv.org/api/query"
 MAX_METADATA_BYTES = 2 * 1024 * 1024
-MAX_PDF_BYTES = 20 * 1024 * 1024
 MAX_SEARCH_RESULTS = 50
 SearchSortBy = Literal["relevance", "submittedDate", "lastUpdatedDate"]
 SearchSortOrder = Literal["ascending", "descending"]

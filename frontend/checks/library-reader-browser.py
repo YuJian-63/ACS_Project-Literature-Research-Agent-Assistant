@@ -20,6 +20,12 @@ PAPERS = [{
     'Evidence-Grounded Repository-Level Issue Resolution with Language Model Agents',
     'Understanding Research Evidence Across Software Engineering Papers',
 ], start=1)]
+PAPERS[0]['original_filename'] = '1706.03762v1.pdf'
+PAPERS[0]['source'] = {
+    'provider': 'arxiv', 'external_id': '1706.03762v1', 'title': PAPERS[0]['title'],
+    'authors': ['Fixture author'], 'abstract': 'Fixture abstract', 'categories': ['cs.SE'],
+    'published_at': '2026-11-15T00:00:00Z', 'source_updated_at': '2026-11-15T00:00:00Z',
+}
 
 
 def pdf_fixture(page_count=1):
@@ -54,7 +60,6 @@ def main():
         browser = driver.chromium.launch(headless=True, **options)
         context = browser.new_context(viewport={'width': 1440, 'height': 1080}, reduced_motion='reduce')
         context.add_init_script("""
-            localStorage.setItem('literature-v3-ui-locale', 'en-US');
             window.revokedDocuments = [];
             const originalRevoke = URL.revokeObjectURL.bind(URL);
             URL.revokeObjectURL = (url) => { window.revokedDocuments.push(url); originalRevoke(url); };
@@ -106,6 +111,10 @@ def main():
         page = context.new_page()
         page.set_default_timeout(5000)
         page.on('pageerror', lambda error: errors.append(str(error)))
+        page.goto(BASE + '/papers')
+        expect(page.locator('html')).to_have_attribute('lang', 'en-US')
+        expect(page.locator('.upload-section').get_by_text('Choose PDF', exact=True)).to_be_visible()
+        expect(page.locator('.upload-explanation')).to_have_count(0)
         page.goto(BASE + '/tasks/new')
         paper_link = page.get_by_role('link', name=PAPERS[0]['title'], exact=True)
         expect(paper_link).to_have_attribute('href', '/papers?paper_id=' + PAPERS[0]['id'])
@@ -176,6 +185,10 @@ def main():
         files.clear()
         page.goto(BASE + '/papers')
         expect(page.get_by_role('heading', name='My papers', exact=True)).to_be_visible()
+        expect(page.locator('.paper-name').first).to_contain_text(PAPERS[0]['title'])
+        expect(page.locator('.paper-name').first).not_to_contain_text(PAPERS[0]['original_filename'])
+        expect(page.locator('.paper-name').nth(1)).to_contain_text(PAPERS[1]['title'])
+        expect(page.locator('.paper-name').nth(1)).not_to_contain_text(PAPERS[1]['original_filename'])
         assert not files, 'Library browsing must not download PDFs'
         page.get_by_role('checkbox', name='Select paper ' + PAPERS[0]['title'], exact=True).click()
         expect(page.get_by_role('checkbox', name='Select paper ' + PAPERS[0]['title'], exact=True)).to_be_checked()
@@ -184,14 +197,23 @@ def main():
         expect(reader).to_be_visible()
         expect(reader.locator('iframe')).to_have_attribute('src', re.compile('^blob:'))
         assert len(context.pages) == 1, 'Reading must stay in the current browser tab'
+        expect(page.locator('.library-panel').get_by_role('link', name='New research', exact=True)).to_be_in_viewport()
+        expect(page.locator('.page-actions').get_by_role('link', name='New research', exact=True)).to_have_count(0)
+        expect(reader.locator('.paper-reader-heading')).not_to_contain_text(PAPERS[0]['original_filename'])
+        expect(page.locator('.paper-reading-item').first).not_to_contain_text(PAPERS[0]['original_filename'])
+        selected_link = page.locator('.library-panel').get_by_role('link', name='New research', exact=True)
+        assert parse_qs(urlparse(selected_link.get_attribute('href')).query)['paper_id'] == [PAPERS[0]['id']]
         first_url = reader.locator('iframe').get_attribute('src').split('#')[0]
         page.get_by_role('button', name='Read ' + PAPERS[1]['title'], exact=True).click()
         expect(reader.get_by_role('heading', name=PAPERS[1]['title'], exact=True)).to_be_focused()
+        expect(reader.locator('.paper-reader-heading')).not_to_contain_text(PAPERS[1]['original_filename'])
+        expect(page.locator('.paper-reading-item').nth(1)).not_to_contain_text(PAPERS[1]['original_filename'])
         expect(reader.locator('iframe')).to_have_attribute('src', re.compile('^blob:'))
         page.wait_for_function('url => window.revokedDocuments.includes(url)', arg=first_url)
         downloads = len(files)
         page.get_by_role('button', name='Focus on reading', exact=True).click()
         expect(page.locator('.library-panel')).to_be_hidden()
+        expect(reader.get_by_role('link', name='New research', exact=True)).to_be_in_viewport()
         page.get_by_role('button', name='Show paper list', exact=True).click()
         expect(page.locator('.library-panel')).to_be_visible()
         page.get_by_role('button', name='中文', exact=True).click()
@@ -267,6 +289,7 @@ def main():
                 page.wait_for_function('document.documentElement.scrollWidth <= innerWidth')
                 expect(reader.locator('iframe')).to_be_visible()
                 if width <= 1000:
+                    expect(reader.get_by_role('link', name='New research' if locale == 'en-US' else '新建研究', exact=True)).to_be_visible()
                     reader.get_by_role('combobox').select_option(PAPERS[0]['id'])
                     expect(reader.get_by_role('heading', name=PAPERS[0]['title'], exact=True)).to_be_visible()
             page.screenshot(path=str(SCREENSHOTS / ('reader-desktop-' + locale + '.png')))
@@ -276,6 +299,13 @@ def main():
         page.set_viewport_size({'width': 1440, 'height': 1080})
         reader.get_by_role('button', name='Close reader', exact=True).click()
         page.wait_for_function('url => window.revokedDocuments.includes(url)', arg=current_url.split('#')[0])
+        uploaded_title = PAPERS[1]['title']
+        PAPERS[1].update(title='research-2', status='processing')
+        page.goto(BASE + '/papers?paper_id=' + PAPERS[1]['id'])
+        expect(reader.get_by_role('heading', name='research-2', exact=True)).to_be_visible()
+        PAPERS[1].update(title=uploaded_title, status='ready')
+        expect(reader.get_by_role('heading', name=uploaded_title, exact=True)).to_be_visible(timeout=10000)
+        reader.get_by_role('button', name='Close reader', exact=True).click()
         state['expired'] = True
         page.locator('.paper-title-button').first.click()
         expect(page.get_by_role('heading', name='Log in', exact=True)).to_be_visible()

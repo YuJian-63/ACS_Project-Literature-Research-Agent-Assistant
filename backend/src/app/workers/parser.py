@@ -33,7 +33,7 @@ class ParserWorker:
         while reap_parses(self.sessions) == 100 and not self.stopped.is_set():
             pass
 
-    def extract(self, paper_id, source_hash: str, size_bytes: int) -> ParseResult:
+    def extract(self, paper_id, source_hash: str, size_bytes: int, *, maintain_lease: bool = True) -> ParseResult:
         root = self.settings.storage_root
         workspace = root / "parse-temp"
         workspace.mkdir(parents=True, exist_ok=True)
@@ -54,11 +54,11 @@ class ParserWorker:
                         raise ParseFailure("PARSER_STOPPED", "解析 Worker 已停止，请重新上传以重试")
                     if now - started >= self.settings.parser_timeout_seconds:
                         raise ParseFailure("PDF_PARSE_TIMEOUT", "PDF 解析超过时间限制，请重新上传其他版本")
-                    if now - last_heartbeat >= HEARTBEAT_SECONDS:
+                    if maintain_lease and now - last_heartbeat >= HEARTBEAT_SECONDS:
                         if not renew_parse(self.sessions, paper_id, self.owner):
                             raise ParseFailure("PARSER_LOST", "解析所有权已失效")
                         last_heartbeat = now
-                    if now - last_recovery >= MONITOR_SECONDS:
+                    if maintain_lease and now - last_recovery >= MONITOR_SECONDS:
                         self.recover()
                         last_recovery = now
                     self.stopped.wait(.1)

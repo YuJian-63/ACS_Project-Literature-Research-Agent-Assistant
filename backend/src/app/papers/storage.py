@@ -13,8 +13,8 @@ from sqlalchemy.orm import Session, sessionmaker
 from app.db.models import Paper
 from app.errors import APIError
 from app.api.views import paper_view
+from app.papers.limits import MAX_PDF_BYTES as MAX_FILE_BYTES
 
-MAX_FILE_BYTES = 20 * 1024 * 1024
 logger = logging.getLogger(__name__)
 
 
@@ -73,7 +73,7 @@ def save_paper(
             while chunk := source.read(64 * 1024):
                 size += len(chunk)
                 if size > MAX_FILE_BYTES:
-                    raise APIError(413, "FILE_TOO_LARGE", "文件最大为 20 MiB")
+                    raise APIError(413, "FILE_TOO_LARGE", "文件最大为 50 MB")
                 header = (header + chunk[:5])[:5]
                 digest.update(chunk)
                 destination.write(chunk)

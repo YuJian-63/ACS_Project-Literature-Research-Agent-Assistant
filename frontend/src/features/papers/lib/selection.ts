@@ -5,8 +5,12 @@ export function canSelectPaper(paper: Paper): boolean {
   return paper.status === 'uploaded' || paper.status === 'ready';
 }
 
+export function hasPendingPaper(paper: Paper | null): boolean {
+  return paper?.status === 'uploaded' || paper?.status === 'processing';
+}
+
 export function hasPendingPapers(page: Page<Paper>): boolean {
-  return page.items.some((paper) => paper.status === 'uploaded' || paper.status === 'processing');
+  return page.items.some(hasPendingPaper);
 }
 
 export function selectedPaperRows(keys: Key[], previous: Paper[], current: Paper[]): Paper[] {

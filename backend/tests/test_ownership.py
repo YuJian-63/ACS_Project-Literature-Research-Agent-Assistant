@@ -125,6 +125,155 @@ class OwnershipPostgresTests(unittest.TestCase):
         self.assertEqual(response.status_code, 201, response.text)
         return response.json()["id"]
 
+    def test_upload_accepts_50_mb_and_rejects_one_more_byte(self):
+        pdf = b'%PDF-' + b' ' * (52_428_800 - 5)
+        response = self.clients[0].post('/api/v1/papers', files={'file': ('large.pdf', pdf, 'application/pdf')})
+        self.assertEqual(response.status_code, 201, response.text)
+        self.assertEqual(response.json()['size_bytes'], 52_428_800)
+        paper_id = response.json()['id']
+        self.assertEqual((self.root / 'uploads' / f'{paper_id}.pdf').stat().st_size, 52_428_800)
+        rejected = self.clients[0].post('/api/v1/papers', files={'file': ('oversized.pdf', pdf + b' ', 'application/pdf')})
+        self.assertEqual(rejected.status_code, 413, rejected.text)
+        self.assertEqual(rejected.json()['error']['code'], 'FILE_TOO_LARGE')
+        self.assertEqual(self.clients[0].get('/api/v1/papers').json()['total'], 1)
+        self.assertEqual(len(list((self.root / 'uploads').iterdir())), 1)
+
+    def test_library_search_ignores_case_preserves_literal_matching_and_ownership(self):
+        paper_ids = []
+        for owner, filename in ((0, 'opaque.pdf'), (0, 'MixedCase-File.pdf'),
+                                (0, 'Literal%Value.pdf'), (0, 'Literal_Value.pdf'),
+                                (1, 'MixedCase-private.pdf')):
+            response = self.clients[owner].post('/api/v1/papers', files={'file': (filename, b'%PDF-fixture', 'application/pdf')})
+            self.assertEqual(response.status_code, 201, response.text)
+            paper_ids.append(response.json()['id'])
+        with self.sessions.begin() as session:
+            session.get(Paper, UUID(paper_ids[0])).title = 'MixedCase Title'
+        for query in ('mixedcase', 'MIXEDCASE', 'MiXeDcAsE'):
+            with self.subTest(query=query):
+                response = self.clients[0].get('/api/v1/papers', params={'q': query})
+                self.assertEqual(response.status_code, 200, response.text)
+                self.assertEqual({paper['id'] for paper in response.json()['items']}, set(paper_ids[:2]))
+        for query, expected in (('%', paper_ids[2]), ('_', paper_ids[3])):
+            response = self.clients[0].get('/api/v1/papers', params={'q': query})
+            self.assertEqual([paper['id'] for paper in response.json()['items']], [expected])
+        filtered = self.clients[0].get('/api/v1/papers', params={'q': 'mixedcase', 'status': 'ready'})
+        self.assertEqual(filtered.json()['total'], 0)
+        first = self.clients[0].get('/api/v1/papers', params={'q': 'mixedcase', 'limit': 1}).json()
+        second = self.clients[0].get('/api/v1/papers', params={'q': 'mixedcase', 'limit': 1, 'offset': 1}).json()
+        self.assertEqual(first['total'], 2)
+        self.assertEqual({first['items'][0]['id'], second['items'][0]['id']}, set(paper_ids[:2]))
+
+    def test_import_accepts_50_mb_and_exposes_paper_title(self):
+        import hashlib
+        submit_import(self.sessions, 'arxiv', '1706.03762v1', user_id=self.users[0], settings=self.settings)
+        job = claim_import(self.sessions, uuid4())
+        data = b'%PDF-' + b' ' * (52_428_800 - 5)
+        staged = staging_path(self.root, job)
+        staged.parent.mkdir(parents=True, exist_ok=True)
+        staged.write_bytes(data)
+        metadata = self.arxiv_fixture().search.return_value.items[0]
+        receipt = DownloadReceipt(size_bytes=52_428_800, sha256=hashlib.sha256(data).hexdigest())
+        self.assertTrue(complete_import(self.sessions, job, metadata, receipt, root=self.root))
+        response = self.clients[0].get(f'/api/v1/papers/{job.import_id}')
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(response.json()['size_bytes'], 52_428_800)
+        self.assertEqual(response.json()['title'], 'Fixture paper')
+        self.assertEqual(response.json()['source']['title'], 'Fixture paper')
+        self.assertEqual(response.json()['original_filename'], '1706.03762v1.pdf')
+
+    def test_uploaded_pdf_gets_title_after_real_parser_worker(self):
+        from app.workers.parser import ParserWorker
+        from test_pdf_titles import paper_pdf
+
+        for metadata, expected in (('Verified Uploaded Paper', 'Verified Uploaded Paper'),
+                                   (None, 'Evidence-Grounded Research with Language Model Agents')):
+            with self.subTest(metadata=metadata):
+                uploaded = self.clients[0].post('/api/v1/papers',
+                    files={'file': ('2604.24212v1.pdf', paper_pdf(metadata), 'application/pdf')})
+                self.assertEqual(uploaded.status_code, 201, uploaded.text)
+                self.assertTrue(ParserWorker(self.sessions, self.settings).run_once())
+                response = self.clients[0].get('/api/v1/papers/' + uploaded.json()['id'])
+                self.assertEqual(response.json()['status'], 'ready', response.text)
+                self.assertEqual(response.json()['title'], expected)
+                self.assertEqual(response.json()['original_filename'], '2604.24212v1.pdf')
+                found = self.clients[0].get('/api/v1/papers', params={'q': expected.lower()}).json()
+                self.assertIn(uploaded.json()['id'], [paper['id'] for paper in found['items']])
+
+    def test_missing_pdf_title_keeps_uploaded_filename_fallback(self):
+        from app.workers.parser import ParserWorker
+        from test_pdf_titles import paper_pdf
+
+        uploaded = self.clients[0].post('/api/v1/papers',
+            files={'file': ('fallback-name.pdf', paper_pdf('Untitled', heading=False), 'application/pdf')}).json()
+        self.assertTrue(ParserWorker(self.sessions, self.settings).run_once())
+        response = self.clients[0].get('/api/v1/papers/' + uploaded['id'])
+        self.assertEqual(response.json()['status'], 'ready', response.text)
+        self.assertEqual(response.json()['title'], 'fallback-name')
+
+    def test_parser_preserves_verified_arxiv_title(self):
+        import hashlib
+        from app.workers.parser import ParserWorker
+        from test_pdf_titles import paper_pdf
+
+        submit_import(self.sessions, 'arxiv', '1706.03762v1', user_id=self.users[0], settings=self.settings)
+        job = claim_import(self.sessions, uuid4())
+        data = paper_pdf('Different PDF Metadata')
+        staged = staging_path(self.root, job)
+        staged.parent.mkdir(parents=True, exist_ok=True)
+        staged.write_bytes(data)
+        receipt = DownloadReceipt(size_bytes=len(data), sha256=hashlib.sha256(data).hexdigest())
+        self.assertTrue(complete_import(self.sessions, job,
+            self.arxiv_fixture().search.return_value.items[0], receipt, root=self.root))
+        self.assertTrue(ParserWorker(self.sessions, self.settings).run_once())
+        response = self.clients[0].get(f'/api/v1/papers/{job.import_id}')
+        self.assertEqual(response.json()['status'], 'ready', response.text)
+        self.assertEqual(response.json()['title'], 'Fixture paper')
+
+    def test_refresh_existing_uploaded_titles_preserves_evidence_and_supports_dry_run(self):
+        from app.papers.refresh_titles import refresh_titles
+        from app.workers.parser import ParserWorker
+        from test_pdf_titles import paper_pdf
+
+        uploaded = self.clients[0].post('/api/v1/papers',
+            files={'file': ('old-upload.pdf', paper_pdf('Existing PDF Research Title'), 'application/pdf')}).json()
+        self.assertTrue(ParserWorker(self.sessions, self.settings).run_once())
+        paper_id = UUID(uploaded['id'])
+        with self.sessions.begin() as session:
+            session.get(Paper, paper_id).title = 'old-upload'
+            evidence = list(session.execute(select(PaperChunk.id, PaperChunk.content, PaperChunk.content_sha256)))
+        preview = refresh_titles(self.sessions, self.settings)
+        self.assertEqual(preview, {'candidates': 1, 'titles_found': 1, 'updated': 0, 'failed': 0})
+        self.assertEqual(self.clients[0].get('/api/v1/papers/' + str(paper_id)).json()['title'], 'old-upload')
+        repaired = refresh_titles(self.sessions, self.settings, execute=True)
+        self.assertEqual(repaired['updated'], 1)
+        response = self.clients[0].get('/api/v1/papers/' + str(paper_id))
+        self.assertEqual(response.json()['title'], 'Existing PDF Research Title')
+        self.assertEqual(response.json()['sha256'], uploaded['sha256'])
+        self.assertEqual(response.json()['status'], 'ready')
+        with self.sessions() as session:
+            self.assertEqual(list(session.execute(select(PaperChunk.id, PaperChunk.content, PaperChunk.content_sha256))), evidence)
+        self.assertEqual(refresh_titles(self.sessions, self.settings, execute=True)['candidates'], 0)
+
+    def test_refresh_titles_preserves_custom_titles_and_rejects_changed_pdf(self):
+        from app.papers.refresh_titles import refresh_titles
+        from app.workers.parser import ParserWorker
+        from test_pdf_titles import paper_pdf
+
+        uploaded = self.clients[0].post('/api/v1/papers',
+            files={'file': ('old-upload.pdf', paper_pdf('Research Title'), 'application/pdf')}).json()
+        self.assertTrue(ParserWorker(self.sessions, self.settings).run_once())
+        paper_id = UUID(uploaded['id'])
+        with self.sessions.begin() as session:
+            session.get(Paper, paper_id).title = 'Keep This Custom Title'
+        self.assertEqual(refresh_titles(self.sessions, self.settings, execute=True)['candidates'], 0)
+        with self.sessions.begin() as session:
+            session.get(Paper, paper_id).title = 'old-upload'
+        (self.root / 'uploads' / f'{paper_id}.pdf').write_bytes(paper_pdf('Changed PDF'))
+        result = refresh_titles(self.sessions, self.settings, execute=True)
+        self.assertEqual(result['failed'], 1)
+        self.assertEqual(result['updated'], 0)
+        self.assertEqual(self.clients[0].get('/api/v1/papers/' + str(paper_id)).json()['title'], 'old-upload')
+
     def test_agent_search_and_download_only_the_authenticated_library(self):
         import hashlib
 

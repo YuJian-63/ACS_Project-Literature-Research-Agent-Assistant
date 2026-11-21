@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { Button, Spin } from 'antd';
-import { ArrowLeftOutlined, CloseOutlined, FilePdfOutlined, FullscreenExitOutlined, FullscreenOutlined, SelectOutlined } from '@ant-design/icons';
-import { useNavigate } from 'react-router-dom';
+import { ArrowLeftOutlined, CloseOutlined, FilePdfOutlined, FullscreenExitOutlined, FullscreenOutlined, PlusOutlined, SelectOutlined } from '@ant-design/icons';
+import { Link, useNavigate } from 'react-router-dom';
 import { api, ApiError, asApiError, isCanceled, paperFileUrl } from '../../../api/client';
 import type { Paper } from '../../../api/types';
 import { t, useLocale } from '../../../i18n';
@@ -11,11 +11,12 @@ import PaperDeleteButton from './PaperDeleteButton';
 
 type DocumentState = { kind: 'loading' } | { kind: 'ready'; url: string } | { kind: 'error'; error: ApiError };
 
-export default function PaperReader({ paper, papers, page = 1, returnToResearch, expanded, onRead, onExpand, onClose, onDelete, deletingId }: {
+export default function PaperReader({ paper, papers, page = 1, returnToResearch, newResearchUrl, expanded, onRead, onExpand, onClose, onDelete, deletingId }: {
   paper: Paper;
   papers: Paper[];
   page?: number;
   returnToResearch?: string;
+  newResearchUrl: string;
   expanded: boolean;
   onRead: (paper: Paper) => void;
   onExpand: () => void;
@@ -66,9 +67,10 @@ export default function PaperReader({ paper, papers, page = 1, returnToResearch,
     <header className="paper-reader-header">
       <div className="paper-reader-heading"><FilePdfOutlined aria-hidden="true" /><div>
         <h2 id="paper-reader-title" ref={heading} tabIndex={-1} title={paper.title}>{paper.title}</h2>
-        <p><span>{paper.original_filename}</span>{paper.page_count !== null && <span>{t('{0} 页', [paper.page_count])}</span>}</p>
+        <p>{paper.page_count !== null && <span>{t('{0} 页', [paper.page_count])}</span>}</p>
       </div></div>
       <div className="paper-reader-actions">
+        <Link className="reader-new-research" to={newResearchUrl}><Button type="primary" icon={<PlusOutlined aria-hidden="true" />}>{t('新建研究')}</Button></Link>
         {onDelete && <PaperDeleteButton paper={paper} onDelete={onDelete} deletingId={deletingId} />}
         {returnToResearch && <Button type="primary" className="reader-task-return" icon={<ArrowLeftOutlined aria-hidden="true" />} onClick={() => navigate(returnToResearch)}>{t('返回研究')}</Button>}
         <Button className="reader-expand" icon={expanded ? <FullscreenExitOutlined aria-hidden="true" /> : <FullscreenOutlined aria-hidden="true" />} onClick={onExpand}>{expanded ? t('显示论文列表') : t('专注阅读')}</Button>

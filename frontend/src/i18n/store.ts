@@ -7,9 +7,9 @@ const chinese = new Map(Object.entries(english).map(([source, translation]) => [
 
 function initialLocale(): Locale {
   try {
-    return localStorage.getItem(storageKey) === 'en-US' ? 'en-US' : 'zh-CN';
+    return localStorage.getItem(storageKey) === 'zh-CN' ? 'zh-CN' : 'en-US';
   } catch {
-    return 'zh-CN';
+    return 'en-US';
   }
 }
 

@@ -11,7 +11,15 @@ export function dateTime(value: string | null): string {
 }
 
 export function fileSize(bytes: number): string {
-  return bytes < 1024 * 1024 ? `${Math.max(1, Math.round(bytes / 1024))} KB` : `${(bytes / 1024 / 1024).toFixed(1)} MiB`;
+  if (!Number.isFinite(bytes) || bytes < 0) return '—';
+  const units = ['B', 'KB', 'MB', 'GB', 'TB', 'PB'];
+  let value = bytes;
+  let unit = 0;
+  while (value >= 1024 && unit < units.length - 1) {
+    value /= 1024;
+    unit += 1;
+  }
+  return `${unit < 2 ? Math.round(value) : value.toFixed(1)} ${units[unit]}`;
 }
 
 export function duration(milliseconds: number | null): string {

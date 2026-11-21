@@ -8,6 +8,28 @@
 
 ## 0. 从零启动：Windows / macOS
 
+### 50 MB PDF 限制升级说明（2026-11-21）
+
+部署本次更新时，先使用后端虚拟环境在 `backend` 目录执行 `alembic upgrade head`，确认 `alembic current` 为 `20261121_0008 (head)`，并运行 `alembic check`。新迁移仅调整文件大小约束，保留已上传文件及论文记录；不要修改历史迁移，也不要重建数据库。
+
+随后重启 API、Parser 和 arXiv Import Worker，并重新构建、发布前端。ECS 对应服务为 `acs-api.service`、`acs-parser.service`、`acs-import.service`。反向代理需要允许 50 MB 文件以及 multipart 元数据，例如在 Nginx 站点的 `server` 块将 `client_max_body_size` 从 `21m` 改为 `51m`，通过 `nginx -t` 后再 reload。应用仍严格限制每个 PDF 为 52,428,800 字节，上传请求额外允许最多 64 KB 的 multipart 元数据；代理设为 51m 不会提高应用文件上限。
+
+前端显示使用 B、KB、MB、GB 等单位，每级按 1024 换算。独立 `agent/` 若需处理 50 MB PDF，其下载上限适配需单独发布；本次前后端发布不包含独立 Agent 代码。
+
+### 上传 PDF 标题与旧记录补提取（2026-11-21）
+
+上传完成时先以文件名作为临时标题；解析就绪后优先使用 PDF 内嵌标题，缺失或无效时尝试首页显著标题。论文库、阅读页和论文选择器使用同一 `title` 字段；处理中的阅读页会轮询并自动更新。无法可靠识别标题时继续保留文件名兜底，不调用模型编造标题。arXiv 来源的已验证标题保持不变。
+
+更新代码、重启 Parser 和 API、重新发布前端后，新上传文件自动生效。已就绪的旧记录不会自动重新解析，可在 ECS 以 `acs` 账号执行以下命令。第一条只预览统计，第二条才保存标题：
+
+```bash
+cd /home/acs/ACS_Project-Literature-Research-Agent-Assistant/backend
+.venv/bin/python -B -m app.papers.refresh_titles
+.venv/bin/python -B -m app.papers.refresh_titles --execute
+```
+
+输出包含 `candidates`（仍以文件名命名的就绪上传论文数）、`titles_found`（识别到不同标题的数量）、`updated`（实际更新数）、`failed`（文件无法读取、哈希不符或解析失败数）。命令按批读取，仅处理无外部来源且标题仍为初始文件名的论文；补提取沿用隔离解析进程、大小/哈希校验和超时限制，只保存标题和更新时间，不改动原文件、解析片段或历史研究记录。可重复执行，已补齐的标题不会再次覆盖。出现 `failed` 时先排查对应存储文件，不要重建数据库。
+
 ### 0.1 执行约定与准备条件
 
 以下流程适用于本地开发，不是公网生产部署。需要提前安装 Git、Docker Desktop、uv、Python 3.11+ 和 Node.js/npm。Node.js 版本须满足仓库 package.json 的要求：20.x 至少 20.19.0，或 22.12.0 及以上。工具尚未安装时，先完成对应系统的安装并重新打开终端，再继续本节；下面的依赖安装命令负责安装项目依赖。
