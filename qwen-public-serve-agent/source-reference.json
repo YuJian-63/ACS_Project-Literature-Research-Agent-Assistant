@@ -1,0 +1,8 @@
+{
+  "scheduler_sha256": "2ed2a550b6558b2495eda845a97ae38bcf0225027b9e25fbf00fc3880c1d3941",
+  "source_sha256": {
+    "vllm/third_party/flash_linear_attention/ops/chunk.py": "c105ead259e86aedc248c53e7c4cef07034d0ff12da608d80265d1dd0990803f",
+    "vllm/third_party/flash_linear_attention/ops/chunk_delta_h.py": "1b3ad391f939d9443c6b7adb19e57fe381bd5dccea064e8417a4f85b0e713b26",
+    "vllm/model_executor/layers/mamba/gdn/qwen_gdn_linear_attn.py": "1227d6f385a52296e9f08223544b1c5fdc7e8d9aa09a848e7a8e522a8dc51214"
+  }
+}

@@ -1,0 +1,22 @@
+{
+  "service_kind": "independent_public_agent",
+  "source_original": "qwen27b-student-release/qwen-public-serve",
+  "source_original_modified": false,
+  "working_directory": "qwen27b-student-release/qwen-public-serve-agent",
+  "runtime": "public",
+  "model": "qwen3.8-27b",
+  "endpoint": "/v1/chat/completions",
+  "base_url_only_handoff": true,
+  "model_discovery": "not needed",
+  "api_key": "EMPTY placeholder only; no authentication configured",
+  "streaming": true,
+  "tool_calls": true,
+  "context_tokens": 36864,
+  "max_input_tokens": 32767,
+  "max_output_tokens": 4096,
+  "private_experiment_directory_used": false,
+  "private_optimization_changes_affect_this_service": false,
+  "agent_round_trip_verified_on_tacc": false,
+  "portable_package": true,
+  "deployment_directory": "部署者自己电脑上解压后的 SERVICE_DIR"
+}
