@@ -1,7 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
 umask 077
-echo "VERIFY_STARTED_AT=$(date +%s)"
 : "${TACC_WORKDIR:?Submit with tcloud submit}"
 : "${TACC_USERDIR:?Submit with tcloud submit}"
 : "${SLURM_JOB_ID:?Submit with tcloud submit}"
@@ -11,20 +10,9 @@ test "$CONDA_PREFIX" = /mnt/home/public/course-envs/CSIT6000V/common/proxy || {
     exit 1
 }
 printf 'SDK_BOOTSTRAP=%s\n' "$CONDA_PREFIX"
-if [[ -f "$TACC_WORKDIR/service-generation" ]]; then
-    generation=$(cat "$TACC_WORKDIR/service-generation")
-    [[ "$generation" =~ ^[0-9a-f-]{36}$ ]]
-    printf '%s\n' "$SLURM_JOB_ID" > "$TACC_USERDIR/model-${generation}.id"
-fi
 project="$TACC_USERDIR/CSIT6000V-private-vllm-latency"
 runtime_mode=$(tr -d '\r\n' < "$TACC_WORKDIR/runtime-mode.txt")
 export QWEN_RUNTIME_MODE="$runtime_mode"
-startup_snapshot() {
-    if ! /usr/bin/python3 -u "$TACC_WORKDIR/startup_diagnostics.py" "$1"; then
-        printf 'STARTUP_DIAGNOSTICS_UNAVAILABLE phase=%s\n' "$1"
-    fi
-}
-startup_snapshot before-activation
 case "$runtime_mode" in
     public)
         unset QWEN_PRIVATE_ENV
@@ -41,7 +29,6 @@ case "$runtime_mode" in
         ;;
     *) echo 'runtime-mode.txt must contain public or private' >&2; exit 1 ;;
 esac
-startup_snapshot after-activation
 cd "$project"
 printf 'RUNTIME_MODE=%s\n' "$runtime_mode"
 trap 'rm -rf -- "$QWEN_RUN_DIR"' EXIT
@@ -68,10 +55,6 @@ export CUDA_VISIBLE_DEVICES="${visible_gpus[0]},${visible_gpus[1]}"
 printf 'Runtime GPU selection: %s\n' "$CUDA_VISIBLE_DEVICES"
 export QWEN_CACHE_HOME="$project/cache"
 mkdir -p -m 700 "$QWEN_CACHE_HOME"
-hostname
-if command -v nvidia-smi >/dev/null 2>&1; then
-    nvidia-smi --query-gpu=index,name,uuid,memory.total,memory.free --format=csv || true
-fi
 service_host=$(hostname)
 if [[ "$service_host" =~ ^([0-9]+)-([0-9]+)-([0-9]+)-([0-9]+)$ ]]; then
     service_host="${BASH_REMATCH[1]}.${BASH_REMATCH[2]}.${BASH_REMATCH[3]}.${BASH_REMATCH[4]}"
@@ -100,7 +83,6 @@ bash -n "$QWEN_RUN_DIR/serve-configured.sh"
 if [[ "$runtime_mode" == private ]]; then
     qwen-python "$TACC_WORKDIR/check-gdn-kernel.py"
 fi
-startup_snapshot after-kernel-check
 supervisor_digest=$(sha256sum "$TACC_WORKDIR/service_supervisor.py")
 [[ "${supervisor_digest%% *}" == 7c19cf3c15ca8686b491b37c5179adf77cfd44dbd4ad79ad186170235a4109af ]] || {
     echo 'Use the unchanged TA service_supervisor.py from cinecontext-qwen-e2e-fix.zip.' >&2
@@ -119,8 +101,5 @@ trap 'forward_stop TERM 143' TERM
 trap 'forward_stop INT 130' INT
 result=0
 wait "$supervisor_pid" || result=$?
-printf 'SERVICE_EXIT_CODE=%s\nPOST_SUPERVISOR_GPU_MEMORY_BEGIN\n' "$result"
-nvidia-smi --query-gpu=index,uuid,memory.used,memory.free --format=csv || true
-nvidia-smi --query-compute-apps=gpu_uuid,pid,process_name,used_gpu_memory --format=csv || true
-printf 'POST_SUPERVISOR_GPU_MEMORY_END\n'
+printf 'SERVICE_EXIT_CODE=%s\n' "$result"
 exit "$result"
