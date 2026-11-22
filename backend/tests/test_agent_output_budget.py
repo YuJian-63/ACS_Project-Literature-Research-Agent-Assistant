@@ -28,11 +28,9 @@ class AgentOutputBudgetTests(unittest.TestCase):
                 digest="a" * 64, interface="agent-research")
         return save.call_args.args[2]
 
-    def test_default_output_budget_is_16384_tokens(self):
-        self.assertEqual(Settings.model_fields["agent_output_tokens"].default, 16384)
-
-    def test_legacy_tasks_use_the_configured_budget_for_any_paper_count(self):
-        settings = self.settings(agent_output_tokens=16384)
+    def test_legacy_tasks_use_the_default_budget_for_any_paper_count(self):
+        with patch.dict("os.environ", {}, clear=True):
+            settings = self.settings()
         for count in (1, 2, 20):
             with self.subTest(count=count):
                 manifest = build_manifest(uuid4(), uuid4(), "review", "Compare", self.papers(count), settings)
@@ -59,16 +57,10 @@ class AgentOutputBudgetTests(unittest.TestCase):
                     self.assertEqual(manifest.task.max_output_tokens, expected)
                     self.assertLessEqual(manifest.task.max_output_tokens + 2048, manifest.runtime.context_window)
 
-    def test_tacc_and_custom_submissions_allow_16384_tokens(self):
-        settings = self.settings(agent_transport="tcloud", agent_output_tokens=16384)
-        for provider in ("tacc", "custom"):
-            with self.subTest(provider=provider):
-                manifest = self.research_submission(settings, provider)
-                self.assertEqual(manifest.task.max_output_tokens, 16384)
-
     def test_tacc_and_custom_submissions_preserve_output_and_context_caps(self):
         for provider in ("tacc", "custom"):
             for configured, context, expected_output, expected_context in (
+                    (16384, 32000, 16384, 32000),
                     (32768, 64000, 16384, 36864), (8192, 32000, 8192, 32000),
                     (16384, 8192, 6144, 8192)):
                 with self.subTest(provider=provider, configured=configured, context=context):

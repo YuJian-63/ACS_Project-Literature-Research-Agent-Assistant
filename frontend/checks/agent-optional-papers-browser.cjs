@@ -16,6 +16,7 @@ if(path==='/api/v1/agent-research' && req.method()==='POST') {
 }
 if(path==='/api/v1/agent-research/'+taskid)return route.fulfill({json:{task_id:taskid,status:'succeeded',question:'研究方法是什么？',paper_ids:[id],error:null,result:{task_id:taskid,question:'研究方法是什么？',answer:'## 测试返回正文\n\n依据论文方法部分进行分析 [chunk-1]',comparison_table:'',citations:[{chunk_id:'chunk-1',source_id:'source-1',paper_id:id,title:paper.title,page:3,source_text:'这是一条用于验证接口的完整测试句子。',url:''}],sources:[{paper_id:id,source_id:'source-1',title:paper.title,url:''}],unresolved:[],stop_reason:'completed',usage:{},trace:[],errors:[],configuration:{}}}});
 if(path.endsWith('/auth/me'))return route.fulfill({json:{user:{id:'a',username:'alice',email:'a@b.com'},csrf_token:'fixture'}});
+if(path==='/api/v1/models')return route.fulfill({json:{bailian_config:'missing',bailian_name:null,enabled:true,state:'ready',owner:false,generation:null,job_id:null,base_url:'http://10.0.3.11:8000/v1',shared_url:null,detail:null,requested_at:null,checked_at:null}});
 if(path==='/api/v1/papers/'+id)return route.fulfill({json:paper});
 if(path.startsWith('/api/v1/tasks'))throw Error('Research detail API must remain disconnected: '+path);
 return route.fulfill({json:{items:path==='/api/v1/papers'?[paper]:[],total:path==='/api/v1/papers'?1:0,limit:20,offset:0}});
@@ -48,7 +49,8 @@ if(submitted[1].research.workflow!=='extension'||submitted[1].research.context_p
 await page.goto(BASE+'/tasks/new');await page.getByRole('button',{name:'English',exact:true}).click();
 await page.getByRole('heading',{name:'Reference papers (optional)',exact:true}).waitFor();
 await page.getByText('No reference papers selected. Relevant material will be found for your research question.',{exact:true}).waitFor();
+await page.setViewportSize({width:390,height:844});await page.waitForFunction(()=>document.documentElement.scrollWidth<=innerWidth);
 if(errors.length)throw Error(errors.join('\n'));
-console.log('PASS: question required, optional references, no step numbering, both payloads allow search, bilingual labels');
+console.log('PASS: question required, optional references, no step numbering, both payloads allow search, bilingual labels and mobile layout');
 await browser.close();
 })().catch(e=>{console.error(e);process.exit(1)});

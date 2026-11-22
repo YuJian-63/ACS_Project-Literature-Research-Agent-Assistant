@@ -60,6 +60,11 @@ class AgentIntegrationBrowserTests(unittest.TestCase):
         if path == '/api/v1/auth/login':
             self.signed_in = True
             return self.session(route)
+        if path == '/api/v1/models':
+            return route.fulfill(json=dict(bailian_config='missing', bailian_name=None,
+                enabled=True, state='ready', owner=False, generation=None, job_id=None,
+                base_url='http://10.0.3.11:8000/v1', shared_url=None, detail=None,
+                requested_at=None, checked_at=None))
         if path == '/api/v1/agent-research':
             if request.method == 'POST':
                 self.posts.append((request.post_data_json, request.headers))
@@ -86,22 +91,24 @@ class AgentIntegrationBrowserTests(unittest.TestCase):
 
     def test_partial_results_disclose_gaps_and_history(self):
         self.open_task()
-        expect(self.page.get_by_text('Some questions remain unresolved', exact=True)).to_be_visible()
         self.page.get_by_role('tab', name='Open questions', exact=True).click()
         expect(self.page.get_by_text('Audit evidence gap.', exact=True)).to_be_visible()
         self.page.goto(BASE + '/tasks')
         expect(self.page.get_by_role('link', name='Fixture question', exact=True)).to_be_visible()
 
-    def test_native_comparison_citation_returns_to_same_evidence(self):
-        self.open_task()
-        self.page.get_by_role('tab', name='Comparison', exact=True).click()
-        self.page.locator('.research-markdown table .citation-trigger').click()
-        expect(self.page.locator('.evidence-quote')).to_have_text('Verbatim evidence 2.')
-        self.page.get_by_role('button', name='Open PDF page', exact=True).click()
-        expect(self.page).to_have_url(re.compile(r'pdf_page=2'))
-        self.page.locator('.reader-task-return').click()
-        expect(self.page.locator('.evidence-quote')).to_have_text('Verbatim evidence 2.')
-        self.assertEqual(len(self.context.pages), 1)
+    def test_body_and_comparison_citations_return_to_same_evidence(self):
+        for tab, page_number in (('Research findings', 1), ('Comparison', 2)):
+            with self.subTest(tab=tab):
+                self.open_task()
+                self.page.get_by_role('tab', name=tab, exact=True).click()
+                self.page.get_by_role('tabpanel').locator('.citation-trigger').click()
+                evidence = f'Verbatim evidence {page_number}.'
+                expect(self.page.locator('.evidence-quote')).to_have_text(evidence)
+                self.page.get_by_role('button', name='Open PDF page', exact=True).click()
+                expect(self.page).to_have_url(re.compile(f'pdf_page={page_number}'))
+                self.page.locator('.reader-task-return').click()
+                expect(self.page.locator('.evidence-quote')).to_have_text(evidence)
+                self.assertEqual(len(self.context.pages), 1)
 
     def test_source_evidence_keeps_joined_excerpt_without_original_disclosure(self):
         self.record['result']['citations'][0]['source_text'] = 'A supported\ncomplete sentence.'
@@ -141,7 +148,9 @@ class AgentIntegrationBrowserTests(unittest.TestCase):
                 self.page.locator('.research-submit-panel button[type=submit]').click()
                 expect(self.page.get_by_role('heading', name='Audit answer', exact=True)).to_be_visible()
                 body, headers = self.posts[-1]
-                self.assertEqual(body, dict(question=question, paper_ids=[PAPER_ID], allow_search=True))
+                self.assertEqual(body, dict(question=question, paper_ids=[PAPER_ID], allow_search=True,
+                    research=dict(model_provider='tacc', workflow='baseline', context_policy='compact',
+                        planner=False, reflection=False)))
                 self.assertEqual(headers['x-csrf-token'], 'audit-csrf')
                 self.assertRegex(headers['idempotency-key'], r'^[0-9a-f-]{36}$')
 
@@ -162,7 +171,6 @@ class AgentIntegrationBrowserTests(unittest.TestCase):
         self.open_task()
         expect(self.page.get_by_role('tab', name='Comparison', exact=True)).to_have_count(0)
         expect(self.page.get_by_role('tab', name='Open questions', exact=True)).to_have_count(0)
-        expect(self.page.get_by_text('Some questions remain unresolved', exact=True)).to_have_count(0)
 
     def test_public_http_login_and_submission(self):
         self.signed_in = False
