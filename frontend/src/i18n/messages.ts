@@ -1,4 +1,7 @@
 export const english: Record<string, string> = {
+  "论文比较界面示例": "Comparison interface preview",
+  "演示记录仅用于查看表格样式，不会提交研究或写入数据库。": "This sample record shows the comparison table without running research or writing to the database.",
+  "查看示例": "View preview",
   "以下内容尚未得到充分确认，请结合研究正文和原文证据阅读。": "The following points need further verification. Read them alongside the answer and original evidence.",
   "项待确认": "items to verify",
   "配置研究模型与全站任务容量": "Manage research models and site-wide capacity",

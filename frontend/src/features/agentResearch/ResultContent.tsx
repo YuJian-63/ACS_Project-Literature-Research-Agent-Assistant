@@ -20,9 +20,9 @@ export default function ResultContent({ result, onReadEvidence, onReadSource }: 
   const [activeTab, setActiveTab] = useState('');
   const selected = result.citations.find(citation => citation.chunk_id === selectedKey);
   const byId = new Map(result.citations.map((citation, index) => [citation.chunk_id, { citation, number: index + 1 }]));
-  function markdown(value: string) {
+  function markdown(value: string, className = '') {
     const content = value.replace(/(?<!\\)\[([^\]\n]+)\]/g, (marker, id: string) => byId.has(id) ? `[[C${byId.get(id)!.number}]](#evidence-${encodeURIComponent(id)})` : marker);
-    return <div className="markdown research-markdown"><ReactMarkdown remarkPlugins={[remarkGfm, remarkMath]} rehypePlugins={[[rehypeKatex, { trust: false, throwOnError: false }]]} skipHtml components={{ img: () => null, a: ({ href, children }) => {
+    return <div className={`markdown research-markdown ${className}`}><ReactMarkdown remarkPlugins={[remarkGfm, remarkMath]} rehypePlugins={[[rehypeKatex, { trust: false, throwOnError: false }]]} skipHtml components={{ img: () => null, a: ({ href, children }) => {
       if (href?.startsWith('#evidence-')) {
         let id: string;
         try { id = decodeURIComponent(href.slice(10)); } catch { return <span>{children}</span>; }
@@ -33,7 +33,7 @@ export default function ResultContent({ result, onReadEvidence, onReadSource }: 
   }
   const entries: { key: string; label: string; icon: ReactNode; children: ReactNode }[] = [];
   if (result.answer.trim()) entries.push({ key: 'answer', label: t('研究正文'), icon: <FileTextOutlined aria-hidden />, children: markdown(result.answer) });
-  if (result.comparison_table.trim()) entries.push({ key: 'comparison', label: t('论文比较'), icon: <TableOutlined aria-hidden />, children: markdown(result.comparison_table) });
+  if (result.comparison_table.trim()) entries.push({ key: 'comparison', label: t('论文比较'), icon: <TableOutlined aria-hidden />, children: markdown(result.comparison_table, 'research-comparison') });
   if (result.unresolved.length) entries.push({ key: 'unresolved', label: t('待解决问题'), icon: <QuestionCircleOutlined aria-hidden />, children: <section className="research-unresolved">
     <div className="research-unresolved-heading"><div><span className="research-section-label">OPEN QUESTIONS</span><h2>{t('仍需进一步确认')}</h2><p>{t('以下内容尚未得到充分确认，请结合研究正文和原文证据阅读。')}</p></div><div className="research-unresolved-count"><strong>{String(result.unresolved.length).padStart(2, '0')}</strong><span>{t('项待确认')}</span></div></div>
     <ol>{result.unresolved.map((item, index) => <li key={index}><span className="research-unresolved-number" aria-hidden>{String(index + 1).padStart(2, '0')}</span><MathText>{item}</MathText></li>)}</ol>

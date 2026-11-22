@@ -94,6 +94,7 @@ export default function TasksPage() {
     {importSource && <SourceImportDialog source={importSource} onClose={() => setImportSource(undefined)}
       onRead={id => { setImportSource(undefined); resource.reload(); navigate(paperReaderUrl(id)); }} />}
     <PageHeader title={t("研究记录")} description={t("查看和管理已经保存的研究结果。")} action={<Link to="/tasks/new"><Button type="primary" icon={<PlusOutlined />}>{t("新建任务")}</Button></Link>} />
+    {import.meta.env.DEV && <div className="research-comparison-preview-entry"><div><strong>{t('论文比较界面示例')}</strong><p>{t('演示记录仅用于查看表格样式，不会提交研究或写入数据库。')}</p></div><Link to="/tasks/preview-comparison"><Button>{t('查看示例')}</Button></Link></div>}
     <section className="content-panel">
       <div className="filter-toolbar">
         <Select<TaskStatus> value={status} allowClear placeholder={t("全部状态")} aria-label={t("筛选任务状态")} onChange={(value) => { setStatus(value); setPage(1); }} options={Object.entries(taskStatusLabels()).map(([value, label]) => ({ value: value as TaskStatus, label }))} />
