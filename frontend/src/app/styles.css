@@ -1635,6 +1635,11 @@ main {
   overflow: visible
 }
 
+.paper-abstract .katex-display {
+  overflow-x: auto;
+  overflow-y: hidden;
+}
+
 .paper-abstract-block {
   margin: 16px 0
 }

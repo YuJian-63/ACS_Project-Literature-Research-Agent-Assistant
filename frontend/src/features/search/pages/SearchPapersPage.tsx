@@ -8,6 +8,7 @@ import { api, asApiError, isCanceled, type ApiError } from '../../../api/client'
 import type { Page, PaperImport, SearchPaper } from '../../../api/types';
 import { PageHeader } from '../../../shared/components/PageHeader';
 import PaperAbstract from '../components/PaperAbstract';
+import MathText from '../../../shared/components/MathText';
 import { importFeedback } from '../lib/importFeedback';
 
 const sortOptions = {
@@ -323,7 +324,7 @@ export default function SearchPapersPage({ active = true }: { active?: boolean }
           const item = records[paper.external_id];
           return <article key={paper.external_id} className="search-paper">
             <div className="source-identity"><span>arXiv · {paper.external_id}</span><span>{t('发布于 {0}', [new Date(paper.published_at).toLocaleDateString(getLocale())])}</span>{snapshot.sort.startsWith('updated') && <span>{t('更新于 {0}', [new Date(paper.source_updated_at).toLocaleDateString(getLocale())])}</span>}</div>
-            <h3>{paper.title}</h3><p className="paper-authors">{paper.authors.join(' · ')}</p>
+            <h3><MathText inline>{paper.title}</MathText></h3><p className="paper-authors">{paper.authors.join(' · ')}</p>
             <PaperAbstract text={paper.abstract} />
             <div className="source-categories">{paper.categories.map((category) => <Tag key={category}>{category}</Tag>)}</div>
             <div className="search-paper-footer"><div className="source-links">{arxivUrl(paper.external_id, 'abs') && <a href={arxivUrl(paper.external_id, 'abs')} target="_blank" rel="noopener noreferrer">{t("arXiv 原文")}</a>}{arxivUrl(paper.external_id, 'pdf') && <a href={arxivUrl(paper.external_id, 'pdf')} target="_blank" rel="noopener noreferrer">{t("来源 PDF")}</a>}</div>

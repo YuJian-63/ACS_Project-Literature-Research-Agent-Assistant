@@ -16,14 +16,15 @@ import { errorText } from '../../i18n/diagnostics';
 import { dateTime, taskStatusLabels } from '../../shared/lib/format';
 import { paperReaderUrl } from '../../shared/lib/paperReader';
 import SourceImportDialog from './SourceImportDialog';
+import MathText from '../../shared/components/MathText';
 
 const columns = (onDelete: (task: AgentResearchSummary) => void, deleting: boolean, onImport: (source: AgentSource) => void): TableColumnsType<AgentResearchSummary> => [
-  { title: t("研究任务"), key: 'task', render: (_value, task) => <div className="task-name"><Link to={`/tasks/${task.id}`}>{task.question || t("研究任务")}</Link><span className="task-identifier">{task.id.slice(0, 8)}</span></div> },
+  { title: t("研究任务"), key: 'task', render: (_value, task) => <div className="task-name"><Link to={`/tasks/${task.id}`}><MathText inline>{task.question || t("研究任务")}</MathText></Link><span className="task-identifier">{task.id.slice(0, 8)}</span></div> },
   { title: t('研究论文'), key: 'papers', width: 280, render: (_value, task) => <div className="task-paper-links">
     {task.papers.length ? task.papers.map(paper => paper.id !== null
-      ? <Link key={paper.id} to={paperReaderUrl(paper.id)}>{paper.title}</Link>
+      ? <Link key={paper.id} to={paperReaderUrl(paper.id)}><MathText inline>{paper.title}</MathText></Link>
       : <div key={paper.source_id} className="task-paper-import">
-          <span>{paper.title}</span>
+          <span><MathText inline>{paper.title}</MathText></span>
           <Button type="text" size="small" icon={<DownloadOutlined />} onClick={() => onImport(paper)}
             aria-label={t('导入并阅读《{0}》', [paper.title])} title={t('导入并阅读')} />
         </div>) : '—'}

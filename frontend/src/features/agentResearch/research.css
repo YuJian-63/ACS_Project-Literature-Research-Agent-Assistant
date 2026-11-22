@@ -38,6 +38,11 @@
 .research-markdown table { min-width: 560px; width: 100%; font-size: 13px; }
 .research-markdown { overflow-x: auto; }
 .research-markdown .citation-trigger { white-space: nowrap; }
+.research-markdown .katex-display,.research-math-text .katex-display { overflow-x: auto; overflow-y: hidden; padding: 8px 0; }
+.research-math-text > :first-child { margin-top: 0; }
+.research-math-text > :last-child { margin-bottom: 0; }
+.research-citation-excerpt { color: var(--muted); margin: 10px 0; font-size: 13px; line-height: 1.9; }
+.research-citation-excerpt p { margin: 0; }
 .research-unresolved { max-width: 780px; }
 .research-unresolved > p { color: var(--muted); line-height: 1.9; }
 .research-unresolved li { line-height: 1.9; margin: 18px 0; padding-left: 8px; }

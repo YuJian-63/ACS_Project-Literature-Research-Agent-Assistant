@@ -16,6 +16,7 @@ import './research.css';
 
 import { changeService, courseAvailable, loadModels, pollModels } from '../../api/models';
 import { useResource } from '../../shared/hooks/useResource';
+import MathText from '../../shared/components/MathText';
 
 export default function NewResearchPage() {
   useLocale();
@@ -147,6 +148,6 @@ export default function NewResearchPage() {
     <Checkbox disabled={loading || submitting} checked={research.reflection} onChange={e => setResearch({ ...research, reflection: e.target.checked })}>Reflection</Checkbox></>}</Space>
   </section>
   <section className="content-panel research-paper-panel"><div className="panel-heading"><div><h2>{t('参考论文（可选）')}</h2><p>{t('可以不选，也可以指定最多 20 篇参考论文。研究将先检索已有资料，信息不足时再搜索补充论文。')}</p></div><Link to="/papers">{t("前往论文库")}</Link></div><PaperPicker value={papers} onChange={setPapers} disabled={loading || submitting || Boolean(error)} /></section>
-  </div><aside className="research-submit-panel"><span className="research-section-label">{t("本次研究")}</span><h2>{t("从问题到理解")}</h2><p>{question.trim() || t("你的研究问题会显示在这里。")}</p>{papers.length > 0 ? <div className="research-submit-count"><BookOutlined /><strong>{papers.length}</strong><span>{t('篇参考论文')}</span></div> : <p className="research-auto-sources">{t('未指定参考论文，将根据研究问题查找相关资料。')}</p>}{papers.length > 0 && <ul>{papers.map(paper => <li key={paper.id}>{paper.title}</li>)}</ul>}<Button type="primary" htmlType="submit" size="large" block loading={submitting} disabled={(research.model_provider === 'tacc' && !courseAvailable(models.data)) || loading || submitting || Boolean(error)}>{t('开始研究')}</Button><small>{t('研究开始后，可在研究记录中查看进展与结果。')}</small></aside>
+  </div><aside className="research-submit-panel"><span className="research-section-label">{t("本次研究")}</span><h2>{t("从问题到理解")}</h2><p><MathText inline>{question.trim() || t("你的研究问题会显示在这里。")}</MathText></p>{papers.length > 0 ? <div className="research-submit-count"><BookOutlined /><strong>{papers.length}</strong><span>{t('篇参考论文')}</span></div> : <p className="research-auto-sources">{t('未指定参考论文，将根据研究问题查找相关资料。')}</p>}{papers.length > 0 && <ul>{papers.map(paper => <li key={paper.id}><MathText inline>{paper.title}</MathText></li>)}</ul>}<Button type="primary" htmlType="submit" size="large" block loading={submitting} disabled={(research.model_provider === 'tacc' && !courseAvailable(models.data)) || loading || submitting || Boolean(error)}>{t('开始研究')}</Button><small>{t('研究开始后，可在研究记录中查看进展与结果。')}</small></aside>
   </div></Form></Spin></>;
 }

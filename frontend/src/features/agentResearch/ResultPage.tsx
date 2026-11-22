@@ -9,6 +9,7 @@ import { PageHeader } from '../../shared/components/PageHeader';
 import ResearchProgress from './ResearchProgress';
 import { paperReaderUrl } from '../../shared/lib/paperReader';
 import ResultContent from './ResultContent';
+import MathText from '../../shared/components/MathText';
 import SourceImportDialog from './SourceImportDialog';
 import { resolveResearchSource } from './lib/researchSource';
 
@@ -55,7 +56,7 @@ export default function ResultPage() {
     <PageHeader title={t('研究结果')} description={t('围绕你的问题，阅读研究内容并核对原文依据。')} action={<Button onClick={() => setRevision(value => value + 1)} loading={loading}>{t('刷新')}</Button>} />
     {error && <ErrorNotice error={error} retry={() => setRevision(value => value + 1)} />}
     {loading && <Skeleton active />}
-    {record?.question && <div className="result-question"><span>{t('研究问题')}</span><p>{record.question}</p></div>}
+    {record?.question && <div className="result-question"><span>{t('研究问题')}</span><MathText>{record.question}</MathText></div>}
     {(record?.status === 'queued' || record?.status === 'running') && <ResearchProgress queued={record.status === 'queued'} disconnected={Boolean(error)} checkedAt={checkedAt} />}
     {record?.status === 'failed' && <Alert type="error" showIcon title={t('研究未能完成')} description={record.error ? t(record.error.message) : t('请稍后重新创建研究。')} />}
     {record?.result && <ResultContent result={record.result}

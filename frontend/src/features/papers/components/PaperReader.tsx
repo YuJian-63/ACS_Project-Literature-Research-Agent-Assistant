@@ -8,6 +8,7 @@ import { t, useLocale } from '../../../i18n';
 import { ErrorNotice } from '../../../shared/components/ErrorNotice';
 import './paper-reader.css';
 import PaperDeleteButton from './PaperDeleteButton';
+import MathText from '../../../shared/components/MathText';
 
 type DocumentState = { kind: 'loading' } | { kind: 'ready'; url: string } | { kind: 'error'; error: ApiError };
 
@@ -66,7 +67,7 @@ export default function PaperReader({ paper, papers, page = 1, returnToResearch,
   return <section ref={panel} className="paper-reader" aria-labelledby="paper-reader-title">
     <header className="paper-reader-header">
       <div className="paper-reader-heading"><FilePdfOutlined aria-hidden="true" /><div>
-        <h2 id="paper-reader-title" ref={heading} tabIndex={-1} title={paper.title}>{paper.title}</h2>
+        <h2 id="paper-reader-title" ref={heading} tabIndex={-1} title={paper.title}><MathText inline>{paper.title}</MathText></h2>
         <p>{paper.page_count !== null && <span>{t('{0} 页', [paper.page_count])}</span>}</p>
       </div></div>
       <div className="paper-reader-actions">
