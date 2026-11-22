@@ -1,4 +1,6 @@
-import { Button } from 'antd';
+import { Button, Tooltip } from 'antd';
+import type { ReactNode } from 'react';
+import { ReloadOutlined, PlayCircleOutlined } from '@ant-design/icons';
 import { useLocale } from '../../i18n';
 import type { DimensionKey, EvaluationStatus, TaskMetrics } from '../../api/taskMetrics';
 import type { EvaluationVersion } from '../../api/evaluations';
@@ -23,20 +25,27 @@ export default function EvaluationPanel({ metrics, taskId, onRequested }: { metr
   const detail = useEvaluation(taskId, metrics?.evaluation, onRequested);
   const evaluation = metrics?.evaluation;
   const pending = evaluation?.status === 'pending' || evaluation?.status === 'running';
-  const canRequest = Boolean(taskId && onRequested && evaluation?.configured && !pending && evaluation.status !== 'succeeded'
-    && !(detail.version?.max_attempts != null && detail.version.attempts >= detail.version.max_attempts));
+  const limitReached = detail.version?.max_attempts != null && detail.version.attempts >= detail.version.max_attempts;
+  const disabledReason = !taskId ? c('缺少研究任务信息', 'Research task unavailable')
+    : !evaluation?.configured ? c('评分服务暂不可用', 'Evaluation service unavailable')
+    : pending ? c('评分完成后自动更新', 'Results will refresh when evaluation completes')
+    : limitReached ? c('已达到评分重试上限', 'Evaluation retry limit reached') : '';
+  const retry = evaluation?.status === 'failed' || evaluation?.status === 'skipped';
+  const action = evaluation && evaluation.status !== 'succeeded' ? <div className="evaluation-request-control">
+    <Tooltip title={disabledReason || undefined}><span><Button type="primary" icon={retry ? <ReloadOutlined /> : <PlayCircleOutlined />} onClick={() => void detail.request()} loading={detail.busy} disabled={Boolean(disabledReason) || detail.busy}>
+      {pending ? c('评分中', 'Evaluating') : retry ? c('重试评分', 'Retry evaluation') : c('申请评分', 'Request evaluation')}
+    </Button></span></Tooltip>
+    {disabledReason && !pending && <small>{disabledReason}</small>}
+  </div> : undefined;
   return <>
-    {evaluation && <div className="evaluation-actions"><p>{evaluation.configured ? c('评分由独立模型异步完成，不影响研究正文。', 'Independent asynchronous evaluation does not alter your research.') : c('评分未启用或未配置。历史评分与执行指标仍可查看。', 'Evaluation is disabled or unconfigured. Historical scores and execution metrics remain available.')}</p>
-      {canRequest && <Button onClick={() => void detail.request()} loading={detail.busy} disabled={detail.busy}>{evaluation.status === 'failed' || evaluation.status === 'skipped' ? c('重试评分', 'Retry evaluation') : c('申请评分', 'Request evaluation')}</Button>}
-    </div>}
     {detail.submitError && <ErrorNotice error={detail.submitError} title={c('评分申请未成功', 'Evaluation request failed')} />}
     {detail.error && <ErrorNotice error={detail.error} retry={detail.reload} title={c('完整报告读取失败', 'Could not load the full report')} />}
     {detail.loading && <p className="evaluation-caption" role="status">{c('正在读取完整评估报告…', 'Loading the full evaluation report…')}</p>}
-    <EvaluationReportView metrics={metrics} version={detail.version} />
+    <EvaluationReportView metrics={metrics} version={detail.version} action={action} />
   </>;
 }
 
-export function EvaluationReportView({ metrics, version }: { metrics?: TaskMetrics; version?: EvaluationVersion }) {
+export function EvaluationReportView({ metrics, version, action }: { metrics?: TaskMetrics; version?: EvaluationVersion; action?: ReactNode }) {
   const locale = useLocale();
   const c = (zh: string, en: string) => locale === 'en-US' ? en : zh;
   if (!metrics) return <section className="evaluation-panel"><p role="status">{c('当前服务未提供指标', 'This service has not provided metrics')}</p></section>;
@@ -45,7 +54,7 @@ export function EvaluationReportView({ metrics, version }: { metrics?: TaskMetri
   const report = version?.status === 'succeeded' ? version.report : null;
   const scope = report?.evaluation_scope;
   return <section className="evaluation-panel evaluation-report" aria-label={c('研究评估报告', 'Research evaluation report')}>
-    <header className="evaluation-report-header"><div><span className="research-section-label">EVALUATION REPORT</span><h2>{c('一份有依据的研究评估', 'An evidence-based research assessment')}</h2><p className="evaluation-caption">{evaluation.provider || '—'} · {evaluation.model || '—'} · {evaluation.rubric_version || '—'}</p></div><span className="evaluation-status-badge" role="status">{c(...statuses[evaluation.status])}</span></header>
+    <header className="evaluation-report-header"><div><span className="research-section-label">EVALUATION REPORT</span><h2>{c('一份有依据的研究评估', 'An evidence-based research assessment')}</h2><p className="evaluation-caption">{evaluation.provider || '—'} · {evaluation.model || '—'} · {evaluation.rubric_version || '—'}</p></div><div className="evaluation-header-controls"><span className={"evaluation-status-badge evaluation-status-" + evaluation.status} role="status"><span className="evaluation-status-dot" aria-hidden />{c(...statuses[evaluation.status])}</span>{action}</div></header>
     <div className="evaluation-report-overview"><aside className="evaluation-total"><span>{c('综合评分', 'Overall score')}</span><div className="evaluation-total-number">{value(scored ? evaluation.overall_score : null)} <small>/ {evaluation.overall_score_max}</small></div><p className="evaluation-caption">{c('直接采用后端加权结果', 'Weighted result from the backend')}</p>
       <p className="evaluation-scope">{scope === 'original_pages' ? c('评估范围：部分原文引用页', 'Scope: some original cited pages') : scope === 'evidence_only' ? c('评估范围：返回的证据摘录', 'Scope: returned evidence excerpts') : c('评估范围：尚未提供', 'Scope: not yet reported')}</p><p className="evaluation-caption">{c('独立模型评审结果，仅供核对参考。', 'Independent model assessment for review and verification.')}</p>
       {evaluation.assessment === 'insufficient_evidence' && <p className="evaluation-status-note">{c('证据不足，无法可靠评分；不代表零分。', 'Insufficient evidence to score reliably; this is not a zero score.')}</p>}
@@ -66,9 +75,6 @@ export function EvaluationReportView({ metrics, version }: { metrics?: TaskMetri
       </> : <p className="evaluation-empty">{c('暂无完整报告。已有评分摘要和执行指标仍可在本页查看。', 'No full report yet. Available summary scores and execution metrics remain visible.')}</p>}
     </section>
     <EvaluationTelemetry metrics={metrics} />
-    <section className="evaluation-report-section"><header><span className="research-section-label">AUDIT & METADATA</span><h3>{c('版本与完整返回数据', 'Version and complete response data')}</h3></header><p className="evaluation-caption">{c('包含状态、配置标记、权重、版本、尝试次数、时间、摘要、用量与所有附加字段。', 'Includes states, configuration flags, weights, versions, attempts, timestamps, digests, usage and all additional fields.')}</p>
-      <details className="evaluation-disclosure"><summary>{c('全部任务指标', 'All task metrics')} · {metrics.schema_version}</summary><EvaluationData value={metrics} /></details>
-      <details className="evaluation-disclosure"><summary>{c('完整评估响应与独立评分模型用量', 'Full evaluation response and independent judge usage')}</summary><EvaluationData value={version} /></details>
-    </section>
+
   </section>;
 }

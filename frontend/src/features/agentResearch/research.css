@@ -2,9 +2,6 @@
 .research-breadcrumb-separator { color: #b4c4be; }
 .research-caption { margin: -12px 0 26px; font-size: 12px; color: var(--muted); line-height: 1.8; }
 .research-result-link { white-space: nowrap; font-size: 13px; }
-.research-comparison-preview-entry { display: flex; justify-content: space-between; align-items: center; gap: 16px; padding: 16px 20px; margin-bottom: 20px; background: var(--soft); border: 1px solid var(--line); border-radius: 6px; }
-.research-comparison-preview-entry strong { font-size: 13px; }
-.research-comparison-preview-entry p { color: var(--muted); font-size: 11px; line-height: 1.6; margin-top: 4px; }
 .research-creation-layout { display: grid; grid-template-columns: minmax(0,1fr) 280px; gap: 32px; align-items: start; }
 .research-section-label { text-transform: uppercase; color: var(--accent); letter-spacing: .08em; font-size: 11px; font-weight: 600; margin-bottom: 12px; }
 .research-question-panel { padding: 28px 30px; }
@@ -90,7 +87,7 @@
 .research-pdf-placeholder p { color: var(--muted); font-size: 12px; line-height: 1.8; }
 @media(max-width:1100px) { .research-creation-layout { grid-template-columns: minmax(0,1fr) 240px; gap: 22px; } .research-submit-panel { padding: 22px; } }
 @media(max-width:900px) { .research-creation-layout { grid-template-columns: minmax(0,1fr); } .research-submit-panel { position: static; } .research-submit-panel > p { display: none; } .research-submit-panel .ant-btn { margin-top: 18px; } }
-@media(max-width:600px) { .research-question-panel,.research-paper-panel { padding: 22px 18px; } .research-result-toolbar { align-items: flex-start; flex-direction: column; } .research-result-tabs .ant-tabs-content-holder { padding: 24px 18px; } .research-result-tabs .ant-tabs-tab { font-size: 13px; } .research-caption { margin-top: 0; } .research-badge { font-size: 10px; } .research-citation-card { padding: 16px; gap: 12px; } .research-unresolved-heading { align-items: flex-start; } .research-unresolved-heading h2 { font-size: 22px; } .research-unresolved-count strong { font-size: 25px; } .research-unresolved li { grid-template-columns: 30px minmax(0,1fr); gap: 10px; padding-block: 16px; } .research-unresolved li p { font-size: 13px; } .research-comparison-preview-entry { align-items: flex-start; flex-direction: column; } }
+@media(max-width:600px) { .research-question-panel,.research-paper-panel { padding: 22px 18px; } .research-result-toolbar { align-items: flex-start; flex-direction: column; } .research-result-tabs .ant-tabs-content-holder { padding: 24px 18px; } .research-result-tabs .ant-tabs-tab { font-size: 13px; } .research-caption { margin-top: 0; } .research-badge { font-size: 10px; } .research-citation-card { padding: 16px; gap: 12px; } .research-unresolved-heading { align-items: flex-start; } .research-unresolved-heading h2 { font-size: 22px; } .research-unresolved-count strong { font-size: 25px; } .research-unresolved li { grid-template-columns: 30px minmax(0,1fr); gap: 10px; padding-block: 16px; } .research-unresolved li p { font-size: 13px; } }
 
 .research-sample-select select { min-width: 205px; background: white; color: var(--ink); border: 1px solid var(--line); border-radius: 4px; padding: 8px 12px; font: inherit; }
 .research-result-tabs > .ant-tabs-nav .ant-tabs-tab { font-size: 16px; padding-block: 18px; }
@@ -170,3 +167,9 @@
 .research-model-status { min-height: 32px; color: var(--muted); font-size: 13px; }
 .research-settings-options { display: flex; margin-top: 24px; padding-top: 20px; border-top: 1px solid var(--line); }
 @media(max-width:600px) { .research-settings-fields, .research-model-row { grid-template-columns: minmax(0, 1fr); } }
+
+.research-sources-heading { margin-bottom: 22px; }
+.research-sources-heading .research-section-label { display: block; margin-bottom: 4px; }
+.research-sources-view .research-sources-heading h2 { font: 600 25px/1.5 var(--serif); margin: 0; }
+.research-sources-heading p { color: var(--muted); font-size: 12px; line-height: 1.8; margin-top: 5px; }
+@media(max-width:600px) { .research-sources-view .research-sources-heading h2 { font-size: 22px; } }

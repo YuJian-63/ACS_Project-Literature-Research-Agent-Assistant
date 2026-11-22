@@ -14,7 +14,6 @@ const PapersPage = lazy(() => import('../features/papers/pages/PapersPage'));
 const SearchPapersPage = lazy(() => import('../features/search/pages/SearchPapersPage'));
 const NewResearchPage = lazy(() => import('../features/agentResearch/NewResearchPage'));
 const AgentResultPage = lazy(() => import('../features/agentResearch/ResultPage'));
-const ComparisonPreviewPage = lazy(() => import('../features/agentResearch/ComparisonPreviewPage'));
 const TasksPage = lazy(() => import('../features/agentResearch/RecordsPage'));
 
 function AppFailure() {
@@ -68,7 +67,6 @@ function Workspace() {
         <Route path="/papers" element={<PapersPage />} />
         <Route path="/papers/search" element={null} />
         <Route path="/tasks" element={<TasksPage />} />
-        {import.meta.env.DEV && <Route path="/tasks/preview-comparison" element={<ComparisonPreviewPage />} />}
         <Route path="/tasks/new" element={<NewResearchPage />} />
         <Route path="/tasks/preview" element={<Navigate to="/tasks" replace />} />
         <Route path="/tasks/:taskId" element={<AgentResultPage />} />
