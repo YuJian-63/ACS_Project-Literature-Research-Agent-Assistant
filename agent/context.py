@@ -11,7 +11,13 @@ import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
 
-from langchain_core.messages import AIMessage, BaseMessage, ToolMessage, convert_to_openai_messages
+from langchain_core.messages import (
+    AIMessage,
+    BaseMessage,
+    ToolCall,
+    ToolMessage,
+    convert_to_openai_messages,
+)
 
 DEFAULT_FINALIZE_RATIO = 0.9
 _PAPER_TOOLS = {"open_paper", "read_paper", "retrieve", "summarize_paper", "search_papers"}
@@ -83,14 +89,14 @@ def prepare_context(
     return PreparedContext(messages, tokens, method)
 
 
-def _tool_observations(messages: list[BaseMessage]) -> tuple[int, list[tuple[int, str, dict]]]:
+def _tool_observations(messages: list[BaseMessage]) -> tuple[int, list[tuple[int, ToolCall, dict]]]:
     """Decode known observations only from completely answered tool-call batches."""
     through = 0
     observations = []
     for start, request in enumerate(messages):
         if not isinstance(request, AIMessage) or not request.tool_calls:
             continue
-        calls = {call["id"]: call["name"] for call in request.tool_calls}
+        calls = {call["id"]: call for call in request.tool_calls}
         end = start + 1 + len(request.tool_calls)
         replies = messages[start + 1 : end]
         if (
@@ -103,22 +109,74 @@ def _tool_observations(messages: list[BaseMessage]) -> tuple[int, list[tuple[int
             continue
         through = end
         for index, reply in enumerate(replies, start + 1):
-            name = calls[reply.tool_call_id]
-            if name not in _PAPER_TOOLS or not isinstance(reply.content, str):
+            call = calls[reply.tool_call_id]
+            if call["name"] not in _PAPER_TOOLS or not isinstance(reply.content, str):
                 continue
             try:
                 data = json.loads(reply.content)
             except ValueError:
                 continue
             if isinstance(data, dict) and "error" not in data:
-                observations.append((index, name, data))
+                observations.append((index, call, data))
     return through, observations
 
 
-def _compact_observations(observations: list[tuple[int, str, dict]]) -> tuple[dict, dict]:
+def prepare_final_context(
+    prepared: PreparedContext, instruction: BaseMessage, window: int, max_output_tokens: int
+) -> PreparedContext:
+    """Fit one tool-free answer using only the already prepared conversation."""
+    counter = TokenCounter()
+    messages = prepared.messages
+    view = [*messages, instruction]
+    budget = window - max_output_tokens
+    tokens = prepared.input_tokens_estimate + counter.estimate([instruction], [])[0]
+    if tokens <= budget:
+        return PreparedContext(view, tokens, "finalize_conservative_estimate")
+
+    tokens, method = counter.estimate(view, [])
+    if tokens <= budget:
+        return PreparedContext(view, tokens, method)
+
+    # Keep the original instructions and question. Replace tool conversations
+    # with complete, citeable evidence from the prepared view, newest batch first.
+    view = [message for message in messages if message.type in {"system", "human"}]
+    base_tokens, _ = counter.estimate([*view, instruction], [])
+    remaining = budget - base_tokens
+    _, observations = _tool_observations(messages)
+    pairs = []
+    for index, call, data in reversed(observations):
+        if call["name"] not in {"read_paper", "retrieve", "summarize_paper"}:
+            continue
+        field = "summaries" if call["name"] == "summarize_paper" else "chunks"
+        items = data.get(field)
+        if not isinstance(items, list):
+            continue
+        request = AIMessage(content="", tool_calls=[call])
+        selected = []
+        pair = None
+        for item in items:
+            if not isinstance(item, dict) or not (item.get("source_text") or item.get("summary")):
+                continue
+            content = json.dumps({field: [*selected, item]}, ensure_ascii=False)
+            reply = messages[index].model_copy(update={"content": content})
+            cost, _ = counter.estimate([request, reply], [])
+            if cost <= remaining:
+                selected.append(item)
+                pair = (request, reply, cost)
+        if pair:
+            pairs.append(pair)
+            remaining -= pair[2]
+    for request, reply, _ in reversed(pairs):
+        view.extend([request, reply])
+    view.append(instruction)
+    tokens, method = counter.estimate(view, [])
+    return PreparedContext(view, tokens, method)
+
+
+def _compact_observations(observations: list[tuple[int, ToolCall, dict]]) -> tuple[dict, dict]:
     selected = set()
-    for _, name, data in observations:
-        if name == "search_papers":
+    for _, call, data in observations:
+        if call["name"] == "search_papers":
             continue
         sources = data.get("source_ids", [data.get("source_id")])
         if isinstance(sources, list):
@@ -132,7 +190,8 @@ def _compact_observations(observations: list[tuple[int, str, dict]]) -> tuple[di
     counts = {"duplicate_chunks": 0, "shortened_receipts": 0, "removed_snippets": 0}
     originals = set()
     visible_ids = set()
-    for index, name, data in observations:
+    for index, call, data in observations:
+        name = call["name"]
         changed = False
         chunks = data.get("chunks")
         if name in {"read_paper", "retrieve"} and isinstance(chunks, list):

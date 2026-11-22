@@ -32,7 +32,7 @@ Agent 优先使用任务 `sources` 中的论文。需要补充论文且 `allow_s
 
 打开、阅读与摘要复用本次运行中已解析的论文。打开论文只返回导航信息，原文证据在读取或成功摘要后登记。arXiv PDF 缓存在本地，库内 PDF 通过当前用户的令牌下载到临时目录。启用持久化时，解析后的论文及结果保存到数据库。原文与摘要分别去重，摘要后可再读取原文核实。
 
-主模型调用前按 `context_policy` 准备输入视图。两版默认使用 `full`，可切换为 `compact`。估算输入加本次输出额度达到窗口的 `context_finalize_ratio`（默认 `0.9`）时，`compact` 先用程序精简工具回包。准备后仍有压力且能放入窗口时，主 agent 追加作答指令，经容量检查后做一次无工具收尾。保存的历史、原文证据和工具记录保留。分块摘要独立准备完整输入。
+主模型调用前按 `context_policy` 准备输入视图。两版默认使用 `full`，可切换为 `compact`。估算输入加本次输出额度达到窗口的 `context_finalize_ratio`（默认 `0.9`）时，`compact` 先用程序精简工具回包。准备后仍达到阈值即进入一次无工具收尾。超窗时按无工具请求重估，必要时保留任务和可容纳的证据，再检查最终请求容量。保存的历史、原文证据和工具记录保留。分块摘要独立准备完整输入。
 
 ## Extensions
 
@@ -68,7 +68,7 @@ DeepSeek Harness 的待办工具让模型在简单单步任务上跳过清单，
 
 整任务限制为最大主 agent 轮数与时间，默认分别为 40 轮和 600 秒；自然最终回答和压力收尾都占一轮，摘要调用另计入模型用量。到限直接停止并保存 `stop_reason`、证据和 trace；不因最后一轮、剩余时间或无进展提前收尾。时间在调用前后检查，并限制单次请求超时。
 
-运行参数 `context_window` 默认 `32000`，不是任务字段；每次调用的估算输入加本次输出额度超过窗口时，记录 `kind="context"` 并停止为 `context_limit`，不增加实际模型调用数或主 agent 轮数。Python 传 `context_window=None` 关闭本地上限及压力收尾；仅禁用收尾可传 `context_finalize_ratio=None`。服务端容量错误仍记录 `context_limit`。本地计数先按字符、消息包装和工具定义估算，后续在历史前缀及工具定义匹配时，以 API 输入用量校准并估算新增内容；主 agent 与摘要分别计数。该估算不等于服务端 tokenizer，不补入 API usage。
+运行参数 `context_window` 默认 `32000`，不是任务字段；最终待发请求的估算输入加本次输出额度超过窗口时，记录 `kind="context"` 并停止为 `context_limit`，不增加实际模型调用数或主 agent 轮数。Python 传 `context_window=None` 关闭本地上限及压力收尾；仅禁用收尾可传 `context_finalize_ratio=None`。服务端容量错误仍记录 `context_limit`。本地计数先按字符、消息包装和工具定义估算，后续在历史前缀及工具定义匹配时，以 API 输入用量校准并估算新增内容；主 agent 与摘要分别计数。该估算不等于服务端 tokenizer，不补入 API usage。
 
 收尾触发记录为 `kind="context", action="finalize", reason="context_pressure"`，实际模型调用为 `purpose="finalize"` 并计入主 agent 轮数和模型成本。触发原因与最终结果分开：收尾回答仍经原有解析、引用与未解决项检查，可能为 `completed`、`partial` 或错误状态。
 

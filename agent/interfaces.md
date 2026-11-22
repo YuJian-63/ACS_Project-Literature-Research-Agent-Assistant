@@ -31,7 +31,7 @@ Extension 另接受布尔运行参数 `planner=False`。通过 `planner=True` �
 
 同一入口接受独立布尔参数 `reflection=False`，对应 CLI 开关 `--reflection`。结果在 `configuration.reflection` 记录开关。自然交稿后，`kind="reflection"` 记录核对结果，`purpose="reflection"` 标记核对调用，`purpose="reflection_revision"` 标记一次补证后的无工具修订。两者均计入 `usage.model_calls` 和 API 用量，补证计入 `usage.tool_calls`。压力收尾跳过 Reflection。
 
-主 agent 默认使用完整历史。`compact` 在估算输入加输出额度达到阈值时精简工具回包，再估算模型输入。准备后仍达到阈值且未超硬窗口时，追加一次无工具作答指令，经容量检查后收尾。准备后的输入超限则返回 `context_limit`，服务端容量错误也保留该状态。摘要使用完整输入，独立做容量检查。Python 传 `context_finalize_ratio=None` 禁用收尾，使 `compact` 仅在达到硬窗口时触发。传 `context_window=None` 则关闭本地容量触发。
+主 agent 默认使用完整历史。`compact` 在估算输入加输出额度达到阈值时精简工具回包，再估算模型输入。准备后只要达到阈值就进入无工具收尾。超窗时按无工具请求重估，必要时仅保留指令、任务及可容纳的论文证据。最小收尾请求仍超窗或服务端报告容量错误时返回 `context_limit`。摘要使用完整输入，独立做容量检查。Python 传 `context_finalize_ratio=None` 禁用收尾，使 `compact` 仅在达到硬窗口时触发。传 `context_window=None` 则关闭本地容量触发。
 
 首次按 ASCII 字符数 / 4、非 ASCII 字符数 × 2 估算，计入消息包装和工具定义。后续历史前缀及工具定义匹配时，用 API `input_tokens` 校准并估算新增内容。主 agent 与摘要各自维护锚点。TACC 的实际窗口、tokenizer 与消息模板待对齐。累计 token 仅记录 API usage，不参与循环控制。
 

@@ -48,9 +48,9 @@ Agent 支持可选的 Neon 持久化：`persist=false`（默认）不写入数�
 - 达到轮数或时间上限直接停止，不追加最终回答调用。最后一轮若仍请求工具，该轮工具不会执行。
 - 时间限制通过调用前后检查及收紧单次请求超时实现，不是到点强杀。`timeout_seconds=null` 不取消各适配器的单次请求超时。
 - 摘要内部每次模型调用的输出上限为 `min(1200, max_output_tokens)`。
-- 当前不设置独立的工具调用次数上限或累计 token 预算。运行参数 `context_window` 默认 `32000`。主模型和摘要调用前，准备后的输入估算加本次输出额度超过窗口则停止为 `context_limit`。服务端可识别的容量错误也记录为 `context_limit`。
-- 主 agent 默认使用完整历史。选择 `compact` 时，估算输入加本次输出额度达到窗口的 `context_finalize_ratio`（默认 `0.9`）就用程序精简工具回包并重估。两种策略都按准备后的视图决定后续动作。仍达到阈值且能放入硬窗口时，追加作答指令，再检查容量，调用一次无工具收尾。
-- 收尾只由上下文压力触发。准备后仍超硬窗口则停止。精简与本地容量拦截均不增加 `usage.model_calls/agent_steps`，实际收尾调用计入两项及 API 用量。分块摘要独立使用完整输入并做容量检查。
+- 当前不设置独立的工具调用次数上限或累计 token 预算。运行参数 `context_window` 默认 `32000`。实际待发请求的输入估算加本次输出额度超过窗口则停止为 `context_limit`。服务端可识别的容量错误也记录为 `context_limit`。
+- 主 agent 默认使用完整历史。选择 `compact` 时，估算输入加本次输出额度达到窗口的 `context_finalize_ratio`（默认 `0.9`）就用程序精简工具回包并重估。两种策略都按准备后的视图决定后续动作。达到阈值即进入一次无工具收尾，包括直接超过硬窗口的情况。
+- 收尾只由上下文压力触发。最小收尾请求仍超硬窗口则停止。精简与本地容量拦截均不增加 `usage.model_calls/agent_steps`，实际收尾调用计入两项及 API 用量。分块摘要独立使用完整输入并做容量检查。
 
 最小输入：
 
@@ -242,12 +242,12 @@ Agent 支持可选的 Neon 持久化：`persist=false`（默认）不写入数�
 - 分块摘要调用的 human message 只包含原始 `question` 和本批 `chunks`。
 - 收尾复用主循环已准备的输入视图，再追加基于已有证据作答的指令，不重新运行自定义 `context_policy`，不提供工具。
 - `output_limit` 是本次模型调用配置的最大输出 token 数；`response.usage_metadata` 是本次 API 返回的用量，可能缺失。
-- `context` 包含运行窗口 `window`（可为 `null`）、本次估算输入 `input_tokens_estimate` 和计数方式 `count_method`。普通调用为 `heuristic` 或 `usage_anchored_estimate`，收尾为 `finalize_conservative_estimate`，均不是精确 tokenizer 计数。
+- `context` 包含运行窗口 `window`（可为 `null`）、本次估算输入 `input_tokens_estimate` 和计数方式 `count_method`。普通调用为 `heuristic` 或 `usage_anchored_estimate`，收尾为 `finalize_conservative_estimate` 或 `heuristic`，均不是精确 tokenizer 计数。
 - 模型调用失败时，保留 `kind`、`purpose`、`output_limit`、`context`、`messages` 和 `elapsed_seconds`，以 `error` 记录异常类型，不包含 `response`。
 
 字符估算覆盖模型可见的消息字段和工具定义，按 ASCII 字符数 / 4 加非 ASCII 字符数 × 2 计算，另计消息包装。历史前缀、工具定义均匹配时，沿用 API 的 `input_tokens`，只估新增消息。改写前缀或更换工具后，全量重估并记录为 `heuristic`。主 agent 与摘要分别维护计数锚点。估算用于本地容量检查，累计用量取自 API。TACC 的实际窗口和 tokenizer 仍待对齐。
 
-收尾不对完整输入重新计数：沿用主循环准备后的输入估算，加新增作答指令估算，并保留原工具定义的估算额度；实际模型请求不带工具。`finalize_conservative_estimate` 表示这种保守计算方式，不保证数学上界，不补入 API usage。调用前仍检查该估算加输出额度是否超过硬窗口。
+收尾先沿用准备后的估算并计入作答指令（`finalize_conservative_estimate`）。若超窗，按实际无工具输入重估（`heuristic`）。若仍超窗，保留系统指令、用户任务与输出额度，从最近的工具结果选入放得下的完整原文块和摘要。模型 trace 记录实际发送的消息。
 
 `kind="context"` 记录以下控制事件。
 
@@ -312,7 +312,7 @@ Agent 支持可选的 Neon 持久化：`persist=false`（默认）不写入数�
 
 - 以 `stop_reason` 判断研究任务结果；函数正常返回不等于任务完成。`completed` 不代表已自动评估内容准确性或覆盖完整性。
 - `completed` 和 `partial` 可作为正常结果展示；其他状态应同时展示停止原因和未解决项，不能仅凭 `answer` 是否非空判断成功。
-- 达到硬执行上限或运行失败时不补最终答案；上下文压力收尾只在尚未超过硬窗口时触发，仍须通过轮数、时间和最终请求容量检查。已有来源、trace 和错误记录保留；最终未引用的证据不会额外填入 `citations`，阅读原文等可从 trace 查看。
+- 达到硬执行上限或运行失败时不补最终答案；上下文压力收尾须通过轮数、时间和最终请求容量检查。已有来源、trace 和错误记录保留；最终未引用的证据不会额外填入 `citations`，阅读原文等可从 trace 查看。
 - `errors` 可能包含已恢复的工具错误，非空不一定表示最终失败。未知工具、禁用工具或无效参数通常返回工具错误供模型继续处理，不直接设置 `invalid_tool_call`。
 - 摘要输出截断或引用无效通常作为工具错误返回；主模型输出截断才直接设置 `output_truncated`。摘要内部模型调用失败可能直接终止任务。
 - 输入校验失败直接抛出 `ValidationError`。非法来源标识或非法上下文运行参数可能直接抛出 `ValueError`。调用方需捕获异常并映射为自己的错误响应。

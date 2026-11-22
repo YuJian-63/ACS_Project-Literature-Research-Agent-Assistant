@@ -238,8 +238,8 @@ def test_full_default_and_explicit_modes_leave_the_normal_request_unchanged(runn
     assert requests[0] == requests[1] == requests[2]
 
 
-@pytest.mark.parametrize("over_hard_limit", [True, False], ids=["stop", "finalize"])
-def test_compact_without_reclaimable_content_falls_back_to_existing_exit(over_hard_limit):
+@pytest.mark.parametrize("over_hard_limit", [True, False], ids=["above_window", "near_window"])
+def test_compact_without_reclaimable_content_finalizes(over_hard_limit):
     text = "A necessary experimental condition. " * 480
 
     def reader(source, **kwargs):
@@ -270,12 +270,11 @@ def test_compact_without_reclaimable_content_falls_back_to_existing_exit(over_ha
     result, model = run("compact", window)
     events = [t for t in result.trace if t.get("action") == "compact"]
     assert len(events) == 1 and events[0]["outcome"] == "no_gain"
-    assert result.stop_reason == ("context_limit" if over_hard_limit else "completed")
-    assert len(model.inputs) == (1 if over_hard_limit else 2)
-    if not over_hard_limit:
-        assert result.trace[-1]["purpose"] == "finalize"
-        assert not model.invocations[-1]["bound"]
-        assert result.citations[0].source_text == text
+    assert result.stop_reason == "completed"
+    assert len(model.inputs) == 2
+    assert result.trace[-1]["purpose"] == "finalize"
+    assert not model.invocations[-1]["bound"]
+    assert result.citations[0].source_text == text
 
 
 def test_compaction_rescues_a_hard_overflow_without_an_extra_model_call(tmp_path):

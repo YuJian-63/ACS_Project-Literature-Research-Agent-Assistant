@@ -80,15 +80,15 @@ Extension 的 `retrieve(source, query, top_k=3)` 接受单个论文标识或非�
 
 模型请求工具时继续循环，返回最终 JSON 时结束。到达轮数或时间上限直接记录 `step_limit` / `time_limit`，保留证据与 trace，不追加收尾调用。时间在调用前后检查，并收紧单次请求超时；它不是到点强杀。Token 用量只按 API usage 记录，不设累计额度。
 
-每次主模型或摘要调用前，检查准备后的输入估算加本次输出额度是否超过 `context_window`。超过则直接停止为 `context_limit`。窗口默认 `32000`，CLI 通过 `--context-window` 配置，Python 可传 `run_task(..., context_window=None)` 关闭本地上限。这是运行参数，不放入任务 JSON。服务端报告上下文超限时也记录 `context_limit`。
+每次调用前，检查实际待发请求的估算输入加预留输出是否超过 `context_window`。容量检查失败会记录 `context_limit`。窗口默认 `32000`，CLI 通过 `--context-window` 配置，Python 可传 `run_task(..., context_window=None)` 关闭本地上限。这是运行参数，不放入任务 JSON。服务端报告上下文超限时也记录 `context_limit`。
 
 两版均可用 `--context-policy full|compact` 或 Python 的 `context_policy` 选择主 agent 的输入视图。默认 `full` 保留完整历史。`compact` 在估算输入加输出额度达到窗口的 90% 时，以程序精简重复的原文块、已有选文的搜索回包及空读记录。每个唯一原文块保留一份完整文本，工具调用与返回保持配对。原始历史和工具 trace 保留，精简不调用模型。分块摘要始终使用完整输入。[策略实现](context.py)
 
-用 `--context-finalize-ratio` 调整同一个压力阈值。准备后的输入加输出额度仍达到阈值且在硬窗口内时，主 agent 追加一次无工具作答指令，检查容量后收尾。若仍超硬窗口，返回 `context_limit`。Python 传 `context_finalize_ratio=None` 关闭压力收尾，此时 `compact` 仅在达到硬窗口时尝试精简。传 `context_window=None` 则关闭本地容量触发。
+用 `--context-finalize-ratio` 调整同一个压力阈值。准备后的输入加输出额度达到或超过阈值即进入一次无工具收尾，包括单轮越过硬窗口的情况。Python 传 `context_finalize_ratio=None` 关闭压力收尾，此时 `compact` 仅在达到硬窗口时尝试精简。传 `context_window=None` 则关闭本地容量触发。
 
 首次计数按字符、消息包装和工具定义估算。历史前缀和工具定义匹配时，用 API `input_tokens` 校准并估算新增内容。改写历史可能使估算回退到字符法。主 agent 与摘要分别维护计数锚点，实际 TACC 容量与 tokenizer 待对齐。
 
-收尾沿用准备后的输入估算，再加新增作答指令估算；虽然实际请求不带工具，估算保留原工具定义额度，记录为 `finalize_conservative_estimate`。这是保守估算方式，不保证数学上界，也不作为 API 用量。
+收尾先沿用准备后的估算并计入作答指令（`finalize_conservative_estimate`）。若超窗，按无工具请求重新估算（`heuristic`）。若仍超窗，保留系统指令、用户任务与输出额度，优先从最近的工具结果选入放得下的完整原文块和摘要。最小请求仍超窗时返回 `context_limit`。
 
 `usage.agent_steps` 记录主 agent 轮数，`usage.model_calls` 包含摘要调用；收尾计入两项及 API 用量，本地容量拦截不增加这两项。触发 trace 为 `kind="context", action="finalize", reason="context_pressure"`，实际收尾调用为 `purpose="finalize"`；最终 `stop_reason` 仍由回答解析、引用校验或执行错误决定。缺失的 API token 统计保留为空，不用估算补齐。原文和摘要分别按 chunk 去重，摘要后仍可读取原文核实。摘要工具的现有行为保留，后续单独评估。
 

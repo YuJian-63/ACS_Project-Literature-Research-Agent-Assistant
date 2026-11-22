@@ -29,6 +29,7 @@ from context import (
     PreparedContext,
     TokenCounter,
     prepare_context,
+    prepare_final_context,
     resolve_context_policy,
 )
 from schemas import Evidence, Task, TaskResult, Usage
@@ -497,18 +498,9 @@ Return the final JSON object with answer, comparison_table and unresolved."""
 
 
 def finalize(model, prepared: PreparedContext, log: RunLog, *, max_tokens: int):
-    """Make one no-tools answer call from the workflow's prepared view.
-
-    Keep the input estimate's calibration, add the new instruction, and retain
-    the old tool-schema allowance conservatively. This is not provider usage.
-    The caller chooses when to finalize and validates the returned answer.
-    """
-    instruction = HumanMessage(content=FINALIZE_INSTRUCTION)
-    extra_tokens, _ = TokenCounter().estimate([instruction], [])
-    final_context = PreparedContext(
-        messages=[*prepared.messages, instruction],
-        input_tokens_estimate=prepared.input_tokens_estimate + extra_tokens,
-        count_method="finalize_conservative_estimate",
+    """Make one no-tools answer call from the workflow's prepared view."""
+    final_context = prepare_final_context(
+        prepared, HumanMessage(content=FINALIZE_INSTRUCTION), log.context_window, max_tokens
     )
     return invoke_model(
         model,
@@ -622,7 +614,7 @@ def agent_node(state: GraphState, *, model, context: PaperContext) -> dict:
         if (
             log.context_window is not None
             and log.context_finalize_ratio is not None
-            and log.context_window * log.context_finalize_ratio <= required <= log.context_window
+            and required >= log.context_window * log.context_finalize_ratio
         ):
             finalizing = True
             log.trace.append(

@@ -7,6 +7,7 @@ import pytest
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 from test_baseline import CHUNK, ScriptedModel, call, final, message, paper
 
+import extension
 from baseline import SUMMARY_SYSTEM, run_task
 from context import PreparedContext, TokenCounter
 from schemas import Task
@@ -41,7 +42,9 @@ def triggers(result):
     return [entry for entry in result.trace if entry.get("action") == "finalize"]
 
 
-@pytest.mark.parametrize("estimate,finalizing", [(8899, False), (8900, True)])
+@pytest.mark.parametrize(
+    "estimate,finalizing", [(8899, False), (8900, True), (9900, True), (9901, True)]
+)
 def test_soft_boundary_reserves_output_and_finalizes_without_tools(estimate, finalizing):
     result, model, histories = execute(
         [message(calls=[call(call_id="read_original")]), final()],
@@ -71,18 +74,6 @@ def test_soft_boundary_reserves_output_and_finalizes_without_tools(estimate, fin
         assert triggers(result)[0]["kind"] == "context"
         assert triggers(result)[0]["reason"] == "context_pressure"
         assert model.inputs[-1][:-1] == histories[-1]
-
-
-def test_hard_overflow_stops_before_attempting_finalization():
-    result, model, _ = execute([message(calls=[call()]), final()], estimate=9901)
-
-    assert result.stop_reason == "context_limit"
-    assert result.usage.agent_steps == result.usage.model_calls == len(model.inputs) == 1
-    assert result.usage.tool_calls == 1
-    assert not triggers(result)
-    assert not result.answer
-    assert result.trace[-1]["kind"] == "context"
-    assert result.trace[-1]["purpose"] == "agent"
 
 
 @pytest.mark.parametrize("options", [{"context_finalize_ratio": None}, {"context_window": None}])
@@ -123,49 +114,64 @@ def test_invalid_ratio_is_rejected_before_model_setup(ratio):
     assert model.inputs == []
 
 
-def test_ratio_one_accepts_configuration_but_still_checks_the_final_request():
+def test_ratio_one_finalizes_at_the_hard_limit():
     result, model, _ = execute(
         [message(calls=[call()]), final()], estimate=9900, context_finalize_ratio=1
     )
 
+    assert result.stop_reason == "completed"
+    assert len(triggers(result)) == 1
+    assert not model.invocations[-1]["bound"]
+    entry = result.trace[-1]
+    assert (
+        entry["context"]["input_tokens_estimate"]
+        == TokenCounter().estimate(model.inputs[-1], [])[0]
+    )
+    assert entry["context"]["input_tokens_estimate"] + entry["output_limit"] <= 10000
+
+
+@pytest.mark.parametrize("runner", [run_task, extension.run_task], ids=["baseline", "extension"])
+def test_overflow_fits_complete_evidence_and_preserves_the_original_trace(runner):
+    large_text = "An oversized passage. " * 800
+
+    def reader(source, **kwargs):
+        parsed = paper(source, page_count=2)
+        parsed["chunks"][1]["source_text"] = parsed["pages"][1]["text"] = large_text
+        return parsed
+
+    read = call(source="1706.03762v7", page_start=1, page_end=2)
+    model = ScriptedModel([message(calls=[read]), final()])
+    result = runner(
+        Task(question="What does the paper say?", sources=["1706.03762v7"], max_output_tokens=100),
+        reader=reader,
+        model_factory=model.factory,
+        context_window=2500,
+    )
+
+    assert result.stop_reason == "completed"
+    assert len(triggers(result)) == 1
+    assert triggers(result)[0]["context"]["input_tokens_estimate"] > 2500
+    assert model.inputs[-1][:2] == model.inputs[0][:2]
+    assert CHUNK in str(model.inputs[-1]) and "Original evidence on page 1." in str(
+        model.inputs[-1]
+    )
+    request, reply = model.inputs[-1][2:4]
+    assert [c["id"] for c in request.tool_calls] == [read["id"]]
+    assert isinstance(reply, ToolMessage) and reply.tool_call_id == read["id"]
+    assert large_text not in str(model.inputs[-1])
+    read_result = next(entry["observation"] for entry in result.trace if entry["kind"] == "tool")
+    assert read_result["chunks"][1]["source_text"] == large_text
+    assert TokenCounter().estimate(model.inputs[-1], [])[0] + 100 <= 2500
+    assert result.usage.model_calls == 2 and not model.invocations[-1]["bound"]
+
+
+def test_unfit_task_and_output_reserve_still_stop_before_model_call():
+    result, model, _ = execute([], context_window=100)
+
     assert result.stop_reason == "context_limit"
-    assert result.configuration["context_finalize_ratio"] == 1
     assert len(triggers(result)) == 1
-    assert len(model.inputs) == result.usage.model_calls == result.usage.agent_steps == 1
     assert result.trace[-1]["purpose"] == "finalize"
-    assert result.trace[-1]["kind"] == "context"
-
-
-@pytest.mark.parametrize("instruction_tokens,expected_calls", [(1000, 2), (1001, 1)])
-def test_finalization_checks_added_instruction_and_output_reserve(
-    monkeypatch, instruction_tokens, expected_calls
-):
-    estimates = []
-
-    def estimate(self, messages, tools):
-        estimates.append((deepcopy(messages), deepcopy(tools)))
-        return instruction_tokens, "heuristic"
-
-    monkeypatch.setattr(TokenCounter, "estimate", estimate)
-    result, model, histories = execute([message(calls=[call()]), final()])
-
-    assert len(histories) == 2
-    assert estimates
-    assert all(len(messages) == 1 and tools == [] for messages, tools in estimates)
-    assert len(triggers(result)) == 1
-    assert result.usage.agent_steps == result.usage.model_calls == expected_calls
-    assert len(model.inputs) == expected_calls
-    assert result.usage.tool_calls == 1
-    assert result.trace[-1]["purpose"] == "finalize"
-    assert result.trace[-1]["context"]["input_tokens_estimate"] == 8900 + instruction_tokens
-    if expected_calls == 1:
-        assert result.stop_reason == "context_limit"
-        assert result.trace[-1]["kind"] == "context"
-        assert not result.answer
-    else:
-        assert result.stop_reason == "completed"
-        assert result.trace[-1]["kind"] == "model"
-        assert model.inputs[-1][:-1] == histories[-1]
+    assert result.usage.model_calls == len(model.inputs) == 0
 
 
 def test_finalization_uses_prepared_view_once_without_restoring_full_history():
