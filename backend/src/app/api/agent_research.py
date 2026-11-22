@@ -14,7 +14,7 @@ from app.auth.dependencies import require_user
 from app.db.models import AgentRun, Task, User
 from app.errors import APIError
 from app.tasks.service import ensure_task_deletable
-from app.tasks.unified import get_research, research_filters, research_references, submit_research
+from app.tasks.unified import get_research, history_papers, research_filters, research_references, submit_research
 
 router = APIRouter(prefix="/api/v1/agent-research")
 CurrentUser = Annotated[User, Depends(require_user)]
@@ -43,8 +43,9 @@ def list_records(request: Request, user: CurrentUser, limit: Limit = 20, offset:
         rows = list(session.scalars(select(Task).where(*conditions)
             .order_by(Task.created_at.desc(), Task.id.desc()).offset(offset).limit(limit)))
         references = research_references(session, [task.id for task in rows], user.id)
+        papers = history_papers(session, references, user.id)
         return {"items": [{"id": task.id, "question": task.question, "status": task.status,
-            "paper_ids": [paper["id"] for paper in references[task.id]], "papers": references[task.id],
+            "paper_ids": [paper["id"] for paper in references[task.id]], "papers": papers[task.id],
             "created_at": task.created_at} for task in rows], "total": total, "limit": limit, "offset": offset}
 
 

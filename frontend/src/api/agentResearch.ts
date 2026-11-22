@@ -24,7 +24,7 @@ export interface AgentResearchSummary {
   id: string;
   question: string;
   paper_ids: string[];
-  papers: { id: string; title: string }[];
+  papers: ({ id: string; title: string } | (AgentSource & { id: null }))[];
   status: TaskStatus;
   created_at: string;
 }

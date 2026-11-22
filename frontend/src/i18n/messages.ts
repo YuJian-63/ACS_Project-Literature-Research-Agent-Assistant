@@ -12,6 +12,7 @@ export const english: Record<string, string> = {
   'Agent 数据库写入失败': 'Agent database write failed',
   '导入论文后阅读': 'Import paper before reading',
   '导入并阅读': 'Import and read',
+  '导入并阅读《{0}》': 'Import and read “{0}”',
   '重试导入': 'Retry import',
   '重新检查': 'Check again',
   '停止等待': 'Stop waiting',

@@ -47,11 +47,20 @@ class ResearchPaperReference(BaseModel):
     title: str
 
 
+class ExternalResearchPaper(BaseModel):
+    id: None
+    title: str
+    source_id: str
+    paper_id: str
+    url: str
+    version: str | int | None = None
+
+
 class AgentResearchSummary(BaseModel):
     id: UUID
     question: str
     paper_ids: list[UUID]
-    papers: list[ResearchPaperReference]
+    papers: list[ResearchPaperReference | ExternalResearchPaper]
     status: TaskStatus
     created_at: datetime
 

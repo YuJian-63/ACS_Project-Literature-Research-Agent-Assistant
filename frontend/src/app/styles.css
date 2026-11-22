@@ -2189,6 +2189,8 @@ main {
 
 .task-paper-links { display: flex; flex-direction: column; gap: 8px; min-width: 180px; }
 .task-paper-links a { white-space: normal; overflow-wrap: anywhere; line-height: 1.6; }
+.task-paper-import { display: flex; align-items: baseline; gap: 6px; color: #696969; overflow-wrap: anywhere; }
+.task-paper-import .ant-btn { flex-shrink: 0; }
 
 .research-records-table .ant-table-cell { vertical-align: middle; }
 .research-records-table .ant-table-thead > tr > th { text-align: center; }

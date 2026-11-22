@@ -9,7 +9,7 @@ from app.agent_bridge.contracts import AgentResult, DispatchManifest, ResultEnve
 ARXIV_SOURCE = re.compile(
     r"arxiv:(?P<base>(?:\d{2}(?:0[1-9]|1[0-2])\.\d{4,5}|"
     r"[A-Za-z][A-Za-z.-]*/\d{2}(?:0[1-9]|1[0-2])\d{3}))"
-    r"(?:(?P<version>v[1-9]\d*)|@[0-9a-f]{12})"
+    r"(?:(?P<version>v[1-9]\d*)|@(?P<sha>[0-9a-f]{12}))"
 )
 LIBRARY_SOURCE = re.compile(
     r"local:(?P<paper>[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12})@(?P<sha>[0-9a-f]{64})"

@@ -55,6 +55,8 @@
 
 `paper_ids` 始终表示提交时的预选论文。第一次请求可以为空；运行中发现的论文出现在 `result.sources`。后端按用户归属、UUID、SHA-256、论文数量以及所引物理页校验库内检索结果，再保存任务关联。
 
+研究记录列表的 `papers` 包含预选论文、库内检索后使用的论文和本次研究打开的 arXiv 来源，篇数取 `papers.length`。已入库的论文按本地 UUID 去重，标题链接直接打开 PDF。未入库的来源返回 `id: null` 以及原始来源标识、版本和标题，网页显示灰色标题及下载按钮，复用引用的「导入并阅读」弹窗。导入匹配版本后，再次读取列表即返回本地 UUID。
+
 `result` 在交付前为 `null`。交付后包含 `answer`、`comparison_table`、`sources`、`citations`、`trace`、`usage`、`errors`、`configuration`、`stop_reason` 和 `unresolved`。`completed` 和 `partial` 对应 `status=succeeded`，部分完成时应同时展示未解决项。失败时查看 `error`；如 Agent 已交付失败结果，仍可读取 `result`。
 
 库内引用使用 `local:<paper_uuid>@<sha256>` 的来源标识和从 1 开始的物理页码。网页按论文 UUID 打开原件对应页。外部 arXiv 来源保留其标识与版本；用户确认导入该版本并完成解析后，网页使用本地论文 UUID 打开引用。[研究请求与响应模型](../backend/src/app/api/agent_research_schemas.py) · [结果校验](../backend/src/app/agent_bridge/results.py)
