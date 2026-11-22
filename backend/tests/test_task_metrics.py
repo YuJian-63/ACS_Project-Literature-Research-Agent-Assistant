@@ -50,6 +50,19 @@ class TelemetryTests(unittest.TestCase):
         self.assertEqual(capture["tokens_per_second"], 80)
         self.assertIn("server_output_tokens_per_second", capture["sources"]["tokens_per_second"])
 
+    def test_native_mean_itl_supplies_missing_tpot_before_streaming_fallback(self):
+        for source, value in (("mean_itl_ms", 6), ("mean_inter_token_latency_ms", 6), ("mean_itl_ms", 0)):
+            with self.subTest(source=source, value=value):
+                payload = server_response()
+                payload["metrics"].pop("time_per_output_token_ms")
+                payload["metrics"].pop("mean_itl_ms")
+                payload["metrics"][source] = value
+                payload["metrics"]["telemetry"]["request"]["server_mean_time_per_output_token_ms"] = 12
+                capture = extract_server_metrics(payload)
+                self.assertEqual(capture["tpot_ms"], value)
+                self.assertEqual(capture["mean_itl_ms"], value)
+                self.assertEqual(capture["sources"]["tpot_ms"], "metrics." + source)
+
     def test_invalid_numbers_and_gpu_readings_are_missing(self):
         payload = server_response()
         payload["metrics"].update(time_to_first_token_ms=math.nan,
@@ -103,6 +116,45 @@ class TaskMetricsTests(unittest.TestCase):
             self.assertIsNone(view["ttft_ms"]["mean"])
             self.assertEqual(view["ttft_ms"]["samples"], 0)
             self.assertEqual(view["gpus"], [])
+
+    def test_historical_mean_itl_supplies_tpot_in_task_details(self):
+        capture = extract_server_metrics(server_response())
+        capture["tpot_ms"] = None
+        capture["sources"].pop("tpot_ms")
+        view = model_server_metrics({"usage": {"model_calls": 1}, "trace": [model_entry(capture)]})
+        self.assertEqual(view["tpot_ms"], {"mean": 6, "samples": 1,
+            "source": "metrics.mean_itl_ms", "unavailable_reason": None})
+        self.assertEqual(view["requests"][0]["tpot_ms"], 6)
+        self.assertEqual(view["requests"][0]["mean_itl_ms"], 6)
+
+    def test_untrusted_mean_itl_cannot_supply_historical_tpot(self):
+        capture = extract_server_metrics(server_response())
+        capture["tpot_ms"] = None
+        capture["sources"].pop("tpot_ms")
+        capture["sources"]["mean_itl_ms"] = "metrics.untrusted"
+        view = model_server_metrics({"usage": {"model_calls": 1}, "trace": [model_entry(capture)]})
+        self.assertIsNone(view["requests"][0]["tpot_ms"])
+        self.assertIsNone(view["requests"][0]["mean_itl_ms"])
+
+    def test_historical_native_mean_itl_precedes_streaming_tpot(self):
+        capture = extract_server_metrics(server_response())
+        capture["tpot_ms"] = 12
+        capture["sources"]["tpot_ms"] = "metrics.telemetry.request.server_mean_time_per_output_token_ms"
+        view = model_server_metrics({"usage": {"model_calls": 1}, "trace": [model_entry(capture)]})
+        self.assertEqual(view["tpot_ms"]["mean"], 6)
+        self.assertEqual(view["tpot_ms"]["source"], "metrics.mean_itl_ms")
+
+    def test_different_tpot_sources_remain_separate_when_aggregating(self):
+        first = extract_server_metrics(server_response())
+        second = copy.deepcopy(first)
+        second["tpot_ms"] = None
+        second["sources"].pop("tpot_ms")
+        view = model_server_metrics({"usage": {"model_calls": 2},
+            "trace": [model_entry(first), model_entry(second)]})
+        self.assertEqual(view["tpot_ms"]["samples"], 2)
+        self.assertIsNone(view["tpot_ms"]["mean"])
+        self.assertEqual(view["tpot_ms"]["unavailable_reason"], "MIXED_SOURCES")
+        self.assertEqual([request["tpot_ms"] for request in view["requests"]], [5, 6])
 
     def test_mixed_timing_scopes_do_not_get_one_misleading_average(self):
         first = extract_server_metrics(server_response())

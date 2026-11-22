@@ -6,7 +6,7 @@ SCHEMA = "backend-model-metrics-v1"
 FIELDS = ("ttft_ms", "tpot_ms", "mean_itl_ms", "tokens_per_second")
 NATIVE_FIELDS = {
     "ttft_ms": ("time_to_first_token_ms", "ttft_ms"),
-    "tpot_ms": ("time_per_output_token_ms", "tpot_ms"),
+    "tpot_ms": ("time_per_output_token_ms", "tpot_ms", "mean_itl_ms", "mean_inter_token_latency_ms"),
     "mean_itl_ms": ("mean_itl_ms", "mean_inter_token_latency_ms"),
     "tokens_per_second": ("tokens_per_second", "output_tokens_per_second"),
 }
@@ -95,6 +95,12 @@ def clean_capture(capture):
             result["sources"][key] = sources[key]
         else:
             result[key] = None
+    if result["mean_itl_ms"] is not None and (
+        result["tpot_ms"] is None
+        or result["sources"].get("tpot_ms") == "metrics.telemetry.request." + SERVER_FIELDS["tpot_ms"]
+    ):
+        result["tpot_ms"] = result["mean_itl_ms"]
+        result["sources"]["tpot_ms"] = result["sources"]["mean_itl_ms"]
     cached = cache_usage(capture.get("cache_hit_tokens"), capture.get("cache_query_tokens"),
         sources.get("cache_hit_tokens"), sources.get("cache_query_tokens"))
     if cached is not None:

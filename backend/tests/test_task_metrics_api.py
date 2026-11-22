@@ -80,6 +80,16 @@ class TaskMetricsAPITests(unittest.TestCase):
         self.assertIsNone(view["model_server"]["cache_hit_ratio"])
         self.assertFalse(view["model_server"]["cache_usage_complete"])
 
+    def test_details_return_tpot_from_historical_mean_itl_without_writing(self):
+        capture = self.run.result["trace"][0]["response"]["response_metadata"]["server_metrics"]
+        capture.pop("tpot_ms")
+        capture["sources"].pop("tpot_ms")
+        view = self.details()["model_server"]
+        self.assertEqual(view["tpot_ms"]["mean"], 6)
+        self.assertEqual(view["tpot_ms"]["source"], "metrics.mean_itl_ms")
+        self.assertEqual(view["requests"][0]["tpot_ms"], 6)
+        self.assertNotIn("tpot_ms", capture)
+
     def test_details_return_cache_from_saved_agent_usage_metadata(self):
         self.run.result["trace"] = [{"kind": "model", "response": {
             "usage_metadata": {"input_tokens": 100, "input_token_details": {"cache_read": 25}}}}]

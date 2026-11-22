@@ -156,8 +156,8 @@ export function getResearchDetail(taskId: string, signal: AbortSignal) {
 | 工具调用次数 | `agent.tool_calls` | 次 |
 | 输入 / 输出 / 总 Token | `agent.input_tokens` / `output_tokens` / `total_tokens` | Token，不含独立评分模型的消耗 |
 | TTFT | `model_server.ttft_ms.mean` | ms；同时展示 `samples` 和 `source` |
-| TPOT | `model_server.tpot_ms.mean` | ms/token |
-| mean ITL | `model_server.mean_itl_ms.mean` | ms；与 TPOT 独立，不互相补值 |
+| TPOT | `model_server.tpot_ms.mean` | ms/token；原生 TPOT 缺失时使用原生 mean ITL |
+| mean ITL | `model_server.mean_itl_ms.mean` | ms；保留原生值，不从 TPOT 反推 |
 | 生成速度 | `model_server.tokens_per_second.mean` | 输出 tokens/sec |
 | 每张 GPU 利用率 | `model_server.gpus[].utilization_percent` | 已是 0–100 的百分数，设备用 `uuid` 标识 |
 | 缓存命中 Token | `model_server.cache_hit_tokens` | 有效配对请求的命中 Token 合计 |
@@ -167,6 +167,8 @@ export function getResearchDetail(taskId: string, signal: AbortSignal) {
 维度满分、综合满分及权重分别由 `score_max`、`overall_score_max`、`weights` 给出；当前权重依次为 30/30/20/15/5。不要将 0–5 的维度直接画在 0–100 的坐标轴上。
 
 Agent 步数可能小于模型调用次数，规划、反思等也会调用模型。`token_usage_complete=false` 表示普通 Token 统计不完整，不应把缺失值填成 0。
+
+课程 Qwen 服务的原生 `mean_itl_ms` 可作为 TPOT。后端优先使用显式原生 TPOT，其次使用原生 mean ITL，最后才使用流式输出事件的近似值；`source` 保留真实来源，例如 `metrics.mean_itl_ms`。已有结果中保存了合法原生 mean ITL 的记录，会在读取详情时补齐缺失的 TPOT，无需重新执行任务或改写数据库；没有有效数据时仍返回 `null`。
 
 ## 4. 详情与异步评分的刷新
 

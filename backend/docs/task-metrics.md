@@ -53,7 +53,7 @@ readings and the latest snapshot of each GPU returned for this task.
 | Field | Unit | Native response fields accepted |
 | --- | --- | --- |
 | `ttft_ms` | ms | `time_to_first_token_ms`, `ttft_ms` |
-| `tpot_ms` | ms/token | `time_per_output_token_ms`, `tpot_ms` |
+| `tpot_ms` | ms/token | `time_per_output_token_ms`, `tpot_ms`, `mean_itl_ms`, `mean_inter_token_latency_ms` |
 | `mean_itl_ms` | ms | `mean_itl_ms`, `mean_inter_token_latency_ms` |
 | `tokens_per_second` | output tokens/sec | `tokens_per_second`, `output_tokens_per_second` |
 
@@ -69,9 +69,15 @@ The repository's `metrics.telemetry.request` can supply these explicit fallbacks
   duration, including queue/prefill. This is not pure decode speed.
 
 The actual field path is returned in `sources` per request and `source` per
-aggregate. Prefill duration alone is not treated as TTFT. TPOT and mean ITL are
-separate fields; unknown/bare timing units are not guessed or converted. Missing
-timings are not calculated from token totals or Agent elapsed time.
+aggregate. Prefill duration alone is not treated as TTFT. TPOT prefers an explicit
+native TPOT field, then native mean ITL (the course server's recommended TPOT),
+then the streaming-event fallback. `mean_itl_ms` remains a separate field and is
+not filled from TPOT or streaming observations. The original mean-ITL source is
+retained when used as TPOT; different sources are not combined into one average.
+Saved captures with a valid native mean ITL and no valid native TPOT receive the
+same precedence when read, without rewriting the stored result or rerunning the Agent.
+Unknown/bare timing units are not guessed or converted. Missing timings are not
+calculated from token totals or Agent elapsed time.
 
 An aggregate is the arithmetic mean of available calls with an identical source.
 It is not system-wide throughput or a token-weighted task decode rate. `samples`
