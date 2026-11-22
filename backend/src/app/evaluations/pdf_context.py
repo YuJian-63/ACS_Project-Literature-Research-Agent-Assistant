@@ -43,7 +43,10 @@ def extract(specification: list[dict]) -> dict:
 def main():
     try:
         import resource
-        resource.setrlimit(resource.RLIMIT_AS, (768 * 1024 * 1024, 768 * 1024 * 1024))
+        # Darwin cannot reliably lower RLIMIT_AS; retain CPU, byte/page
+        # budgets and the parent process timeout on that platform.
+        if sys.platform != "darwin":
+            resource.setrlimit(resource.RLIMIT_AS, (768 * 1024 * 1024, 768 * 1024 * 1024))
         resource.setrlimit(resource.RLIMIT_CPU, (60, 60))
     except ImportError:
         pass

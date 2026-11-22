@@ -53,7 +53,7 @@ class AgentBridgeTests(unittest.TestCase):
         self.assertIn("作者提出了什么方法", task["question"])
         self.assertFalse(task["allow_search"])
         self.assertEqual(task["max_papers"], 1)
-        self.assertEqual(task["sources"], [f"local:{self.paper_id}@{self.source["sha256"]}"])
+        self.assertEqual(task["sources"], [f"local:{self.paper_id}@{self.source['sha256']}"])
         with self.assertRaises(ValidationError):
             AgentTask.model_validate(task | {"budget": {}})
 

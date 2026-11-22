@@ -36,11 +36,11 @@ export default function ResultPage() {
     else setReadingTarget(target);
   }
   useEffect(() => {
-    setReadingTarget(undefined);
+    setReadingTarget(undefined); setRecord(undefined); setError(undefined); setCheckedAt(undefined);
   }, [taskId]);
   useEffect(() => {
     const pending = new AbortController(); let timer: ReturnType<typeof setTimeout> | undefined;
-    setRecord(undefined); setError(undefined); setLoading(true); setCheckedAt(undefined);
+    setError(undefined); setLoading(true);
     async function load() {
       let poll = false;
       try {
@@ -60,7 +60,7 @@ export default function ResultPage() {
     {record?.question && <div className="result-question"><span>{t('研究问题')}</span><MathText>{record.question}</MathText></div>}
     {(record?.status === 'queued' || record?.status === 'running') && <ResearchProgress queued={record.status === 'queued'} disconnected={Boolean(error)} checkedAt={checkedAt} />}
     {record?.status === 'failed' && <Alert type="error" showIcon title={t('研究未能完成')} description={record.error ? t(record.error.message) : t('请稍后重新创建研究。')} />}
-    {record?.result && <ResultContent key={taskId} result={record.result} metrics={record.metrics}
+    {record?.result && <ResultContent key={taskId} result={record.result} metrics={record.metrics} onEvaluationRequested={() => setRevision(value => value + 1)}
       onReadEvidence={evidence => readSource({ source: evidence, page: evidence.page, citationKey: evidence.chunk_id })}
       onReadSource={source => readSource({ source })} />}
     {readingTarget && <SourceImportDialog key={taskId + ':' + readingTarget.source.source_id + ':' + (readingTarget.citationKey || '')}
