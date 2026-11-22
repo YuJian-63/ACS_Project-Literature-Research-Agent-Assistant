@@ -16,7 +16,7 @@ We propose a Literature Research Agent Assistant that helps students and early-s
 
 The system consists of four components: **frontend, application backend, agent framework, and model serving** . RAG and PostgreSQL support evidence retrieval and data management . The frontend communicates with the backend through RESTful APIs, while LangGraph coordinates agents and vLLM serves the Qwen 27B model on TACC.
 
-<img src="E:\HKUST\Homework\Advanced AI Computing and System\Project\Agent_Workflow.png" alt="Agent_Workflow" style="zoom:33%;" />
+<img src="workflow.png" alt="Agent_Workflow" style="zoom:33%;" />
 
 #### 2.2 Frontend
 
