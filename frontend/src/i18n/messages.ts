@@ -1,4 +1,9 @@
 export const english: Record<string, string> = {
+  "配置研究模型与全站任务容量": "Manage research models and site-wide capacity",
+  "同时运行的研究任务上限，所有账号共享": "Maximum concurrent research jobs, shared by all accounts",
+  "在 TACC GPU 节点运行的模型": "Model running on a TACC GPU node",
+  "标准研究模型与嵌入服务": "Default research model and embedding service",
+  "连接已在 TACC 上运行的模型服务": "Connect to a model service already running on TACC",
   "全站研究并发数": "Concurrent research jobs (all users)",
   "全站并发已设为 {0}": "Research concurrency set to {0} for all users",
   "课程模型已停止或更换，请检查模型管理后重新提交研究": "The course service stopped or changed. Check Model management and resubmit.",

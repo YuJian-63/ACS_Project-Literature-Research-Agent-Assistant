@@ -25,6 +25,7 @@ if (path === '/api/v1/agent-research/queue/concurrency') {
   }
   return route.fulfill({json: {concurrency}});
 }
+if (path === '/api/v1/models') return route.fulfill({json:{bailian_config:'local',bailian_name:'qwen3.8-27b',enabled:true,state:'stopped',owner:false,generation:null,job_id:null,base_url:null,shared_url:null,detail:null,requested_at:null,checked_at:null}});
 if (path === '/api/v1/agent-research' && req.method() === 'GET' && showRecord) {
   const papers = [{id,title:paper.title}, imported ? {id:importedId,title:external.title} : external];
   return route.fulfill({json:{items:[{id:taskid,question:'Compare',paper_ids:[id],papers,
@@ -51,6 +52,8 @@ return route.fulfill({json:{items:path==='/api/v1/papers'?[paper]:[],total:path=
 });
 await page.goto(BASE+'/tasks');
 await page.getByText('还没有研究任务',{exact:true}).waitFor();
+if (await page.getByRole('radiogroup', {name:'全站研究并发数'}).count()) throw Error('Concurrency control remains on research history');
+await page.goto(BASE+'/models');
 const choices = page.getByRole('radiogroup', {name:'全站研究并发数'});
 for (const limit of [4, 1, 3, 2]) {
   const saved = page.waitForResponse(res => res.request().method() === 'PUT' &&
@@ -59,6 +62,7 @@ for (const limit of [4, 1, 3, 2]) {
   await saved;
   await choices.getByRole('radio', {name:String(limit), checked:true}).waitFor({state:'attached'});
 }
+await page.goto(BASE+'/tasks');
 for(const label of ['论文摘要','论文问答','跨论文综述','全部类型'])if(await page.getByText(label,{exact:true}).count())throw Error('Legacy category remains: '+label);
 if(await page.locator('[aria-label="筛选任务类型"]').count())throw Error('Type selector remains');
 await page.getByRole('button',{name:'English',exact:true}).click();
