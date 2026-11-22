@@ -3,6 +3,7 @@
 import hashlib
 import os
 from dataclasses import dataclass, field
+from getpass import getpass
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from typing import Literal
@@ -39,6 +40,25 @@ class LibraryClient:
             return None
         base_url = os.getenv("AGENT_LIBRARY_BASE_URL", "").strip() or "http://127.0.0.1:8000"
         return cls(base_url, token)
+
+    @classmethod
+    def login_from_cli(cls) -> "LibraryClient":
+        load_env()
+        base_url = os.getenv("AGENT_LIBRARY_BASE_URL") or "http://127.0.0.1:8000"
+        origin = os.getenv("AGENT_LIBRARY_ORIGIN") or "http://127.0.0.1:5173"
+        username = os.getenv("AGENT_LIBRARY_USERNAME") or input("论文库用户名: ").strip()
+        password = os.getenv("AGENT_LIBRARY_PASSWORD") or getpass("论文库密码: ")
+        try:
+            with httpx.Client(base_url=base_url, headers={"Origin": origin.rstrip("/")}) as http:
+                session = http.post("/api/v1/auth/login", json={"username": username, "password": password})
+                session.raise_for_status()
+                grant = http.post("/api/v1/agent/library-token", headers={"X-CSRF-Token": session.json()["csrf_token"]})
+                grant.raise_for_status()
+                return cls(base_url, grant.json()["access_token"])
+        except httpx.HTTPStatusError as exc:
+            raise SystemExit(f"{exc.request.url.path} 返回 HTTP {exc.response.status_code}，论文库授权失败。") from None
+        except httpx.RequestError:
+            raise SystemExit("无法连接论文库 API，请检查后端是否已启动及 AGENT_LIBRARY_BASE_URL。") from None
 
 
 def search_library(

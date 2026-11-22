@@ -118,8 +118,9 @@ def test_direct_revision_can_correct_a_table_citation_before_validation_with_pla
         (read(), read(2, 2)),
         (read(1, 2), read(2, 2)),
         (read(), retrieve("results")),
+        (read(1, 2), retrieve("results")),
     ],
-    ids=["new-page", "previously-read-uncited-page", "retrieve"],
+    ids=["new-page", "previously-read-uncited-page", "retrieve", "retrieve-previously-read"],
 )
 def test_single_supplement_supplies_original_before_one_tool_free_revision(
     first_read, supplement, tmp_path

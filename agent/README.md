@@ -27,15 +27,18 @@ arXiv PDF 缓存在 `data/papers/`。库内 PDF 在本次任务首次打开、�
 uv run python baseline.py --task examples/qa.json --persist
 uv run python baseline.py --task examples/summary.json
 uv run python baseline.py --task examples/review.json
+uv run python baseline.py --task examples/discovery.json
 uv run python baseline.py --task examples/qa.json --context-window 32000 --context-finalize-ratio 0.9
 uv run pytest -q
 ```
 
-要让 Baseline 或 Extension 搜索当前用户的论文库，按[论文库 API 契约](../docs/api-contract.md#41-agent-论文库)签发短期 Bearer 令牌，通过环境变量 `AGENT_LIBRARY_TOKEN` 传给 CLI。`AGENT_LIBRARY_BASE_URL` 默认为 `http://127.0.0.1:8000`。库中已有《Attention Is All You Need》时可运行：
+后端启动后，加 `--library-login` 并按提示输入网页账号和密码，CLI 会为本次运行签发短期论文库令牌。Baseline 和 Extension 都支持。
 
 ```bash
-uv run python baseline.py --task examples/library-qa.json --context-window 8192
+uv run python extension.py --library-login --task examples/discovery.json
 ```
+
+如需重复运行，可在本地 `agent/.env` 填写 `AGENT_LIBRARY_USERNAME` 和 `AGENT_LIBRARY_PASSWORD`。默认 API 为 `http://127.0.0.1:8000`，网页来源为 `http://127.0.0.1:5173`，自定义部署可分别设置 `AGENT_LIBRARY_BASE_URL` 和 `AGENT_LIBRARY_ORIGIN`。已有令牌也可以通过 `AGENT_LIBRARY_TOKEN` 传给不带登录参数的 CLI。[论文库 API 契约](../docs/api-contract.md#41-agent-论文库)
 
 Python 调用按任务传入 `run_task(task, library=LibraryClient(base_url, token))`，其中 `LibraryClient` 来自 `apis.library`。`allow_search=true` 时，`search_papers` 搜 arXiv，配置了令牌的 `search_library` 按标题或文件名搜论文库。两者的候选都带有可直接交给 `open_paper(source)` 的 `source`。库内标识为 `local:<UUID>@<SHA-256>`，也可预先填入任务的 `sources`。
 
@@ -60,11 +63,19 @@ Reflection 独立于 Planner，默认关闭。传 `--reflection` 或 Python 参�
 
 Extension 的 `retrieve(source, query, top_k=3)` 接受单个论文标识或非空标识列表。所选论文的原文块一起排名，合计返回最多 `top_k` 个（可设为 1–5），每块保留论文标识、页码和引用 ID。例如传入两篇论文及 `top_k=3` 时，两篇合计最多返回三个块，结果可以全部来自同一篇。每次调用只为查询文本生成一个向量。
 
+同一任务中，`retrieve` 和 `read_paper` 共用已展示原文的记录。检索按原排名返回命中片段，首次命中附原文，已展示的片段只返回标识、页码和 `already_read`。全部命中都已展示时，工具结果也带有 `status: already_read`。
+
 首次检索优先复用已打开的解析结果，或加载指定论文。索引按单篇论文的内容、分块与 embedding 配置缓存在 `data/retrieval/`，可跨论文组合复用；`--index-dir` 可改位置。默认使用百炼 `text-embedding-v4`、1024 维，配置见 [.env.example](.env.example)。
 
 结果写入 `runs/extension/`。启用 `--persist` 时，Neon 存储键为 `extension/<task_id>`，结果 JSON 保留原任务 ID。Trace 中 `retrieval_index` 记录建索引或复用，`embedding` 按 `document` 和 `query` 分别记录调用耗时与实际输入 token；`usage` 延续 Baseline 的聊天模型统计。
 
-在 `agent/` 运行 `./run.sh` 可串行对比三个示例。每个示例先跑 Baseline，再跑 Extension，分别写入 `runs/baseline/<task_id>.json` 和 `runs/extension/<task_id>.json`。示例每次生成新的任务 ID。单项失败后继续运行其余项，脚本最后以非零状态退出。
+从仓库根目录运行以下命令，可串行对比 `agent/examples/*.json` 下的全部示例。脚本接收一次网页账号和密码，运行 discovery 的 Baseline 和 Extension 时分别自动登录论文库。
+
+```bash
+./agent/run.sh '你的用户名' '你的密码'
+```
+
+也可通过环境变量 `AGENT_LIBRARY_USERNAME` 和 `AGENT_LIBRARY_PASSWORD` 提供凭据。省略凭据时仍运行全部示例，使用 CLI 默认的搜索配置。每个示例先跑 Baseline，再跑 Extension，分别写入 `runs/baseline/<task_id>.json` 和 `runs/extension/<task_id>.json`。示例每次生成新的任务 ID。单项失败后继续运行其余项，脚本最后以非零状态退出。
 
 重复写入同一路径会覆盖已有结果。对照实验可用 `--output` 为每次运行指定不同的文件名。
 
