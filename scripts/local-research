@@ -1,0 +1,158 @@
+#!/usr/bin/env bash
+# Run the local web stack against backend/.env. Docker Desktop supplies PostgreSQL and the tunnel.
+set -euo pipefail
+cd "$(dirname "$0")/../backend"
+python=.venv/bin/python
+state=runtime/local-research
+web=http://127.0.0.1:5173
+api=http://127.0.0.1:8000
+library=http://127.0.0.1:8001
+umask 077
+
+case "${1:-up}" in
+  jobs)
+    exec "$python" - "${2:-}" <<'PY'
+import sys
+from uuid import UUID
+from sqlalchemy import select
+from app.config import Settings
+from app.db.models import AgentRun, Task
+from app.db.session import create_database_engine
+
+query = select(Task.id, Task.status, AgentRun.remote_job_id, AgentRun.dispatch_id, Task.error_code).outerjoin(
+    AgentRun, AgentRun.task_id == Task.id
+).order_by(Task.created_at.desc()).limit(10)
+if sys.argv[1]:
+    try:
+        query = query.where(Task.id == UUID(sys.argv[1]))
+    except ValueError:
+        sys.exit("请输入网页任务 UUID")
+with create_database_engine(Settings()).connect() as db:
+    print("网页任务 UUID | 状态 | TACC 作业号 | 派发 UUID | 错误码")
+    for row in db.execute(query):
+        print(" | ".join(str(value) if value is not None else "—" for value in row))
+PY
+    ;;
+  logs) exec tail -n 20 -F "$state"/*.log ;;
+  up) ;;
+  *) echo "Usage: scripts/local-research [up | jobs [TASK_UUID] | logs]" >&2; exit 2 ;;
+esac
+
+[[ -x "$python" && -f ../frontend/node_modules/vite/bin/vite.js ]] || {
+  echo "请先安装 backend 和 frontend 依赖，见 tacc/TACC.md" >&2
+  exit 1
+}
+# Check before opening any ports or starting background services.
+"$python" - <<'PY'
+import shutil
+import socket
+from app.auth.security import check_config
+from app.config import Settings
+s = Settings()
+check_config(s, mail=s.smtp_configured)
+if s.frontend_public_url != "http://127.0.0.1:5173" or not s.agent_dispatch_enabled or s.agent_transport != "tcloud":
+    raise SystemExit("请核对 backend/.env 的 FRONTEND_PUBLIC_URL、AGENT_DISPATCH_ENABLED 和 AGENT_TRANSPORT")
+if not shutil.which(s.agent_tcloud_cli):
+    raise SystemExit("找不到课程 tcloud CLI")
+for port in (5173, 8000, 8001):
+    with socket.socket() as sock:
+        sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        try:
+            sock.bind(("127.0.0.1", port))
+        except OSError:
+            raise SystemExit(f"本机端口 {port} 已占用")
+PY
+docker compose up -d --wait postgres
+mkdir -p "$state"
+pids=()
+names=()
+tunnel_id=''
+start() {
+  local name=$1
+  shift
+  "$@" > "$state/$name.log" 2>&1 &
+  pids+=("$!")
+  names+=("$name")
+}
+check_services() {
+  local i
+  for i in "${!pids[@]}"; do
+    if ! kill -0 "${pids[i]}" 2>/dev/null; then
+      echo "${names[i]} 已退出，见 backend/$state/${names[i]}.log" >&2
+      return 1
+    fi
+  done
+}
+cleanup() {
+  trap - EXIT INT TERM
+  local pid
+  for pid in "${pids[@]}"; do kill "$pid" 2>/dev/null || true; done
+  for pid in "${pids[@]}"; do wait "$pid" 2>/dev/null || true; done
+  if [[ -n "$tunnel_id" ]]; then docker stop "$tunnel_id" >/dev/null || true; fi
+}
+trap cleanup EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
+
+wait_health() {
+  local url=$1 expected=$2 host address
+  local route=(--silent)
+  for ((attempt=0; attempt<30; attempt++)); do
+    check_services
+    if curl -fsS --max-time 6 "${route[@]}" "$url" 2>/dev/null | "$python" -c 'import json,sys; sys.exit(json.load(sys.stdin).get("status") != sys.argv[1])' "$expected" 2>/dev/null; then return; fi
+    # Some local VPN resolvers return synthetic addresses for new Quick Tunnel hosts.
+    # Probe the public A record as well, retaining the hostname for TLS verification.
+    if (( attempt % 5 == 2 )) && [[ -n "$tunnel_id" && "$url" == https://*.trycloudflare.com/health ]]; then
+      host=${url#https://}
+      host=${host%/health}
+      address=$(curl -fsS --max-time 5 "https://dns.google/resolve?name=$host&type=A" |
+        "$python" -c 'import json,sys; print(next(a["data"] for a in json.load(sys.stdin)["Answer"] if a["type"] == 1))' 2>/dev/null) || address=''
+      if [[ -n "$address" ]]; then route=(--resolve "$host:443:$address"); fi
+    fi
+    sleep 1
+  done
+  echo "健康检查超时: $url" >&2
+  return 1
+}
+
+start library "$python" -m uvicorn app.main:create_library_app --factory --host 127.0.0.1 --port 8001
+wait_health "$library/health" ok
+public_url=$("$python" -c 'from app.config import Settings; print(Settings().agent_library_public_url or "")')
+if [[ -z "$public_url" ]]; then
+  tunnel_id=$(docker run -d --rm --name acs-local-research-tunnel cloudflare/cloudflared:latest \
+    tunnel --no-autoupdate --protocol http2 --url http://host.docker.internal:8001)
+  for ((attempt=0; attempt<45; attempt++)); do
+    public_url=$(docker logs "$tunnel_id" 2>&1 | sed -nE 's/.*(https:\/\/[a-z0-9-]+\.trycloudflare\.com).*/\1/p' | tail -1)
+    [[ -n "$public_url" ]] && break
+    sleep 1
+  done
+  [[ -n "$public_url" ]] || { echo "Cloudflare 未返回隧道地址" >&2; exit 1; }
+fi
+export AGENT_LIBRARY_PUBLIC_URL="$public_url"
+wait_health "$public_url/health" ok
+start api "$python" -m uvicorn app.main:create_app --factory --host 127.0.0.1 --port 8000
+wait_health "$api/ready" ready
+start parser "$python" -m app.parser_worker
+start worker "$python" -m app.runner_worker
+if "$python" -c 'from app.config import Settings; raise SystemExit(not Settings().arxiv_configured)'; then
+  start imports "$python" -m app.import_worker
+else
+  echo "网页 arXiv 搜索/导入待配置 ARXIV_ENABLED 和 ARXIV_CONTACT_EMAIL"
+fi
+if "$python" -c 'from app.config import Settings; raise SystemExit(not Settings().smtp_configured)'; then
+  start mail "$python" -m app.mail_worker
+else
+  echo "新账号注册待配置 SMTP，已有已验证账号可登录"
+fi
+web_server() {
+  cd ../frontend
+  export API_PROXY_TARGET="$api"
+  exec node node_modules/vite/bin/vite.js --host 127.0.0.1 --port 5173 --strictPort
+}
+start web web_server
+wait_health "$web/ready" ready
+echo "网页 $web    论文库 $public_url"
+echo "查看任务: scripts/local-research jobs    查看日志: scripts/local-research logs"
+echo "按 Ctrl+C 停止本次服务，数据库和 PDF 保留。"
+while check_services; do sleep 2; done
+exit 1
