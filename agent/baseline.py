@@ -150,7 +150,8 @@ def remember(context: PaperContext, paper: dict, chunks: list[dict]) -> None:
 
 @tool
 def search_papers(query: str, context: Annotated[PaperContext, InjectedToolArg]) -> dict:
-    """Search arXiv for papers. Returns candidates with source IDs and discovery snippets."""
+    """Search arXiv for papers. Returns candidates with source IDs and snippets.
+    Snippets are discovery leads, not citation evidence."""
     if not context.task.allow_search:
         raise ValueError("Search is disabled for this task")
     if not query.strip():
