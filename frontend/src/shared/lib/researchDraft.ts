@@ -1,13 +1,18 @@
-import type { AgentResearchRequest } from '../../api/agentResearch';
+import { defaultResearch, type ResearchOptions, type AgentResearchRequest } from '../../api/agentResearch';
 import { createUuid } from './uuid';
 
 export interface ResearchSubmission { fingerprint: string; key: string }
-export interface ResearchDraft { question: string; paperIds: string[]; sourceKey?: string; submission?: ResearchSubmission }
+export interface ResearchDraft { question: string; paperIds: string[]; research?: ResearchOptions; allowSearch?: boolean; sourceKey?: string; submission?: ResearchSubmission }
 const prefix = 'literature-v3-research-draft:';
 const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 export function researchSubmission(input: AgentResearchRequest, previous?: ResearchSubmission): ResearchSubmission {
-  const fingerprint = JSON.stringify([input.question.trim(), input.paper_ids ?? [], input.allow_search ?? true]);
+  const values: unknown[] = [input.question.trim(), input.paper_ids ?? [], input.allow_search ?? true];
+  const options = input.research;
+  if (options && (options.workflow !== 'baseline' || options.context_policy !== 'full' || options.planner || options.reflection)) {
+    values.push(options.workflow, options.context_policy, options.planner, options.reflection);
+  }
+  const fingerprint = JSON.stringify(values);
   return previous?.fingerprint === fingerprint ? previous : { fingerprint, key: createUuid() };
 }
 
@@ -20,7 +25,11 @@ export function readResearchDraft(userId: string): ResearchDraft | undefined {
       || new Set(draft.paperIds).size !== draft.paperIds.length) return undefined;
     const submission = typeof draft.submission?.fingerprint === 'string' && typeof draft.submission?.key === 'string' && uuid.test(draft.submission.key)
       ? { fingerprint: draft.submission.fingerprint, key: draft.submission.key } : undefined;
-    return { question: draft.question, paperIds: draft.paperIds, submission,
+    const options = draft.research;
+    const valid = options && ['baseline','extension'].includes(options.workflow) && ['full','compact'].includes(options.context_policy)
+      && typeof options.planner === 'boolean' && typeof options.reflection === 'boolean';
+    return { ...(options ? { research: valid ? options : defaultResearch } : {}),
+      ...(typeof draft.allowSearch === 'boolean' ? { allowSearch: draft.allowSearch } : {}), question: draft.question, paperIds: draft.paperIds, submission,
       ...(typeof draft.sourceKey === 'string' && draft.sourceKey.length <= 2000 ? { sourceKey: draft.sourceKey } : {}) };
   } catch { return undefined; }
 }

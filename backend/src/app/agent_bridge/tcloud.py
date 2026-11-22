@@ -20,7 +20,7 @@ from app.config import Settings
 
 ROOT = Path(__file__).resolve().parents[4]
 TEMPLATE = ("tuxiv.conf", "job.sh", "run_job.py", "runtime.sh", "requirements.txt")
-AGENT = ("baseline.py", "config.py", "context.py", "schemas.py", "apis/__init__.py",
+AGENT = ("extension.py", "retrieval.py", "apis/embeddings.py", "baseline.py", "config.py", "context.py", "schemas.py", "apis/__init__.py",
     "apis/database.py", "apis/library.py", "apis/model.py", "apis/papers.py", "apis/search_web.py")
 JOB_ID = re.compile(r"[1-9][0-9]{0,19}")
 
@@ -92,7 +92,20 @@ def stage_model_env(path: Path, target: Path, deadline: float) -> None:
     if (not isinstance(token, str) or not re.fullmatch(r"st-[A-Za-z0-9_+.=/\-]{1,4096}", token)
         or token == config["BAILIAN_API_KEY"] or type(expiry) is not int or not now < expiry <= min(deadline, now + ttl) + 5):
         raise TransportError("AGENT_MODEL_TOKEN_INVALID")
-    atomic_write(target, f"MODEL_PROVIDER=bailian\nMODEL_NAME={model}\nMODEL_BASE_URL={base_url}\nBAILIAN_API_KEY={token}\n".encode())
+    embedding = ""
+    for name in ("EMBEDDING_MODEL", "EMBEDDING_DIMENSIONS", "EMBEDDING_BASE_URL"):
+        value = config.get(name)
+        if not value:
+            continue
+        if name == "EMBEDDING_BASE_URL":
+            address = urlsplit(value)
+            if (address.scheme != "https" or address.netloc not in {host, "dashscope.aliyuncs.com", "dashscope-intl.aliyuncs.com", "dashscope-us.aliyuncs.com"}
+                or address.path.rstrip("/") not in {"/v1", "/compatible-mode/v1"} or address.query or address.fragment):
+                raise ValueError("Embedding requires an official Bailian HTTPS endpoint")
+        elif not re.fullmatch(r"[A-Za-z0-9._/-]{1,128}" if name == "EMBEDDING_MODEL" else r"[1-9][0-9]{0,4}", value):
+            raise ValueError("Invalid embedding configuration")
+        embedding += f"{name}={value}\n"
+    atomic_write(target, f"MODEL_PROVIDER=bailian\nMODEL_NAME={model}\nMODEL_BASE_URL={base_url}\nBAILIAN_API_KEY={token}\n{embedding}".encode())
 
 
 class TcloudTransport(ManualTransport):
@@ -143,6 +156,7 @@ class TcloudTransport(ManualTransport):
             stage_model_env(self.settings.agent_tcloud_model_env_file, stage / "model.env", deadline)
         atomic_write(stage / "dispatch.json", canonical_json({
             "dispatch_id": str(manifest.dispatch_id), "input_sha256": manifest_digest(manifest), "deadline": deadline,
+            "max_result_bytes": self.settings.agent_result_max_bytes,
         }))
 
     def fetch(self, manifest, name, target):

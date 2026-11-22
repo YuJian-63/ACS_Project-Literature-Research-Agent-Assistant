@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import sys
 from collections.abc import Iterator
 from contextlib import contextmanager
 from typing import Any
@@ -89,18 +90,22 @@ def probe() -> dict[str, Any]:
 
 def save_paper(paper: dict[str, Any]) -> None:
     """Save parsed pages and evidence; different source versions stay separate."""
-    source_id = _identifier(paper, "source_id")
-    paper_id = _identifier(paper, "paper_id")
     with _connect() as connection:
         _ensure_schema(connection)
-        connection.execute(
-            """INSERT INTO agt_baseline.papers (source_id, paper_id, document)
-               VALUES (%s, %s, %s)
-               ON CONFLICT (source_id) DO UPDATE
-               SET paper_id = EXCLUDED.paper_id, document = EXCLUDED.document,
-                   updated_at = now()""",
-            (source_id, paper_id, Jsonb(paper)),
-        )
+        _write_paper(connection, paper)
+
+
+def _write_paper(connection, paper):
+    source_id = _identifier(paper, "source_id")
+    paper_id = _identifier(paper, "paper_id")
+    connection.execute(
+        """INSERT INTO agt_baseline.papers (source_id, paper_id, document)
+           VALUES (%s, %s, %s)
+           ON CONFLICT (source_id) DO UPDATE
+           SET paper_id = EXCLUDED.paper_id, document = EXCLUDED.document,
+               updated_at = now()""",
+        (source_id, paper_id, Jsonb(paper)),
+    )
 
 
 def load_paper(paper_id: str, source_id: str | None = None) -> dict[str, Any] | None:
@@ -118,15 +123,19 @@ def load_paper(paper_id: str, source_id: str | None = None) -> dict[str, Any] | 
 
 def save_run(result: dict[str, Any], *, storage_key: str | None = None) -> None:
     """Save a result under its task ID or an explicitly namespaced storage key."""
-    task_id = _identifier(result, "task_id")
     with _connect() as connection:
         _ensure_schema(connection)
-        connection.execute(
-            """INSERT INTO agt_baseline.runs (task_id, result) VALUES (%s, %s)
-               ON CONFLICT (task_id) DO UPDATE
-               SET result = EXCLUDED.result, updated_at = now()""",
-            (storage_key if storage_key is not None else task_id, Jsonb(result)),
-        )
+        _write_run(connection, result, storage_key)
+
+
+def _write_run(connection, result, storage_key):
+    task_id = _identifier(result, "task_id")
+    connection.execute(
+        """INSERT INTO agt_baseline.runs (task_id, result) VALUES (%s, %s)
+           ON CONFLICT (task_id) DO UPDATE
+           SET result = EXCLUDED.result, updated_at = now()""",
+        (storage_key if storage_key is not None else task_id, Jsonb(result)),
+    )
 
 
 def load_run(task_id: str) -> dict[str, Any] | None:
@@ -140,6 +149,15 @@ def load_run(task_id: str) -> dict[str, Any] | None:
 
 if __name__ == "__main__":
     try:
-        print(json.dumps(probe(), ensure_ascii=False, indent=2))
+        if sys.argv[1:] == ["--save-dispatch"]:
+            # The Worker validates ownership and task identity before invoking this writer.
+            payload = json.load(sys.stdin)
+            with _connect() as connection:
+                _ensure_schema(connection)
+                for paper in payload["papers"]:
+                    _write_paper(connection, paper)
+                _write_run(connection, payload["result"], payload["storage_key"])
+        else:
+            print(json.dumps(probe(), ensure_ascii=False, indent=2))
     except (DatabaseError, ValueError) as error:
         raise SystemExit(str(error)) from None

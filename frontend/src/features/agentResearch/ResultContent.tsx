@@ -32,6 +32,19 @@ export default function ResultContent({ result, onReadEvidence, onReadSource }: 
   if (result.comparison_table.trim()) entries.push({ key: 'comparison', label: t('论文比较'), icon: <TableOutlined aria-hidden />, children: markdown(result.comparison_table) });
   if (result.unresolved.length) entries.push({ key: 'unresolved', label: t('待解决问题'), icon: <QuestionCircleOutlined aria-hidden />, children: <section className="research-unresolved"><h2>{t('仍需进一步确认')}</h2><ol>{result.unresolved.map((item, index) => <li key={index}>{item}</li>)}</ol></section> });
   if (result.citations.length || result.sources.length) entries.push({ key: 'sources', label: t('引用与来源'), icon: <LinkOutlined aria-hidden />, children: <div className="research-sources-view">{result.citations.length > 0 && <><h2>{t('原文证据')}</h2>{result.citations.map((citation, index) => <button type="button" className="research-citation-card" key={citation.chunk_id} onClick={() => setSelectedKey(citation.chunk_id)}><span className="citation-chip">[C{index + 1}]</span><div><strong>{citation.title}</strong><p>{readableEvidence(citation.source_text).text || citation.source_text || t('请打开 PDF 查看完整上下文。')}</p><small>{t('PDF 第 {0} 页 · 查看证据', [citation.page])} <ArrowRightOutlined aria-hidden /></small></div></button>)}</>}{result.sources.length > 0 && <><h2>{t('研究来源')}</h2><ul className="research-source-list">{result.sources.map(source => <li key={source.source_id}><BookOutlined aria-hidden /><span><button type="button" className="research-source-link" disabled={!onReadSource} onClick={() => onReadSource?.(source)}>{source.title}</button>{source.version && <small>{source.version}</small>}</span></li>)}</ul></>}</div> });
+  const config = result.configuration;
+  const events = result.trace.flatMap((entry) => {
+    if (!entry || typeof entry !== 'object' || !('kind' in entry)) return [];
+    const e = entry as Record<string, unknown>;
+    return [[e.kind, e.name ?? e.purpose ?? e.action, e.outcome].filter(value => typeof value === 'string').join(' · ')];
+  });
+  entries.push({ key: 'execution', label: t('运行记录'), icon: <FileTextOutlined aria-hidden />, children: <section>
+    <p>{config.workflow === 'extension' ? 'Extension' : 'Baseline'} · {String(config.model ?? '')} · {result.usage.elapsed_seconds} s</p>
+    <p>{t('模型调用 {0} 次，工具调用 {1} 次', [result.usage.model_calls, result.usage.tool_calls])}</p>
+    {typeof config.persistence === 'string' && <p>{config.persistence === 'saved' ? t('Agent 数据库已保存') : t('Agent 数据库写入失败')}</p>}
+    {result.errors.map((error, index) => <p key={index}>{error.stage} · {error.type}</p>)}
+    <ol>{events.map((event, index) => <li key={index}>{event}</li>)}</ol>
+  </section> });
   return <>
     {result.stop_reason !== 'completed' && <Alert type="warning" showIcon className="inline-alert" title={t('本次研究仍有未解决的问题')} description={t('已有结果可以阅读，尚未覆盖的内容列在「待解决问题」中。')} />}
     {entries.length ? <Tabs destroyOnHidden className="result-tabs research-result-tabs" activeKey={entries.some(entry => entry.key === activeTab) ? activeTab : entries[0].key} onChange={setActiveTab} items={entries} /> : <Empty description={t('本次尚未返回可展示的内容')} />}

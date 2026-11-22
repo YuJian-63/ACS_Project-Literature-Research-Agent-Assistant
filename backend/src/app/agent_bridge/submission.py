@@ -36,10 +36,10 @@ def create_research_task(session, settings, request, papers, *, user_id, key, di
     manifest = build_research_manifest(uuid4(), uuid4(), request.question,
         [{"paper_id": str(paper.id), "title": paper.title, "sha256": paper.sha256,
             "size_bytes": paper.size_bytes, "page_count": paper.page_count} for paper in papers],
-        settings, allow_search=request.allow_search)
+        settings, allow_search=request.allow_search, research=request.research)
     return _save_agent_task(session, settings, manifest, papers, user_id=user_id, key=key, digest=digest,
         task_type="review" if len(papers) > 1 else "qa", question=request.question,
-        workflow_type="baseline", interface=interface)
+        workflow_type="extended" if request.research and request.research.workflow == "extension" else "baseline", interface=interface)
 
 
 def _save_agent_task(session, settings, manifest, papers, *, user_id, key, digest,

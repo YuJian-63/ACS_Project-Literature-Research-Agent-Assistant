@@ -1,6 +1,6 @@
 # 在 TACC 上运行网页研究任务
 
-网页把问题和可选的论文 UUID 发给后端。Worker 通过课程平台的 `tcloud` 提交一个 CPU 批作业。作业运行仓库中的 Baseline Agent，通过 HTTPS 读取用户论文库、调用百炼，然后把答案和引用写回 TACC 持久目录。Worker 下载结果并存入 PostgreSQL，网页可从引用打开原 PDF 对应页。[作业入口](research/run_job.py) · [Worker 传输](../backend/src/app/agent_bridge/tcloud.py)
+网页把问题和可选的论文 UUID 发给后端。Worker 通过课程平台的 `tcloud` 提交一个 CPU 批作业。作业运行网页选定的 Baseline 或 Extension，通过 HTTPS 读取用户论文库、调用百炼，然后把答案和引用写回 TACC 持久目录。Worker 下载结果并存入 PostgreSQL，网页可从引用打开原 PDF 对应页。[作业入口](research/run_job.py) · [Worker 传输](../backend/src/app/agent_bridge/tcloud.py)
 
 <a id="从头启动本机环境"></a>
 
@@ -16,13 +16,14 @@
 | `BAILIAN_API_KEY` | 你在百炼工作空间创建的 API key。若工作空间的地址或模型有差异，同表填写 `MODEL_BASE_URL` 和 `MODEL_NAME`。 |
 | `ARXIV_CONTACT_EMAIL` | 网页搜索和导入论文时提供给 arXiv 的联系邮箱。首次配置留空会使用发件地址；已有配置会保留原联系人。注册表单中的收件邮箱由注册人自行填写。 |
 | `AGENT_TCLOUD_ENV_NAME` | 课程 SDK 列出的作业环境名，默认 `acs-network-probe`。 |
-| `TAVILY_API_KEY` | 独立 Agent 用 Tavily 搜索外部 arXiv 论文时使用。留空保留已有值。 |
-| `AGENT_DATABASE_URL` | 独立 Agent 开启 `--persist` 时的 PostgreSQL 连接。填 Neon 连接串可写入 Neon，填 `local` 可写入本机开发库的 `agt_baseline` schema。切换影响后续运行，已有记录保存在原库。 |
+| `TAVILY_API_KEY` | 网页作业通过本机代理调用 Tavily 搜索 arXiv，独立 Agent 也使用此 key。 |
+| `AGENT_PERSIST` | `true` 为网页 TACC 任务启用 Agent 数据库写入，默认关闭。 |
+| `AGENT_DATABASE_URL` | 网页启用持久化、独立 Agent 开启 `--persist` 时的 PostgreSQL 连接。填 Neon 连接串可写入 Neon，填 `local` 可写入本机开发库的 `agt_baseline` schema。切换影响后续运行，已有记录保存在原库。 |
 | `EMBEDDING_BASE_URL`、`EMBEDDING_MODEL`、`EMBEDDING_DIMENSIONS` | Retrieval Extension 的嵌入配置，可按需覆盖默认值。 |
 
 首次创建后端配置时，脚本生成本机 PostgreSQL 密码、登录密钥和邮件加密密钥，并启用网页 arXiv 搜索与 TACC 派发。已有开发环境会保留数据库连接、存储路径及现有密钥。修改表单后重新运行 `configure`，再重启服务即可生效。已配置的组件可直接使用 `up`。
 
-**安装前端依赖。** 在仓库根目录运行 `npm --prefix frontend ci`。本阶段的空预选验收使用自己的论文库，网页搜索使用 arXiv 接口。独立 Agent 的 Tavily 搜索目前仍待接入 TACC 派发。
+**安装前端依赖。** 在仓库根目录运行 `npm --prefix frontend ci`。本阶段的空预选验收使用自己的论文库，网页搜索使用 arXiv 接口。开启搜索的 TACC 作业可用自己的短期令牌调用本机 Tavily 代理。
 
 **准备数据库。** 首次运行或代码带来新迁移时，在备份已有数据后执行：
 
@@ -76,7 +77,32 @@
 
 复现本次验收可上传[两页测试 PDF](<../frontend/checks/fixtures/Orchid Calibration Report.pdf>)，提问「只查我的论文库，《Orchid Calibration Report》最终校准记录的校验标签是什么？请引用第二页原文。」页面应给出 `LUMEN-472`，引用应能打开第二页。[浏览器验收脚本](../frontend/checks/live-tcloud.cjs)
 
-每次提交仅同步 Baseline 所需源码、作业启动文件、任务清单和短期凭据。`input.zip` 只含 `manifest.json`、`task.json`、`sources.json`。预选论文随清单携带 UUID 与 SHA-256，动态检索按提交用户授权。两种路径都在作业首次读取时下载 PDF、核对摘要，沿用 Agent 的分页解析，无需向 `agent/data/` 复制文件。[Agent 读库实现](../agent/apis/library.py)
+每次提交仅同步两种模式所需源码、作业启动文件、任务清单和短期凭据。`input.zip` 只含 `manifest.json`、`task.json`、`sources.json`。预选论文随清单携带 UUID 与 SHA-256，动态检索按提交用户授权。两种路径都在作业首次读取时下载 PDF、核对摘要，沿用 Agent 的分页解析，无需向 `agent/data/` 复制文件。[Agent 读库实现](../agent/apis/library.py)
+
+## 阶段二网页验收
+
+在「新建研究 → 研究设置」选择 **Baseline** 或 **Extension**，默认 Baseline。两种模式在网页上默认使用 compact 上下文，可切换为 full。初次选择 Extension 时默认勾选 Planner 和 Reflection，可分别取消。预算随任务冻结，服务端上限由 `backend/.env` 中的 `AGENT_MAX_STEPS`、`AGENT_TIMEOUT_SECONDS`、`AGENT_CONTEXT_TOKENS`、`AGENT_OUTPUT_TOKENS` 和 `AGENT_SEARCH_MAX_PAPERS` 控制。
+
+| 状态 | 用例 | 在网页中核对 |
+| --- | --- | --- |
+| 已有真实作业 | Baseline 库内搜索、预选、分页阅读、分块摘要 | 作业 30395、30387 和 30628，见下方记录。 |
+| 已接入，待真实作业 | Baseline，开启搜索，参考论文留空，搜索一篇库里还没有的论文 | 「运行记录」有 `search_papers`，再看打开原文和阅读工具。在正文点击引用，导入同一 arXiv 版本，打开引用页。 |
+| 已接入，待真实作业 | Extension，勾选两篇 PDF，开启 Planner、Reflection 和 compact，要求分别检索单篇及两篇并比较 | 核对 `planner`、`retrieve`、`embedding`、`retrieval_index` 和自然交稿后的 `reflection`；两篇分别有可点击的证据。进入上下文压力收尾时可跳过 Reflection。 |
+| 两种模式的 Neon 写入与读回已实测，待真实作业 | 开启 `AGENT_PERSIST=true` 后运行两种模式 | 「运行记录」显示 Agent 数据库保存状态。网页仍从本机后端取结果，Worker 另外把解析文档和完整 TaskResult 写入配置的 Agent 数据库。 |
+
+**Baseline 可复制问题**（先确认自己的库里还没有 LoRA）
+
+```text
+请用外部 arXiv 搜索找到 Hu 等人的 LoRA 原论文。根据原文解释训练时哪些参数被冻结、哪些参数被更新。给出引用和页码，以便我导入论文后打开对应页。
+```
+
+**Extension 可复制问题**（先上传并勾选 LoRA 与 QLoRA）
+
+```text
+请先在 LoRA 单篇中检索低秩更新公式，再在 LoRA 和 QLoRA 两篇原文中一起检索节省显存的机制。用表格比较冻结权重、训练参数和量化方式，每一行都给出两篇各自的页码证据。不要直接比较不同实验配置的显存数字。
+```
+
+Neon 使用 `agt_baseline.papers` 和 `agt_baseline.runs`。Baseline 的 run 键是网页任务 UUID，Extension 用 `extension/<网页任务 UUID>`。同一任务重交付按键更新。外部写入失败或解析文档超出交付上限时，网页保留研究结果并显示持久化失败。修改私有配置表后运行 `./scripts/local-research configure`，再重启本机服务。
 
 ## 查看作业
 

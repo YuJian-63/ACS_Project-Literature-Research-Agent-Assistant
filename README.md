@@ -1,6 +1,6 @@
 # Literature Research Agent Assistant
 
-HKUST CSIT6000V Advanced AI Computing and Systems 课程项目。用户在网页上传 PDF，提交研究问题，可预选论文或让 Agent 搜索自己的论文库。课程模式下，后端 Worker 派发 TACC CPU 作业，独立 Baseline Agent 调用百炼。答案回到网页后，点击引用即可打开原 PDF 的对应页。
+HKUST CSIT6000V Advanced AI Computing and Systems 课程项目。用户在网页上传 PDF，提交研究问题，可预选论文或让 Agent 搜索自己的论文库。课程模式下，后端 Worker 派发 TACC CPU 作业，按网页选择的 Baseline 或 Extension 调用百炼。答案回到网页后，点击引用即可打开原 PDF 的对应页。
 
 ## 项目结构
 

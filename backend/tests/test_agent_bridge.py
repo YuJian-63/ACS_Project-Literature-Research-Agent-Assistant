@@ -76,6 +76,26 @@ class AgentBridgeTests(unittest.TestCase):
         self.assertLessEqual(review.task.timeout_seconds, 1800)
         self.assertLessEqual(review.task.max_output_tokens, self.settings.agent_output_tokens)
 
+    def test_persistence_binds_parsed_documents_and_preserves_result_on_write_failure(self):
+        from app.agent_bridge.contracts import ResultEnvelope
+        from app.agent_bridge.store import persist_dispatch
+        from app.agent_bridge.results import validate_delivery
+
+        self.manifest.runtime.persist = True
+        raw = self.delivery()
+        paper = {"paper_id": str(self.paper_id), "source_id": self.manifest.sources[0].source_id,
+            "sha256": self.source["sha256"], "title": "fixture", "url": ""}
+        raw["result"]["sources"] = [paper]
+        envelope = ResultEnvelope.model_validate(dict(raw, parsed_papers=[paper.copy()]))
+        validate_delivery(self.manifest, envelope)
+        persist_dispatch(self.settings, self.manifest, envelope)
+        self.assertTrue(envelope.result.answer)
+        self.assertEqual(envelope.result.configuration["persistence"], "failed")
+        self.assertEqual(envelope.result.errors[-1]["stage"], "persistence")
+        envelope.parsed_papers[0]["sha256"] = "0" * 64
+        with self.assertRaises(ValueError):
+            validate_delivery(self.manifest, envelope)
+
     def test_bundle_only_contains_authorized_inputs_and_is_idempotent(self):
         (self.root / ".env").write_text("PRIVATE_KEY=must-not-leak", encoding="utf-8")
         spool = self.root / "exchange"

@@ -30,6 +30,17 @@ class AgentResearchContractTests(unittest.TestCase):
         request = AgentResearchCreate(question="Compare", paper_ids=identifiers, allow_search=False)
         self.assertEqual(request.paper_ids, identifiers)
 
+    def test_research_settings_bind_retries_and_preserve_old_request_hash(self):
+        from app.api.agent_research_schemas import AgentResearchCreate
+        from app.tasks.unified import research_request_hash
+
+        old = AgentResearchCreate(question="Explain")
+        self.assertEqual(research_request_hash(old), research_request_hash(AgentResearchCreate(question="Explain", research={})))
+        request = AgentResearchCreate(question="Explain", research={"workflow": "extension", "reflection": True})
+        self.assertNotEqual(research_request_hash(old), research_request_hash(request))
+        with self.assertRaises(ValidationError):
+            AgentResearchCreate(question="Explain", research={"planner": True})
+
     def test_invalid_inputs_and_client_budgets_are_rejected(self):
         from app.api.agent_research_schemas import AgentResearchCreate
 

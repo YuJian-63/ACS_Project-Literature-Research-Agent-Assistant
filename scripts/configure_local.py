@@ -79,6 +79,11 @@ def configure(root):
                      "EMBEDDING_BASE_URL", "EMBEDDING_MODEL", "EMBEDDING_DIMENSIONS"):
             if form.get(name):
                 model_updates[name] = form[name]
+        persist = (form.get("AGENT_PERSIST") or old.get("AGENT_PERSIST") or "false").lower()
+        if persist not in {"true", "false"}:
+            raise SystemExit("AGENT_PERSIST 必须为 true 或 false")
+        updates["AGENT_PERSIST"] = persist
+        updates["TAVILY_API_KEY"] = model_updates.get("TAVILY_API_KEY") or model.get("TAVILY_API_KEY") or ""
         staged_backend = stage_env(backend, updates, cleanup)
         check_config(Settings(_env_file=staged_backend), mail=True)
         agent_db = form.get("AGENT_DATABASE_URL")
@@ -96,6 +101,10 @@ def configure(root):
             except ProgrammingError:
                 raise SystemExit("AGENT_DATABASE_URL 需要有效的 PostgreSQL 连接串或 local") from None
             model_updates["DATABASE_URL"] = agent_db
+        destination = model_updates.get("DATABASE_URL") or model.get("DATABASE_URL")
+        if persist == "true" and not destination:
+            raise SystemExit("启用 AGENT_PERSIST 需要 AGENT_DATABASE_URL")
+        set_key(str(staged_backend), "AGENT_PERSIST_DATABASE_URL", destination if persist == "true" else "")
         staged_agent = stage_env(agent, model_updates, cleanup)
         os.replace(staged_agent, agent)
         os.replace(staged_backend, backend)

@@ -23,6 +23,9 @@ class Settings(BaseSettings):
     parser_timeout_seconds: float = Field(default=120, ge=1, le=600, allow_inf_nan=False)
     task_runner: Literal["agent"] = "agent"
     agent_dispatch_enabled: bool = False
+    agent_persist: bool = False
+    agent_persist_database_url: SecretStr | None = None
+    tavily_api_key: SecretStr | None = None
     agent_exchange_root: Path | None = None
     agent_library_public_url: str | None = None
     agent_transport: Literal["manual", "local", "tacc", "tcloud"] = "manual"

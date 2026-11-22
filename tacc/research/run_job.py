@@ -66,7 +66,7 @@ def read_manifest(identity):
         if (
             manifest["schema_version"] != "agent-dispatch-v1"
             or manifest["dispatch_id"] != identity["dispatch_id"]
-            or manifest["runtime"]["persist"] is not False
+            or type(manifest["runtime"]["persist"]) is not bool
             or task != json.loads(archive.read("task.json"))
             or sources != json.loads(archive.read("sources.json"))
             or len(sources) > 20
@@ -103,15 +103,14 @@ def read_manifest(identity):
     return manifest
 
 
-def run_research(identity, deadline):
+def run_research(identity, deadline, papers):
     from apis.library import LibraryClient
-    from baseline import run_task
     from dotenv import dotenv_values
     from schemas import Task
 
     manifest = read_manifest(identity)
     settings = dotenv_values(os.environ["ACS_MODEL_CONFIG"], interpolate=False)
-    for name in ("MODEL_BASE_URL", "MODEL_NAME", "BAILIAN_API_KEY", "TAVILY_API_KEY"):
+    for name in ("MODEL_BASE_URL", "MODEL_NAME", "BAILIAN_API_KEY", "EMBEDDING_BASE_URL", "EMBEDDING_MODEL", "EMBEDDING_DIMENSIONS"):
         if settings.get(name):
             os.environ[name] = settings[name]
     if not settings.get("MODEL_BASE_URL", "").startswith(
@@ -133,12 +132,29 @@ def run_research(identity, deadline):
     if remaining <= 0:
         raise DeadlineExpired
     task.timeout_seconds = min(task.timeout_seconds or remaining, remaining)
-    return run_task(
+    runtime = manifest["runtime"]
+    research = runtime.get("research") or {}
+    workflow = research.get("workflow", "baseline")
+    options = {key: research[key] for key in ("context_policy", "context_finalize_ratio") if key in research}
+    if workflow == "extension":
+        from extension import run_task
+        options["index_dir"] = Path(os.environ["TACC_USERDIR"]) / "acs-research" / "retrieval"
+        options.update(planner=research.get("planner", False), reflection=research.get("reflection", False))
+    elif workflow == "baseline":
+        from baseline import run_task
+    else:
+        raise ValueError("Unknown research workflow")
+    if task.allow_search and library:
+        options["search"] = library.search_arxiv
+    result = run_task(
         task,
         library=library,
-        persist=False,
-        context_window=manifest["runtime"]["context_window"],
+        persist=papers.extend if runtime["persist"] else False,
+        context_window=runtime["context_window"],
+        **options,
     ).model_dump(mode="json")
+    result["configuration"]["workflow"] = workflow
+    return result
 
 
 def main():
@@ -201,12 +217,17 @@ def main():
         signal.signal(signal.SIGALRM, interrupt_at_deadline)
         try:
             signal.setitimer(signal.ITIMER_REAL, max(0.001, deadline - time.time()))
-            result = run_research(identity, deadline)
+            papers = []
+            result = run_research(identity, deadline, papers)
             signal.setitimer(signal.ITIMER_REAL, 0)
-            publish(
-                directory / "result.json",
-                {"schema_version": "agent-result-v1", **identity, "result": result},
-            )
+            envelope = {"schema_version": "agent-result-v1", **identity, "result": result}
+            if papers:
+                envelope["parsed_papers"] = papers
+                limit = dispatch.get("max_result_bytes", 16 * 1024 * 1024)
+                if len(json.dumps(envelope, ensure_ascii=False).encode()) > limit:
+                    del envelope["parsed_papers"]
+                    result["errors"].append({"stage": "persistence", "type": "PaperBundleTooLarge"})
+            publish(directory / "result.json", envelope)
             reason = result["stop_reason"]
             state = "succeeded" if reason in {"completed", "partial"} else "failed"
             write_status(directory, identity, state, stop_reason=reason)

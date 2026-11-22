@@ -1,12 +1,12 @@
 # 后端与独立 Agent 对接
 
-网页提交问题和可选论文，后端冻结输入、预算与用户权限。课程环境中，每个新任务对应一个 TACC CPU 作业，运行 Baseline Agent，通过 HTTPS 读取论文库并调用百炼。Worker 将结果写回数据库，网页从引用跳转到原 PDF。[从头启动与真实验收](../tacc/TACC.md) · [后端传输配置](../backend/README.md#8-独立-agent-配置)
+网页提交问题和可选论文，后端冻结输入、预算与用户权限。课程环境中，每个新任务对应一个 TACC CPU 作业，运行选定的 Baseline 或 Extension，通过 HTTPS 读取论文库并调用百炼。Worker 将结果写回数据库，网页从引用跳转到原 PDF。[从头启动与真实验收](../tacc/TACC.md) · [后端传输配置](../backend/README.md#8-独立-agent-配置)
 
 ## 从提交到作业
 
-1. 登录用户调用 `POST /api/v1/agent-research`，提交 `question`、`paper_ids` 和 `allow_search`。开启搜索可留空论文，关闭搜索至少选一篇。后端检查选中文件的归属，以 `202` 返回 `task_id`。同一请求重试时复用 `Idempotency-Key`。[统一研究接口](api-contract.md#13-v3-统一研究接口2026-11-20)
+1. 登录用户调用 `POST /api/v1/agent-research`，提交 `question`、`paper_ids`、`allow_search` 和可选的 `research`。开启搜索可留空论文，关闭搜索至少选一篇。后端检查选中文件的归属，以 `202` 返回 `task_id`。同一请求重试时复用 `Idempotency-Key`。[统一研究接口](api-contract.md#13-v3-统一研究接口2026-11-20)
 2. 每个任务绑定一个 `dispatch_id`。研究 Worker 领取后，在 `AGENT_EXCHANGE_ROOT/outbox/<dispatch_id>/` 生成 `input.zip` 和作业私有的 `library-access.json`。课程 ZIP 仅含 `manifest.json`、`task.json`、`sources.json`。每篇预选论文以 `local:<论文 UUID>@<SHA-256>` 标识，空预选时来源列表为 `[]`。[输入契约](../backend/src/app/agent_bridge/contracts.py)
-3. Worker 用 `tcloud submit` 同步本次所需的 Agent 源码、作业脚本、输入和凭据。计算节点运行 `job.sh`，由 `run_job.py` 调用 `baseline.run_task(..., library=..., persist=False)`。Python 3.12 和依赖可跨作业缓存。[提交文件清单](../backend/src/app/agent_bridge/tcloud.py) · [作业入口](../tacc/research/run_job.py)
+3. Worker 用 `tcloud submit` 同步本次所需的 Agent 源码、作业脚本、输入和凭据。计算节点运行 `job.sh`，由 `run_job.py` 按清单调用 Baseline 或 Extension，启用 Agent 持久化时随结果回传解析文档。Python 3.12 和依赖可跨作业缓存。[提交文件清单](../backend/src/app/agent_bridge/tcloud.py) · [作业入口](../tacc/research/run_job.py)
 
 ## PDF 与权限
 
@@ -18,7 +18,9 @@
 | TACC 作业读取论文 | Worker 签发绑定本次派发的只读 Bearer 令牌。开启搜索时可列出、读取提交用户的论文。关闭搜索时列表返回 403，仅可下载预选原件。任务到期或进入终态后令牌失效。 |
 | TACC 作业调用模型 | Worker 用私有 `AGENT_TCLOUD_MODEL_ENV_FILE` 中的百炼凭据换取本次作业的临时 key。有效期取任务剩余时间，最长 30 分钟。 |
 
-`AGENT_LIBRARY_PUBLIC_URL` 填计算节点可访问的 HTTPS 地址。采用临时隧道时，将它指向本机 `app.main:create_library_app`（示例端口 `8001`）。该入口只提供 `GET /health`、`GET /api/v1/agent/papers`、`GET /api/v1/agent/papers/{paper_id}/pdf`。网页登录与任务提交使用主 API（示例端口 `8000`）。独立调试可从主 API 的 `POST /api/v1/agent/library-token` 申请会话令牌。[论文库 API](api-contract.md#41-agent-论文库)
+`AGENT_LIBRARY_PUBLIC_URL` 填计算节点可访问的 HTTPS 地址。采用临时隧道时，将它指向本机 `app.main:create_library_app`（示例端口 `8001`）。该入口只提供 `GET /health`、`GET /api/v1/agent/papers`、`GET /api/v1/agent/papers/{paper_id}/pdf` 和作业专用的 `GET /api/v1/agent/search-arxiv`。网页登录与任务提交使用主 API（示例端口 `8000`）。独立调试可从主 API 的 `POST /api/v1/agent/library-token` 申请会话令牌。[论文库 API](api-contract.md#41-agent-论文库)
+
+搜索代理只接受开启搜索的活动作业令牌，查询域固定为 arXiv。Tavily key 和 Agent 数据库连接串保留在本机；聊天和嵌入使用百炼短期凭据。
 
 ## 结果与恢复
 

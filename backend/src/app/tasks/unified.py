@@ -47,6 +47,8 @@ def research_references(session, task_ids: list[UUID], user_id: UUID):
 
 def research_request_hash(request: AgentResearchCreate) -> str:
     payload = {"interface": RESEARCH_INTERFACE, **request.model_dump(mode="json")}
+    if request.research and not request.research.model_dump(exclude_defaults=True):
+        payload.pop("research", None)  # Match default requests from older browser sessions.
     return hashlib.sha256(json.dumps(payload, sort_keys=True, separators=(",", ":"),
         ensure_ascii=False).encode("utf-8")).hexdigest()
 

@@ -40,6 +40,7 @@
 ```
 
 - `question` 必填，非空，最多 8000 字符。`paper_ids` 默认为空数组，最多 20 个不重复的本账号论文 UUID，按提交顺序保存。允许使用 `uploaded`、`processing`、`ready` 的原件；已解析失败的预选论文返回 `409 PAPER_NOT_READY`。
+- `research` 可省略。支持 `workflow=baseline|extension`、`context_policy=full|compact`、`context_finalize_ratio`（默认 0.9，可为 null）和仅在 Extension 下启用的 `planner`、`reflection`。默认 Baseline、完整上下文、两个开关关闭。
 - `allow_search` 默认为 `true`，允许 Agent 按需补充来源，包括本账号的论文；设为 `false` 时至少预选一篇，仅使用指定论文。执行预算由后端在创建时确定。
 - 可选请求头 `Idempotency-Key` 为 1–128 个不含空白的可见 ASCII 字符。同账号同键同输入返回原任务；更换问题、论文顺序或搜索开关却沿用同键，返回 `409 IDEMPOTENCY_CONFLICT`。
 - 首次创建返回 `202` 和 `{"task_id":"<uuid>","status":"queued"}`。幂等重放同样返回 202，`task_id` 保持一致，`status` 为该任务当前状态。响应头 `Location` 指向详情接口，`Idempotency-Replayed` 标记是否重放。派发未启用返回 `503 AGENT_NOT_CONNECTED`，传输配置不完整返回 `503 RUNNER_NOT_CONFIGURED`。
