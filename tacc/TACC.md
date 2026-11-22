@@ -12,15 +12,27 @@
 ./scripts/local-research up
 ```
 
-入口会启动 Compose 数据库、主 API、只读论文库、解析 Worker、研究 Worker 和前端。留空 `AGENT_LIBRARY_PUBLIC_URL` 时，它用 Docker Desktop 创建指向只读论文库的 Cloudflare 临时隧道。配置 arXiv 或 SMTP 后，对应的导入或邮件 Worker 也会启动。终端显示网页地址表示数据库、前端代理和论文库公网健康检查已通过。保持终端打开，作业回传后可按 Ctrl+C 停止本次进程。
+入口会启动 Compose 数据库、主 API、只读论文库、解析 Worker、研究 Worker 和前端。留空 `AGENT_LIBRARY_PUBLIC_URL` 时，它用 Docker Desktop 创建指向只读论文库的 Cloudflare 临时隧道。配置 arXiv 或 SMTP 后，对应的导入或邮件 Worker 也会启动。等启动器打印以「网页」开头、同时列出网页和论文库地址的一行，即可打开网页。此时数据库、前端代理和论文库公网健康检查均已通过。保持终端打开，作业回传后可按 Ctrl+C 停止本次进程。
 
 在[论文库](http://127.0.0.1:5173/papers)上传测试 PDF，从[新建研究](http://127.0.0.1:5173/tasks/new)提交问题。结果页地址最后一段是任务 UUID。另开终端在仓库根目录查询：
 
 ```sh
 ./scripts/local-research jobs            # 最近十条，含状态和 TACC 作业号
 ./scripts/local-research jobs TASK_UUID  # 只看这次任务
-./scripts/local-research logs            # 跟踪各本机服务日志
 ```
+
+### 看终端日志
+
+`up` 所在的终端会实时显示各服务的输出，每行开头的标签表示来源：
+
+| 标签 | 看什么 |
+| --- | --- |
+| `[web]`、`[api]` | 前端开发服务、网页登录和研究请求。`POST /api/v1/agent-research` 返回 202 表示后端已受理。 |
+| `[worker]` | 研究 Worker 的派发、重试或回传异常。查询某一单的状态和作业号用上面的 `jobs TASK_UUID`。 |
+| `[library]`、`[parser]` | TACC 对只读论文库的 HTTP 请求、本机 PDF 解析进程的输出。 |
+| `[imports]`、`[mail]` | 启用对应功能后，查看 arXiv 导入或邮件 Worker 的输出。 |
+
+日志同时写入 `backend/runtime/local-research/<服务名>.log`，每次启动该服务会重写对应文件。需要单独跟踪时，另开终端运行 `./scripts/local-research logs worker`，或运行 `./scripts/local-research logs` 查看全部服务。两条命令都会先显示最近 20 行，再跟踪新输出。在这个查看窗口按 Ctrl+C 只退出日志查看。
 
 网页「搜索论文」使用 `ARXIV_ENABLED=true` 和 `ARXIV_CONTACT_EMAIL`，用户确认导入后由导入 Worker 下载原文。网页注册使用 SMTP 验证邮件，已有已验证账号可直接登录。[账号配置](../backend/README.md#10-账号与邮件)
 

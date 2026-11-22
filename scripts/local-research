@@ -33,9 +33,19 @@ with create_database_engine(Settings()).connect() as db:
         print(" | ".join(str(value) if value is not None else "—" for value in row))
 PY
     ;;
-  logs) exec tail -n 20 -F "$state"/*.log ;;
+  logs)
+    case "${2:-}" in
+      '') shopt -s nullglob; files=("$state"/*.log) ;;
+      api|library|parser|worker|imports|mail|web) files=("$state/$2.log") ;;
+      *) echo "服务名可选 api library parser worker imports mail web" >&2; exit 2 ;;
+    esac
+    if [[ ${#files[@]} == 0 || ! -f "${files[0]:-}" ]]; then
+      echo "没有对应的日志，请先启动服务" >&2; exit 1
+    fi
+    exec tail -n 20 -F "${files[@]}"
+    ;;
   up) ;;
-  *) echo "Usage: scripts/local-research [up | jobs [TASK_UUID] | logs]" >&2; exit 2 ;;
+  *) echo "Usage: scripts/local-research [up | jobs [TASK_UUID] | logs [SERVICE]]" >&2; exit 2 ;;
 esac
 
 [[ -x "$python" && -f ../frontend/node_modules/vite/bin/vite.js ]] || {
@@ -70,7 +80,10 @@ tunnel_id=''
 start() {
   local name=$1
   shift
-  "$@" > "$state/$name.log" 2>&1 &
+  # Keep $! pointing at the service so supervision and shutdown still reach it.
+  "$@" > >(while IFS= read -r line || [[ -n "$line" ]]; do
+    printf '[%s] %s\n' "$name" "$line"
+  done | tee "$state/$name.log") 2>&1 &
   pids+=("$!")
   names+=("$name")
 }
@@ -115,6 +128,8 @@ wait_health() {
   return 1
 }
 
+echo "服务日志按 [服务名] 标记。查看某一项可运行 ./scripts/local-research logs worker"
+export PYTHONUNBUFFERED=1
 start library "$python" -m uvicorn app.main:create_library_app --factory --host 127.0.0.1 --port 8001
 wait_health "$library/health" ok
 public_url=$("$python" -c 'from app.config import Settings; print(Settings().agent_library_public_url or "")')
