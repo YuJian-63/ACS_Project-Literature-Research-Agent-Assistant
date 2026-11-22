@@ -151,6 +151,10 @@ class TcloudTransport(ManualTransport):
                 content = source.read_text().replace("DISPATCH_ID", str(manifest.dispatch_id))
                 content = content.replace("name: acs-network-probe", f"name: '{self.settings.agent_tcloud_env_name}'", 1)
                 (stage / name).write_text(content)
+            elif name == "run_job.py":
+                shutil.copyfile(source, stage / "research_job.py")
+                shutil.copyfile(Path(__file__).with_name("metrics_job.py"), stage / name)
+                shutil.copyfile(Path(__file__).with_name("model_telemetry.py"), stage / "model_telemetry.py")
             else:
                 shutil.copyfile(source, stage / name)
         (stage / "agent" / "apis").mkdir(parents=True)

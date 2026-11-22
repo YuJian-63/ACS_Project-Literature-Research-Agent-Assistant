@@ -13,6 +13,7 @@ from app.api.views import resource_error
 from app.auth.dependencies import require_user
 from app.db.models import AgentQueueSettings, AgentRun, Task, User
 from app.errors import APIError
+from app.task_metrics.service import task_metrics
 from app.tasks.service import ensure_task_deletable
 from app.tasks.lifecycle import lock_agent_queue
 from app.tasks.unified import get_research, history_papers, research_filters, research_references, submit_research
@@ -73,7 +74,8 @@ def get_record(task_id: UUID, request: Request, user: CurrentUser):
             raise APIError(500, "INTERNAL_ERROR", "研究执行记录不可用")
         papers = research_references(session, [task_id], user.id)[task_id]
         return {"task_id": task.id, "question": task.question, "status": task.status,
-            "paper_ids": [paper["id"] for paper in papers], "result": run.result, "error": resource_error(task)}
+            "paper_ids": [paper["id"] for paper in papers], "result": run.result, "error": resource_error(task),
+            "metrics": task_metrics(session, task, run, request.app.state.settings)}
 
 
 @router.delete("/{task_id}", status_code=204)

@@ -5,6 +5,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 
 from app.agent_bridge.contracts import AgentResult, ResearchOptions
 from app.api.schemas import Error, TaskStatus
+from app.task_metrics.contracts import TaskMetrics
 
 
 class AgentResearchCreate(BaseModel):
@@ -77,3 +78,4 @@ class AgentResearchRecord(BaseModel):
     paper_ids: list[UUID]
     result: AgentResult | None
     error: Error | None
+    metrics: TaskMetrics

@@ -41,6 +41,12 @@ class TcloudTests(unittest.TestCase):
             self.assertEqual(cwd.name, f"acs-{self.manifest.dispatch_id}")
             self.assertTrue((cwd / "agent" / "baseline.py").is_file())
             self.assertTrue((cwd / "run_job.py").is_file())
+            self.assertEqual((cwd / "research_job.py").read_bytes(),
+                (Path(__file__).resolve().parents[2] / "tacc" / "research" / "run_job.py").read_bytes())
+            self.assertEqual((cwd / "agent/baseline.py").read_bytes(),
+                (Path(__file__).resolve().parents[2] / "agent" / "baseline.py").read_bytes())
+            self.assertIn("def install():", (cwd / "model_telemetry.py").read_text())
+            self.assertIn("def run_research(*args, **kwargs):", (cwd / "run_job.py").read_text())
             self.assertEqual(json.loads((cwd / "dispatch.json").read_text())["input_sha256"], manifest_digest(self.manifest))
             self.assertFalse(any(p.name == ".env" or p.name == ".git" for p in cwd.rglob("*")))
             with zipfile.ZipFile(cwd / "input.zip") as bundle:

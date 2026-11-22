@@ -23,6 +23,7 @@ from app.api.views import summary_view, task_view
 from app.auth.dependencies import require_user
 from app.db.models import AgentRun, Artifact, Citation, Paper, Task, TaskEvent, User
 from app.errors import APIError
+from app.task_metrics.service import task_metrics
 from app.tasks.service import ensure_task_deletable, get_task, selected_papers, submit_task
 
 CurrentUser = Annotated[User, Depends(require_user)]
@@ -72,6 +73,7 @@ def task_detail(request: Request, task_id: UUID, user: CurrentUser) -> dict:
     with request.app.state.sessions() as session:
         task = get_task(session, task_id, user.id)
         view = task_view(task, selected_papers(session, [task_id])[task_id])
+        run = None
         if task.runner_type == "agent":
             run = session.get(AgentRun, task_id)
             if run is not None:
@@ -79,6 +81,7 @@ def task_detail(request: Request, task_id: UUID, user: CurrentUser) -> dict:
                     "transport": task.run_config.get("transport", "file-exchange-v1"),
                     "stop_reason": run.stop_reason, "unresolved": (run.result or {}).get("unresolved", []),
                     "limits": task.run_config["agent_limits"]}
+        view["metrics"] = task_metrics(session, task, run, request.app.state.settings)
         return view
 
 

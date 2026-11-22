@@ -5,6 +5,7 @@ from uuid import UUID
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from app.agent_bridge.contracts import AgentResult, StopReason
+from app.task_metrics.contracts import TaskMetrics
 
 PaperStatus = Literal["uploaded", "processing", "ready", "failed"]
 TaskStatus = Literal["queued", "running", "succeeded", "failed"]
@@ -169,6 +170,7 @@ class TaskResponse(TaskSummary):
     last_event_seq: int
     retrieval: None = None
     agent: AgentExecution | None = None
+    metrics: TaskMetrics
 
 
 class EventResponse(BaseModel):
