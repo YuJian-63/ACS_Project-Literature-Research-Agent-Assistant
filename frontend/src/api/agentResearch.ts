@@ -9,7 +9,7 @@ export interface ResearchOptions {
   planner: boolean;
   reflection: boolean;
 }
-export const defaultResearch: ResearchOptions = { workflow: 'baseline', context_policy: 'compact', planner: false, reflection: false };
+export const defaultResearch: ResearchOptions = { model_provider: 'tacc', workflow: 'baseline', context_policy: 'compact', planner: false, reflection: false };
 export interface AgentResearchRequest { question: string; paper_ids?: string[]; allow_search?: boolean; research?: ResearchOptions }
 export interface AgentSource { source_id: string; paper_id: string; version?: string | number | null; url: string; title: string }
 export interface AgentEvidence extends AgentSource { chunk_id: string; page: number; source_text: string }

@@ -1,7 +1,6 @@
 import { useLocale } from '../../i18n';
 import type { TaskMetrics } from '../../api/taskMetrics';
 import { formatMetric as value } from '../../shared/lib/taskMetrics';
-import { EvaluationData } from './EvaluationData';
 
 export default function EvaluationTelemetry({ metrics }: { metrics: TaskMetrics }) {
   const locale = useLocale();
@@ -30,8 +29,6 @@ export default function EvaluationTelemetry({ metrics }: { metrics: TaskMetrics 
     <section className="evaluation-report-section"><header><span className="research-section-label">GPU SNAPSHOTS</span><h3>{c('GPU 最近利用率快照', 'Latest GPU utilization snapshots')}</h3></header><p className="evaluation-caption">{c('响应完成时的设备采样，可能包含其他进程；不是任务平均值或实时监控。', 'Device snapshots at response completion may include other processes; these are not task averages or live monitoring.')} {server.gpu_scope}</p>
       {server.gpus.length ? <ul className="evaluation-gpus">{server.gpus.map(gpu => <li key={gpu.uuid}><strong>{gpu.uuid}: {value(gpu.utilization_percent, '%')}</strong><span>{c('调用', 'Call')} #{gpu.call_index} · {gpu.sampled_at || '—'}</span></li>)}</ul> : <p className="evaluation-empty">{c('未采集', 'Not collected')}</p>}
     </section>
-    <section className="evaluation-report-section"><header><span className="research-section-label">REQUEST DETAILS</span><h3>{c('逐次模型请求', 'Individual model requests')}</h3></header>
-      {server.requests?.length ? server.requests.map(request => <details className="evaluation-disclosure" key={request.call_index}><summary>{c('调用', 'Call')} #{request.call_index} · {request.request_id || '—'} · {request.available ? c('已采集', 'Available') : c('部分或未采集', 'Partial or unavailable')}</summary><EvaluationData value={request} /></details>) : <p className="evaluation-empty">{c('未报告请求明细', 'No request details reported')}</p>}
-    </section>
+
   </div>;
 }
