@@ -1,6 +1,6 @@
 import { t, useLocale } from '../../i18n';
 import { useState, type ReactNode } from 'react';
-import { Alert, Button, Drawer, Empty, Tabs } from 'antd';
+import { Button, Drawer, Empty, Tabs } from 'antd';
 import { ArrowRightOutlined, BookOutlined, FileTextOutlined, LinkOutlined, QuestionCircleOutlined, TableOutlined } from '@ant-design/icons';
 import { useSearchParams } from 'react-router-dom';
 import ReactMarkdown from 'react-markdown';
@@ -46,7 +46,6 @@ export default function ResultContent({ result, onReadEvidence, onReadSource }: 
     <ol>{events.map((event, index) => <li key={index}>{event}</li>)}</ol>
   </section> });
   return <>
-    {result.stop_reason !== 'completed' && <Alert type="warning" showIcon className="inline-alert" title={t('本次研究仍有未解决的问题')} description={t('已有结果可以阅读，尚未覆盖的内容列在「待解决问题」中。')} />}
     {entries.length ? <Tabs destroyOnHidden className="result-tabs research-result-tabs" activeKey={entries.some(entry => entry.key === activeTab) ? activeTab : entries[0].key} onChange={setActiveTab} items={entries} /> : <Empty description={t('本次尚未返回可展示的内容')} />}
     <Drawer open={Boolean(selected)} onClose={() => setSelectedKey(undefined)} title={t('证据与来源')} size="default" styles={{ wrapper: { width: 'min(560px, calc(100vw - 24px))' } }}>
       {selected && <><div className="evidence-location"><span className="citation-chip">[C{byId.get(selected.chunk_id)?.number}]</span><span>{t('原文片段')}</span></div><h3 className="evidence-paper-title">{selected.title}</h3><div className="evidence-source-meta">{t('PDF 第 {0} 页', [selected.page])}{selected.version && ' · ' + selected.version}</div><blockquote className="evidence-quote">{readableEvidence(selected.source_text).text || selected.source_text || t('当前摘录没有可确认的完整句子，请打开 PDF 查看上下文。')}</blockquote><Button block disabled={!onReadEvidence} icon={<BookOutlined aria-hidden />} onClick={() => onReadEvidence?.(selected)}>{t('查看 PDF 对应页')}</Button></>}
