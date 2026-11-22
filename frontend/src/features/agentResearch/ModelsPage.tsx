@@ -40,21 +40,21 @@ export default function ModelsPage() {
     catch (err) { notification.error({ title: asApiError(err).message }); }
     finally { setBusy(false); }
   }
-  async function saveUrl() {
-    if (draft === undefined) return;
-    const url = draft.trim().replace(/\/+$/, '');
+  async function saveUrl(clear = false) {
+    if (!clear && !draft?.trim()) return;
+    const url = clear ? '' : draft!.trim().replace(/\/+$/, '');
     if (url && !/^http:\/\/10\.0\.(?:0|[1-9]\d{0,2})\.(?:0|[1-9]\d{0,2}):8000\/v1$/.test(url)) {
       notification.error({ title: t('请输入有效的 TACC 地址，例如 http://10.0.3.10:8000/v1') });
       return;
     }
     setBusy(true);
-    try { await setModelUrl(url); setDraft(undefined); reload(); }
+    try { await setModelUrl(url); setDraft(undefined); void message.success(t(clear ? '服务地址已清除' : '服务地址已保存')); reload(); }
     catch (err) { notification.error({ title: asApiError(err).message }); }
     finally { setBusy(false); }
   }
   const inactive = data?.state === 'stopped' || data?.state === 'failed';
   return <div className="models-page">
-    <div className="page-heading"><div><h1>{t('模型管理')}</h1><p>{t('配置研究模型与全站任务容量')}</p></div><Button onClick={reload}>{t('刷新')}</Button></div>
+    <div className="page-heading"><div><h1>{t('模型设置')}</h1><p>{t('配置研究模型与全站任务容量')}</p></div><Button onClick={reload}>{t('刷新')}</Button></div>
     {error && <ErrorNotice error={error} retry={reload} />}
     <div className="models-dashboard">
       {data && <>
@@ -84,15 +84,18 @@ export default function ModelsPage() {
             <div><h2>{t('指定服务地址')}</h2><p>{t('连接已在 TACC 上运行的模型服务')}</p></div>
             <label htmlFor="course-url">{t('默认服务地址')}</label>
             <Space.Compact className="models-url-field">
-              <Input id="course-url" autoComplete="off" placeholder="http://10.0.3.10:8000/v1" allowClear
-                value={draft ?? ''} onChange={event => setDraft(event.target.value)} />
-              <Button disabled={draft === undefined} loading={busy} onClick={saveUrl}>{t('保存')}</Button>
+              <Input id="course-url" autoComplete="off" placeholder="http://10.0.3.10:8000/v1"
+                disabled={Boolean(data.shared_url) || busy}
+                value={data.shared_url || draft || ''} onChange={event => setDraft(event.target.value)} />
+              {data.shared_url
+                ? <Button disabled={busy} loading={busy} onClick={() => void saveUrl(true)}>{t('清除')}</Button>
+                : <Button disabled={!draft?.trim() || busy} loading={busy} onClick={() => void saveUrl()}>{t('保存')}</Button>}
             </Space.Compact>
           </section>
         </div>
       </>}
     </div>
-    <div className="page-heading concurrency-heading"><div><h1>{t('并发管理')}</h1><p>{t('配置研究任务并发上限')}</p></div></div>
+    <div className="page-heading concurrency-heading"><div><h1>{t('并发设置')}</h1><p>{t('配置研究任务并发上限')}</p></div></div>
     <div className="models-dashboard">
       <section className="content-panel models-concurrency">
         <div><h2 id="research-concurrency-label">{t('研究并发数')}</h2><p>{t('同时运行的研究任务上限，所有账号共享')}</p></div>
