@@ -1,9 +1,0 @@
-# Frontend Chinese and English
-
-The user requested an English interface with user-selectable language switching. Preserve the existing visual layout and business flows. Default to the current Simplified Chinese interface unless a valid saved preference exists; offer 中文 / English in the top bar on desktop and mobile. Persist a non-sensitive locale identifier locally, tolerate blocked/unavailable storage and ignore unsupported saved locales.
-
-Use a small centralized source-message catalog and React's external-store subscription; no additional runtime dependency is needed for two languages. Render translations at use time, including column definitions/status maps and stored system errors. Switching must not remount routes, reset form fields, change request bodies/idempotency keys, resubmit tasks or restart polling. Ant Design locale, document language/title/description and displayed dates change with the UI locale. Preserve exact numeric budgets and identifiers.
-
-Translate application chrome, empty/loading/error states, forms, accessibility labels, upload validation, statuses, import history and known backend diagnostics. Use stable backend error codes for an English fallback when an unknown Chinese diagnostic arrives, retaining its code/request ID. Leave user questions, paper titles/abstracts, source quotations, model-generated artifacts and comparison content in their original language; UI locale does not request a new model output language.
-
-Keep backend/API behavior unchanged. Verify both languages and persistence using isolated browser fixtures, including switching on the current route with active form input, failures, polling and existing artifacts; test blocked storage and mobile layout. Default regression checks remain in the existing ignored runtime convention; formal tracked test/CI adoption is separate pending work. No live source/model calls, user-service restarts, commits or pushes are included.

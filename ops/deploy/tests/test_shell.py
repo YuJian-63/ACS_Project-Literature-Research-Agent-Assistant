@@ -65,6 +65,24 @@ class DeploymentShellTests(unittest.TestCase):
                 result = subprocess.run([BASH, "-n", str(ROOT / name)], capture_output=True, text=True)
                 self.assertEqual(result.returncode, 0, result.stderr)
 
+    def test_running_evaluation_worker_participates_in_deployment_lifecycle(self):
+        source = (ROOT / "deploy-ecs.sh").read_text(encoding="utf-8")
+        setup = "services=(" + source.split("services=(", 1)[1].split("\nas_acs() {", 1)[0]
+        for active in (0, 1):
+            with self.subTest(active=active):
+                script = "\n".join((
+                    f"evaluation_active={active}",
+                    'systemctl() { [[ "$*" == "is-active --quiet acs-evaluation.service" && "$evaluation_active" == 1 ]]; }',
+                    setup,
+                    "include_running_evaluation",
+                    'printf "service:%s\\n" "${services[@]}"',
+                    'printf "worker:%s\\n" "${workers[@]}"',
+                ))
+                result = subprocess.run([BASH, "-c", script], capture_output=True, text=True)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                for prefix in ("service:", "worker:"):
+                    self.assertEqual(prefix + "acs-evaluation.service" in result.stdout.splitlines(), bool(active))
+
     def test_deployment_rejects_invalid_arguments_before_operations(self):
         for arguments in ([], ["a" * 40], ["../../outside", "123-1"], ["a" * 40, "../bad"]):
             with self.subTest(arguments=arguments):

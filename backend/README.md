@@ -104,7 +104,7 @@ TACC 与课程自定义模型路径另外将有效上下文限制为 36864，输
 
 共享同一数据库的研究 Worker 默认合计并发 2 项，可在界面调为 1–4；新设置在下一次领取时生效，降低并发不会中止已派发任务。每用户活跃额度独立于全局并发。每日研究额度按现存任务记录计数，删除记录可能降低当天计数。
 
-Worker 重启沿用任务期限和派发标识，优先恢复已启动任务。详情中的 `agent.dispatch_id`、`remote_job_id` 可用于排查；提交回执不明时保留交换目录。限额更改仅影响新任务，已签名清单不变，失败任务需重新提交。`AGENT_RETENTION_SECONDS` 默认 7 天、最少 1 天，仅供显式清理使用。旧 mock/LangGraph 未完成任务会标为 `RUNNER_RETIRED`，历史终态结果仍可读取。交换和恢复协议见 [Agent 对接契约](../docs/agent-backend-integration.md)。
+Worker 重启沿用任务期限和派发标识，优先恢复已启动任务。详情中的 `agent.dispatch_id`、`remote_job_id` 可用于排查；提交回执不明时保留交换目录。限额更改仅影响新任务，已签名清单不变，失败任务需重新提交。`AGENT_RETENTION_SECONDS` 默认 7 天、最少 1 天，仅供显式清理使用。旧 mock/LangGraph 未完成任务会标为 `RUNNER_RETIRED`，历史终态结果仍可读取。交换和恢复协议见 [Agent 派发协议](../docs/api-contract.md#agent-dispatch-protocol)。
 
 <a id="deepseek-evaluation"></a>
 

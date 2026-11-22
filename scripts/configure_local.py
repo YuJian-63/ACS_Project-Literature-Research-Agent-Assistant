@@ -1,5 +1,4 @@
 """Render the local web/TACC configuration from one private dotenv file."""
-import fcntl
 import os
 import secrets
 import tempfile
@@ -14,6 +13,7 @@ from sqlalchemy.engine import make_url
 
 from app.auth.security import check_config
 from app.config import Settings
+from service_manager import ServiceError, service_lock, validate_configuration
 
 
 def stage_env(path, changes, cleanup):
@@ -37,8 +37,7 @@ def configure(root):
     backend = root / "backend" / ".env"
     agent = root / "agent" / ".env"
     source = root / ".env.local-research"
-    with source.open() as handle, ExitStack() as cleanup:
-        fcntl.flock(handle, fcntl.LOCK_EX)
+    with service_lock(root / "backend/runtime/service.lock"), source.open() as handle, ExitStack() as cleanup:
         source.chmod(0o600)
         form = dotenv_values(stream=handle, interpolate=False)
         old = dotenv_values(backend, interpolate=False)
@@ -62,6 +61,14 @@ def configure(root):
                        ARXIV_CONTACT_EMAIL=form.get("ARXIV_CONTACT_EMAIL") or old.get("ARXIV_CONTACT_EMAIL") or sender,
                        TASK_RUNNER="agent", AGENT_DISPATCH_ENABLED="true", AGENT_TRANSPORT="tcloud",
                        AGENT_TCLOUD_MODEL_ENV_FILE=str(agent))
+        for name, value in (
+            ("FRONTEND_PUBLIC_URL", "http://127.0.0.1:5173"),
+            ("CORS_ORIGINS", '["http://127.0.0.1:5173"]'),
+            ("AUTH_COOKIE_SECURE", "false"),
+            ("EVALUATION_ENABLED", "false"),
+        ):
+            if name not in old:
+                updates[name] = value
         if form.get("AGENT_TCLOUD_ENV_NAME"):
             updates["AGENT_TCLOUD_ENV_NAME"] = form["AGENT_TCLOUD_ENV_NAME"]
         for name in ("AUTH_RATE_KEY", "AUTH_CSRF_KEY"):
@@ -70,9 +77,12 @@ def configure(root):
         if not old.get("MAIL_OUTBOX_KEY"):
             updates["MAIL_OUTBOX_KEY"] = Fernet.generate_key().decode()
         if not backend.exists():
+            defaults = dotenv_values(backend.with_name(".env.example"), interpolate=False)
             password = secrets.token_hex(24)
-            updates.update(POSTGRES_PASSWORD=password,
-                           DATABASE_URL=f"postgresql+psycopg://literature:{password}@127.0.0.1:5432/literature")
+            database = make_url(defaults["DATABASE_URL"]).set(password=password)
+            updates.update(POSTGRES_DB=database.database, POSTGRES_USER=database.username,
+                           POSTGRES_PORT=str(database.port or 5432), POSTGRES_PASSWORD=password,
+                           DATABASE_URL=database.render_as_string(hide_password=False))
 
         model_updates = {"MODEL_PROVIDER": "bailian", "BAILIAN_API_KEY": key}
         for name in ("MODEL_BASE_URL", "MODEL_NAME", "TAVILY_API_KEY",
@@ -83,9 +93,12 @@ def configure(root):
         if persist not in {"true", "false"}:
             raise SystemExit("AGENT_PERSIST 必须为 true 或 false")
         updates["AGENT_PERSIST"] = persist
-        updates["TAVILY_API_KEY"] = model_updates.get("TAVILY_API_KEY") or model.get("TAVILY_API_KEY") or ""
+        updates["TAVILY_API_KEY"] = (model_updates.get("TAVILY_API_KEY") or old.get("TAVILY_API_KEY")
+                                     or model.get("TAVILY_API_KEY") or "")
         staged_backend = stage_env(backend, updates, cleanup)
-        check_config(Settings(_env_file=staged_backend), mail=True)
+        settings = Settings(_env_file=staged_backend)
+        check_config(settings, mail=True)
+        validate_configuration(settings)
         agent_db = form.get("AGENT_DATABASE_URL")
         if agent_db == "local":
             local = make_url(dotenv_values(staged_backend)["DATABASE_URL"])
@@ -113,4 +126,7 @@ def configure(root):
 
 if __name__ == "__main__":
     os.umask(0o077)
-    configure(Path(__file__).resolve().parents[1])
+    try:
+        configure(Path(__file__).resolve().parents[1])
+    except ServiceError as error:
+        raise SystemExit(str(error)) from None

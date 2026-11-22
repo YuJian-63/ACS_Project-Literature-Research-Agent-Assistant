@@ -65,8 +65,8 @@ PY
   logs)
     case "${2:-}" in
       '') shopt -s nullglob; files=("$state"/*.log) ;;
-      api|library|parser|worker|imports|mail|web) files=("$state/$2.log") ;;
-      *) echo "服务名可选 api library parser worker imports mail web" >&2; exit 2 ;;
+      api|library|parser|worker|imports|mail|evaluation|web) files=("$state/$2.log") ;;
+      *) echo "服务名可选 api library parser worker imports mail evaluation web" >&2; exit 2 ;;
     esac
     if [[ ${#files[@]} == 0 || ! -f "${files[0]:-}" ]]; then
       echo "没有对应的日志，请先启动服务" >&2; exit 1
@@ -83,7 +83,7 @@ esac
 }
 # The shell holds the locked file description until shutdown, even after Python exits.
 mkdir -p "$state"
-exec 9>>"$state/up.lock"
+exec 9>>runtime/service.lock
 lock_status=$("$python" - <<'PY'
 import fcntl
 try:
@@ -99,10 +99,16 @@ fi
 "$python" - <<'PY'
 import shutil
 import socket
-from app.auth.security import check_config
+import sys
+from pathlib import Path
 from app.config import Settings
+sys.path.insert(0, str(Path("../scripts").resolve()))
+from service_manager import ServiceError, validate_configuration
 s = Settings()
-check_config(s, mail=s.smtp_configured)
+try:
+    validate_configuration(s)
+except ServiceError as error:
+    raise SystemExit(str(error)) from None
 if s.frontend_public_url != "http://127.0.0.1:5173" or not s.agent_dispatch_enabled or s.agent_transport != "tcloud":
     raise SystemExit("请核对 backend/.env 的 FRONTEND_PUBLIC_URL、AGENT_DISPATCH_ENABLED 和 AGENT_TRANSPORT")
 if not shutil.which(s.agent_tcloud_cli):
@@ -116,6 +122,7 @@ for port in (5173, 8000, 8001):
             raise SystemExit(f"本机端口 {port} 已占用")
 PY
 docker compose up -d --wait postgres
+"$python" -m alembic upgrade head
 pids=()
 names=()
 tunnel_id=''
@@ -227,9 +234,13 @@ fi
 if "$python" -c 'from app.config import Settings; raise SystemExit(not Settings().smtp_configured)'; then
   start mail "$python" -m app.mail_worker
 fi
+if "$python" -c 'from app.config import Settings; raise SystemExit(not Settings().evaluation_configured)'; then
+  start evaluation "$python" -m app.evaluation_worker
+fi
 web_server() {
   cd ../frontend
   export API_PROXY_TARGET="$api"
+  export VITE_API_BASE_URL=''
   exec node node_modules/vite/bin/vite.js --host 127.0.0.1 --port 5173 --strictPort
 }
 start web web_server

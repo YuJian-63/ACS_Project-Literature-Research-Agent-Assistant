@@ -14,15 +14,36 @@ if ! command -v systemctl >/dev/null || ! systemctl list-unit-files --no-legend 
 fi
 
 # systemd services read the deployment's configuration independently of this shell.
-env -u AGENT_LIBRARY_PUBLIC_URL .venv/bin/python - <<'PY'
+workers=$(env -u AGENT_LIBRARY_PUBLIC_URL .venv/bin/python - <<'PY'
+import os
+from pathlib import Path
+import sys
 from app.config import Settings
+sys.path.insert(0, str(Path("../scripts").resolve()))
+from service_manager import worker_modules
 
-if not Settings(_env_file=".env").agent_library_public_url:
+for field in Settings.model_fields:
+    os.environ.pop(field.upper(), None)
+settings = Settings(_env_file=".env")
+if (settings.agent_dispatch_enabled and settings.agent_transport in {"tcloud", "tacc"}
+        and not settings.agent_library_public_url):
     raise SystemExit("请在服务器的 backend/.env 设置 AGENT_LIBRARY_PUBLIC_URL 后重新启动。")
+if settings.evaluation_enabled and not settings.evaluation_configured:
+    raise SystemExit("请补齐 EVALUATION_MODEL 和 EVALUATION_API_KEY，或关闭 EVALUATION_ENABLED。")
+print(" ".join(f"acs-{'import' if name == 'imports' else name}.service" for name, _ in worker_modules(settings)))
 PY
+)
+read -r -a services <<<"$workers"
+for service in "${services[@]}"; do
+  if ! systemctl list-unit-files --no-legend "$service" |
+      awk -v unit="$service" '$1 == unit { found = 1 } END { exit !found }'; then
+    echo "缺少已启用功能的 systemd 单元: $service，请先安装后重新启动。" >&2
+    exit 1
+  fi
+done
 
 systemctl start acs-api.service
 curl --noproxy '*' --retry 20 --retry-connrefused --retry-delay 1 --max-time 5 \
   -fsS -o /dev/null http://127.0.0.1:8000/ready
-systemctl start acs-runner.service acs-parser.service acs-import.service acs-mail.service nginx.service
+systemctl start "${services[@]}" nginx.service
 echo "ECS 服务已启动，Nginx 提供已部署的前端。"

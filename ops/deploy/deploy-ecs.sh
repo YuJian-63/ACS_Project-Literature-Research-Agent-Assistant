@@ -28,6 +28,12 @@ code_switched=0
 migration=not-started
 services=(acs-api.service acs-runner.service acs-parser.service acs-import.service acs-mail.service)
 workers=(acs-runner.service acs-parser.service acs-import.service acs-mail.service)
+include_running_evaluation() {
+    if systemctl is-active --quiet acs-evaluation.service; then
+        services+=(acs-evaluation.service)
+        workers+=(acs-evaluation.service)
+    fi
+}
 
 as_acs() {
     runuser -u acs -- env HOME=/home/acs PYTHONNOUSERSITE=1 \
@@ -68,6 +74,7 @@ test ! -L "$site"
 test -f "$repo/backend/.env"
 test "$(as_acs git -C "$repo" branch --show-current)" = main
 test -z "$(as_acs git -C "$repo" status --porcelain)"
+include_running_evaluation
 for service in "${services[@]}" nginx; do
     systemctl is-active --quiet "$service"
 done
