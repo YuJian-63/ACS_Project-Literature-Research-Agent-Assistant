@@ -30,8 +30,7 @@ def configuration(settings) -> dict:
         "max_input_bytes": settings.evaluation_max_input_bytes,
         "max_response_bytes": settings.evaluation_max_response_bytes,
         "max_attempts": settings.evaluation_max_attempts,
-        "evidence_timeout_seconds": settings.evaluation_evidence_timeout_seconds,
-        "max_original_pages": settings.evaluation_max_original_pages}
+        "evidence_timeout_seconds": settings.evaluation_evidence_timeout_seconds}
 
 
 def result_input(session, task, run) -> dict:

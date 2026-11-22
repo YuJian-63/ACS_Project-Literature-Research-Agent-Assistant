@@ -29,7 +29,7 @@ def build_research_manifest(task_id: UUID, dispatch_id: UUID, question: str,
     instruction += answer_language_instruction(question) + "\n\nUser request:\n" + question
     return DispatchManifest(dispatch_id=dispatch_id, task=AgentTask(task_id=str(task_id), question=instruction,
         sources=[source.source_id for source in sources], allow_search=allow_search, max_papers=capacity,
-        max_steps=min(settings.agent_max_steps, 16 + 4 * capacity),
+        max_steps=min(settings.agent_max_steps, 32 + 8 * capacity),
         timeout_seconds=min(settings.agent_timeout_seconds, 300 + 60 * capacity),
         max_output_tokens=min(settings.agent_output_tokens, settings.agent_context_tokens - 2048,
             4096 + max(0, capacity - 1) * 768)),
@@ -50,7 +50,7 @@ def build_manifest(task_id: UUID, dispatch_id: UUID, task_type: str, question: s
         instruction += "\n\nUser request:\n" + question
     sources = _source_files(papers)
     count = len(sources)
-    steps = min(settings.agent_max_steps, 16 + 4 * count)
+    steps = min(settings.agent_max_steps, 32 + 8 * count)
     timeout = min(settings.agent_timeout_seconds, 300 + 60 * count)
     output = min(settings.agent_output_tokens, settings.agent_context_tokens - 2048, 4096 + (count - 1) * 768)
     return DispatchManifest(dispatch_id=dispatch_id, task=AgentTask(task_id=str(task_id),

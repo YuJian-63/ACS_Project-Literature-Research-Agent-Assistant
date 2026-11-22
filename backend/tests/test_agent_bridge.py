@@ -72,9 +72,24 @@ class AgentBridgeTests(unittest.TestCase):
         review = build_manifest(uuid4(), uuid4(), "review", "比较论文", papers, self.settings)
         self.assertGreater(review.task.max_steps, self.manifest.task.max_steps)
         self.assertGreater(review.task.max_output_tokens, self.manifest.task.max_output_tokens)
-        self.assertLessEqual(review.task.max_steps, 100)
+        self.assertEqual(self.manifest.task.max_steps, 40)
+        self.assertEqual(review.task.max_steps, 192)
         self.assertLessEqual(review.task.timeout_seconds, 1800)
         self.assertLessEqual(review.task.max_output_tokens, self.settings.agent_output_tokens)
+
+    def test_research_and_legacy_manifests_share_the_larger_step_budget(self):
+        from app.agent_bridge.policy import build_research_manifest
+
+        for count in (1, 5, 20):
+            papers = [self.source | {"paper_id": str(uuid4())} for _ in range(count)]
+            legacy = build_manifest(uuid4(), uuid4(), "review", "Compare", papers, self.settings)
+            research = build_research_manifest(uuid4(), uuid4(), "Compare", papers, self.settings, allow_search=False)
+            self.assertEqual(legacy.task.max_steps, 32 + 8 * count)
+            self.assertEqual(research.task.max_steps, legacy.task.max_steps)
+            self.assertEqual(research.task.timeout_seconds, 300 + 60 * count)
+        self.settings.agent_max_steps = 50
+        bounded = build_research_manifest(uuid4(), uuid4(), "Compare", papers, self.settings, allow_search=True)
+        self.assertEqual(bounded.task.max_steps, 50)
 
     def test_persistence_binds_parsed_documents_and_preserves_result_on_write_failure(self):
         from app.agent_bridge.contracts import ResultEnvelope

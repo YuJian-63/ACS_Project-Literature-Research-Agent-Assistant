@@ -41,7 +41,7 @@ class Settings(BaseSettings):
     agent_tacc_python: str = Field(default="python3", min_length=1, max_length=1024)
     agent_transport_timeout_seconds: float = Field(default=30, ge=1, le=300, allow_inf_nan=False)
     agent_retention_seconds: int = Field(default=604800, ge=86400, le=31536000)
-    agent_max_steps: int = Field(default=100, ge=1, le=100)
+    agent_max_steps: int = Field(default=200, ge=1, le=200)
     agent_search_max_papers: int = Field(default=5, ge=1, le=20)
     agent_timeout_seconds: int = Field(default=1800, ge=60, le=1800)
     agent_output_tokens: int = Field(default=8192, ge=1024, le=32768)
@@ -64,21 +64,20 @@ class Settings(BaseSettings):
     mail_outbox_key: SecretStr | None = None
     user_active_tasks: int = Field(default=5, ge=1, le=100)
     user_active_imports: int = Field(default=2, ge=1, le=100)
-    user_daily_tasks: int = Field(default=20, ge=1, le=10000)
+    user_daily_tasks: int = Field(default=50, ge=1, le=10000)
     arxiv_enabled: bool = False
     arxiv_contact_email: str | None = None
     evaluation_enabled: bool = False
     evaluation_base_url: str = "https://api.deepseek.com"
     evaluation_model: str = Field(default="", max_length=256)
     evaluation_api_key: SecretStr | None = None
-    evaluation_timeout_seconds: float = Field(default=90, ge=1, le=180, allow_inf_nan=False)
+    evaluation_timeout_seconds: float = Field(default=180, ge=1, le=180, allow_inf_nan=False)
     evaluation_max_output_tokens: int = Field(default=4096, ge=512, le=16384)
     evaluation_max_input_bytes: int = Field(default=64000, ge=4000, le=256000)
     evaluation_max_response_bytes: int = Field(default=262144, ge=4096, le=1048576)
     evaluation_max_attempts: int = Field(default=3, ge=1, le=5)
-    evaluation_daily_limit: int = Field(default=30, ge=1, le=1000)
-    evaluation_evidence_timeout_seconds: float = Field(default=20, ge=1, le=60, allow_inf_nan=False)
-    evaluation_max_original_pages: int = Field(default=12, ge=0, le=40)
+    evaluation_daily_limit: int = Field(default=50, ge=1, le=1000)
+    evaluation_evidence_timeout_seconds: float = Field(default=60, ge=1, le=60, allow_inf_nan=False)
 
     @field_validator("evaluation_base_url")
     @classmethod

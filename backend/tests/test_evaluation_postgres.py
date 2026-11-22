@@ -165,6 +165,22 @@ class EvaluationPostgresTests(unittest.TestCase):
             self.assertEqual(row.error_code, "NO_USABLE_RESULT")
             self.assertIsNone(row.report)
 
+    def test_default_allowance_accepts_fifty_versions_then_rejects_a_new_version(self):
+        from app.errors import APIError
+
+        task_id = self.ready()
+        self.assertEqual(self.settings.evaluation_daily_limit, 50)
+        versions = set()
+        for number in range(50):
+            self.settings.evaluation_model = f"test-judge-{number}"
+            versions.add(self.enqueue(task_id))
+        self.assertEqual(len(versions), 50)
+        self.assertIn(self.enqueue(task_id), versions)
+        self.settings.evaluation_model = "test-judge-51"
+        with self.assertRaises(APIError) as raised:
+            self.enqueue(task_id)
+        self.assertEqual(raised.exception.status_code, 429)
+
     def test_configuration_versions_and_daily_limit(self):
         task_id = self.ready()
         self.settings.evaluation_daily_limit = 1

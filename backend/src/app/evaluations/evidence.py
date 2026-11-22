@@ -29,7 +29,6 @@ def prepare_evidence(payload: dict, settings) -> dict:
     citations = payload["citations"]
     sources = {f"local:{source['paper_id']}@{source['sha256']}": source for source in payload["original_sources"]}
     specification, locations, limitations = {}, {}, set()
-    page_count = 0
     for citation in citations:
         source = sources.get(citation.get("source_id"))
         if not source:
@@ -37,9 +36,6 @@ def prepare_evidence(payload: dict, settings) -> dict:
             continue
         location = (source["paper_id"], citation["page"])
         if location not in locations:
-            if page_count >= settings.evaluation_max_original_pages:
-                limitations.add("original_page_limit")
-                continue
             try:
                 path = controlled_path(settings.storage_root, UUID(source["paper_id"]), source["storage_key"])
             except (ValueError, OSError):
@@ -49,7 +45,6 @@ def prepare_evidence(payload: dict, settings) -> dict:
                 "sha256": source["sha256"], "path": str(path), "pages": []})
             item["pages"].append(citation["page"])
             locations[location] = []
-            page_count += 1
         locations[location].append(citation)
     pages = []
     if specification:

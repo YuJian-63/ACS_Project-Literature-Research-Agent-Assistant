@@ -25,7 +25,8 @@ class MigrationGraphTests(unittest.TestCase):
         script = ScriptDirectory.from_config(config)
         revisions = list(script.walk_revisions())
         self.assertEqual(len(revisions), len({revision.revision for revision in revisions}))
-        self.assertEqual(script.get_heads(), ["20261122_0014"])
+        self.assertEqual(script.get_heads(), ["20261122_0015"])
+        self.assertEqual(script.get_revision("20261122_0015").down_revision, "20261122_0014")
         self.assertEqual(script.get_revision("20261122_0014").down_revision, "20261122_0013")
         self.assertEqual(script.get_revision("20261118_0006").path,
             str(BACKEND / "alembic/versions/20261118_0006_import_metadata.py"))
@@ -51,7 +52,7 @@ class MergeMigrationPostgresTests(unittest.TestCase):
         self.admin.dispose()
 
     def check_head(self, connection):
-        self.assertEqual(connection.scalar(text("SELECT version_num FROM alembic_version")), "20261122_0014")
+        self.assertEqual(connection.scalar(text("SELECT version_num FROM alembic_version")), "20261122_0015")
         self.assertTrue(inspect(connection).has_table("task_evaluations"))
         self.assertIn("source_metadata", {column["name"] for column in inspect(connection).get_columns("paper_imports")})
         self.assertTrue(inspect(connection).has_table("agent_runs"))
@@ -98,6 +99,33 @@ class MergeMigrationPostgresTests(unittest.TestCase):
             command.upgrade(self.config, "head")
             self.check_head(connection)
             self.assertEqual(connection.scalar(text("SELECT count(*) FROM task_evaluations")), 0)
+
+    def test_step_budget_upgrade_enforces_boundary_and_preserves_existing_research(self):
+        with self.engine.connect() as connection:
+            self.config.attributes["connection"] = connection
+            command.upgrade(self.config, "20261122_0014")
+            user_id, task_id = uuid4(), uuid4()
+            connection.execute(text("INSERT INTO users (id, username, username_key, email, email_key, password_hash) "
+                "VALUES (:id, 'stepsfixture', 'stepsfixture', 'steps@example.com', 'steps@example.com', 'unused')"), {"id": user_id})
+            connection.execute(text("INSERT INTO tasks (id, user_id, task_type, runner_type, workflow_version, request_hash, max_steps) "
+                "VALUES (:id, :user, 'summary', 'agent', 'agent-io-v1', :digest, 96)"),
+                {"id": task_id, "user": user_id, "digest": "a" * 64})
+            command.upgrade(self.config, "head")
+            self.check_head(connection)
+            self.assertEqual(connection.scalar(text("SELECT max_steps FROM tasks WHERE id = :id"), {"id": task_id}), 96)
+            connection.execute(text("UPDATE tasks SET max_steps = 200 WHERE id = :id"), {"id": task_id})
+            for invalid in (0, 201):
+                with self.assertRaises(IntegrityError), connection.begin_nested():
+                    connection.execute(text("UPDATE tasks SET max_steps = :steps WHERE id = :id"), {"id": task_id, "steps": invalid})
+            with self.assertRaises(IntegrityError), connection.begin_nested():
+                command.downgrade(self.config, "20261122_0014")
+            self.assertEqual(connection.scalar(text("SELECT max_steps FROM tasks WHERE id = :id"), {"id": task_id}), 200)
+            connection.execute(text("UPDATE tasks SET max_steps = 96 WHERE id = :id"), {"id": task_id})
+            command.downgrade(self.config, "20261122_0014")
+            with self.assertRaises(IntegrityError), connection.begin_nested():
+                connection.execute(text("UPDATE tasks SET max_steps = 101 WHERE id = :id"), {"id": task_id})
+            command.upgrade(self.config, "head")
+            self.check_head(connection)
 
     def test_pdf_limit_upgrade_preserves_existing_paper_and_enforces_boundary(self):
         with self.engine.connect() as connection:

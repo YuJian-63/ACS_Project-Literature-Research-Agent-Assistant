@@ -152,7 +152,7 @@ class Task(UUIDPrimaryKey, CreatedAt, UpdatedAt, Base):
         CheckConstraint("length(btrim(dataset_version)) > 0"),
         CheckConstraint("jsonb_typeof(run_config) = 'object'"),
         CheckConstraint("jsonb_typeof(review_state) = 'object'", name="ck_tasks_review_state_object"),
-        CheckConstraint("max_steps BETWEEN 1 AND 100"),
+        CheckConstraint("max_steps BETWEEN 1 AND 200"),
         CheckConstraint("max_tokens BETWEEN 1 AND 100000"),
         CheckConstraint("timeout_seconds BETWEEN 1 AND 1800"),
         CheckConstraint("status IN ('queued', 'running', 'succeeded', 'failed')"),

@@ -29,6 +29,15 @@ def judge_report():
 
 
 class EvaluationContractTests(unittest.TestCase):
+    def test_larger_default_limits_and_daily_allowances(self):
+        settings = Settings(_env_file=None, database_url="postgresql://unused@127.0.0.1/unused")
+        self.assertEqual(settings.agent_max_steps, 200)
+        self.assertEqual(settings.user_daily_tasks, 50)
+        self.assertEqual(settings.evaluation_daily_limit, 50)
+        self.assertEqual(settings.evaluation_timeout_seconds, 180)
+        self.assertEqual(settings.evaluation_evidence_timeout_seconds, 60)
+        self.assertNotIn("max_original_pages", configuration(settings))
+
     def test_backend_computes_the_weighted_total(self):
         self.assertEqual(weighted_score(validate_report(judge_report(), {"C2"})), 74.0)
 
@@ -166,6 +175,18 @@ class EvaluationProviderTests(unittest.TestCase):
             self.call(lambda request: self.response(report))
         self.assertEqual(raised.exception.code, "EVALUATION_INVALID_RESPONSE")
 
+    def test_response_after_the_previous_timeout_uses_the_larger_request_timeout(self):
+        from unittest.mock import patch
+
+        def handler(request):
+            self.assertEqual(request.extensions["timeout"]["read"], 180)
+            return self.response()
+
+        with patch("app.evaluations.judge.time.monotonic", side_effect=[0, 120, 120]):
+            report, usage = self.call(handler)
+        self.assertEqual(report["overall_score"], 74.0)
+        self.assertEqual(usage["elapsed_seconds"], 120)
+
     def test_slow_partial_response_checks_deadline_before_buffering_a_full_chunk(self):
         from unittest.mock import patch
         test = self
@@ -173,7 +194,7 @@ class EvaluationProviderTests(unittest.TestCase):
             def __iter__(self):
                 yield b"{"
                 test.fail("An expired response must be closed before reading more bytes")
-        with patch("app.evaluations.judge.time.monotonic", side_effect=[0, 91]):
+        with patch("app.evaluations.judge.time.monotonic", side_effect=[0, self.settings.evaluation_timeout_seconds + 1]):
             with self.assertRaises(EvaluationFailure) as raised:
                 self.call(lambda request: httpx.Response(200, stream=SlowResponse()))
         self.assertEqual(raised.exception.code, "EVALUATION_PROVIDER_TIMEOUT")
@@ -199,11 +220,33 @@ class EvaluationEvidenceTests(unittest.TestCase):
         self.assertEqual(evidence["checks"][0]["status"], "unavailable")
         self.assertNotIn("EVALUATION_API_KEY", run.call_args.kwargs["env"])
         self.assertNotIn("SMTP_AUTH_CODE", run.call_args.kwargs["env"])
-        settings.evaluation_max_original_pages = 0
-        with patch("app.evaluations.evidence.subprocess.run") as run:
+        self.assertEqual(run.call_args.kwargs["timeout"], 60)
+
+    def test_all_distinct_cited_pages_are_extracted_without_a_page_count_cap(self):
+        from unittest.mock import patch
+        from uuid import uuid4
+
+        paper_id = str(uuid4())
+        sha = "a" * 64
+        settings = Settings(_env_file=None, database_url="postgresql://unused@127.0.0.1/unused")
+        citations = [{"key": f"C{number}", "source_id": f"local:{paper_id}@{sha}", "page": number,
+            "source_text": "Evidence"} for number in range(1, 46)]
+        payload = {"citations": citations + [citations[0] | {"key": "C46"}], "original_sources": [
+            {"paper_id": paper_id, "sha256": sha, "storage_key": f"uploads/{paper_id}.pdf", "page_count": 45}]}
+
+        def extract(command, **kwargs):
+            specification = json.loads(Path(command[-2]).read_text(encoding="utf-8"))
+            self.assertEqual(specification[0]["pages"], list(range(1, 46)))
+            Path(command[-1]).write_text(json.dumps({"pages": [
+                {"paper_id": paper_id, "page": number, "text": "Evidence"} for number in range(1, 46)],
+                "limitations": []}), encoding="utf-8")
+
+        with patch("app.evaluations.evidence.subprocess.run", side_effect=extract):
             evidence = prepare_evidence(payload, settings)
-            run.assert_not_called()
-        self.assertIn("original_page_limit", evidence["limitations"])
+        self.assertEqual(len(evidence["pages"]), 45)
+        self.assertEqual(len(evidence["checks"]), 46)
+        self.assertTrue(all(check["status"] == "matched" for check in evidence["checks"]))
+        self.assertNotIn("original_page_limit", evidence["limitations"])
 
     def test_missing_original_keeps_evidence_only_scope(self):
         settings = Settings(_env_file=None, database_url="postgresql://unused@127.0.0.1/unused")

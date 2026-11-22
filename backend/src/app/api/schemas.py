@@ -28,7 +28,7 @@ class ErrorResponse(BaseModel):
 
 
 class Budget(StrictModel):
-    max_steps: int = Field(default=10, ge=1, le=100, strict=True)
+    max_steps: int = Field(default=10, ge=1, le=200, strict=True)
     max_tokens: int = Field(default=8000, ge=1, le=100000, strict=True)
     timeout_seconds: int = Field(default=120, ge=1, le=1800, strict=True)
 

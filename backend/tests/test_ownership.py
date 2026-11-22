@@ -739,6 +739,25 @@ class OwnershipPostgresTests(unittest.TestCase):
         self.assertEqual(self.task(first, key="third").status_code, 429)
         self.assertEqual(self.task(first).status_code, 202)
 
+    def test_default_daily_allowance_accepts_fifty_tasks_and_preserves_replays(self):
+        paper = self.upload()
+        self.assertEqual(self.settings.user_daily_tasks, 50)
+        identifiers = set()
+        for number in range(50):
+            response = self.task(paper, key=f"daily-task-{number}")
+            self.assertEqual(response.status_code, 202, response.text)
+            task_id = response.json()["id"]
+            identifiers.add(task_id)
+            with self.sessions.begin() as session:
+                session.execute(text("UPDATE tasks SET status = 'failed', stage = 'failed', "
+                    "finished_at = clock_timestamp(), error_code = 'FIXTURE_COMPLETED', "
+                    "error_message = 'Finished test fixture', error_details = '{}'::jsonb WHERE id = :id"), {"id": UUID(task_id)})
+        self.assertEqual(len(identifiers), 50)
+        rejected = self.task(paper, key="daily-task-51")
+        self.assertEqual(rejected.status_code, 429)
+        self.assertEqual(rejected.json()["error"]["code"], "DAILY_TASK_LIMIT")
+        self.assertIn(self.task(paper, key="daily-task-0").json()["id"], identifiers)
+
     def test_daily_limit_counts_only_new_tasks_and_replays_remain_available(self):
         paper = self.upload()
         self.settings.user_daily_tasks = 1

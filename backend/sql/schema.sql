@@ -59,7 +59,7 @@ CREATE TABLE tasks (
     dataset_version text CHECK (length(btrim(dataset_version)) > 0),
     run_config jsonb NOT NULL DEFAULT '{}'::jsonb CHECK (jsonb_typeof(run_config) = 'object'),
     review_state jsonb NOT NULL DEFAULT '{}'::jsonb CONSTRAINT ck_tasks_review_state_object CHECK (jsonb_typeof(review_state) = 'object'),
-    max_steps integer NOT NULL DEFAULT 10 CHECK (max_steps BETWEEN 1 AND 100),
+    max_steps integer NOT NULL DEFAULT 10 CHECK (max_steps BETWEEN 1 AND 200),
     max_tokens integer NOT NULL DEFAULT 8000 CHECK (max_tokens BETWEEN 1 AND 100000),
     timeout_seconds integer NOT NULL DEFAULT 120 CHECK (timeout_seconds BETWEEN 1 AND 1800),
     status text NOT NULL DEFAULT 'queued' CHECK (status IN ('queued', 'running', 'succeeded', 'failed')),
