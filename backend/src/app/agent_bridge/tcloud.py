@@ -130,6 +130,7 @@ class TcloudTransport(ManualTransport):
             source = ROOT / "tacc" / "research" / name
             if name == "tuxiv.conf":
                 content = source.read_text().replace("DISPATCH_ID", str(manifest.dispatch_id))
+                content = content.replace("name: acs-network-probe", f"name: '{self.settings.agent_tcloud_env_name}'", 1)
                 (stage / name).write_text(content)
             else:
                 shutil.copyfile(source, stage / name)

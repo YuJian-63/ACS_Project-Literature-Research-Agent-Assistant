@@ -16,7 +16,7 @@ HKUST CSIT6000V Advanced AI Computing and Systems 课程项目。用户在网页
 
 ## 运行
 
-本机配置完成后，在仓库根目录运行 `./scripts/local-research up`，打开终端显示的网页。用 `./scripts/local-research jobs` 查看 TACC 作业号。[本机一键启动](tacc/TACC.md#本机一键启动)
+新设备先运行 `./scripts/local-research configure` 创建配置表，填好仓库根目录的 `.env.local-research` 后再运行一次。完成首次安装和数据库迁移后，在仓库根目录运行 `./scripts/local-research up`，打开终端显示的网页。用 `./scripts/local-research jobs` 查看 TACC 作业号。[本机一键启动](tacc/TACC.md#本机一键启动)
 
 - **使用已启动的预览。** 登录后在「论文库」上传 PDF，在「新建研究」提问，然后从「研究记录」查看答案和引用。[网页操作与真实作业验收](tacc/TACC.md)
 - **从头启动。** 准备 PostgreSQL 并运行迁移，配置 API、Parser 和研究 Worker，再启动前端。[后端启动](backend/README.md) · [TACC 作业配置](tacc/TACC.md#从头启动本机环境) · [前端启动](frontend/README.md)

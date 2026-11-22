@@ -2,11 +2,41 @@
 
 网页把问题和可选的论文 UUID 发给后端。Worker 通过课程平台的 `tcloud` 提交一个 CPU 批作业。作业运行仓库中的 Baseline Agent，通过 HTTPS 读取用户论文库、调用百炼，然后把答案和引用写回 TACC 持久目录。Worker 下载结果并存入 PostgreSQL，网页可从引用打开原 PDF 对应页。[作业入口](research/run_job.py) · [Worker 传输](../backend/src/app/agent_bridge/tcloud.py)
 
+<a id="从头启动本机环境"></a>
+
+## 首次配置：从新账号注册到网页研究
+
+**准备环境。** 安装 Docker Desktop、uv、Node.js 和课程 SDK。按[SDK 初始化步骤](README.md#常用-tcloud-命令)配置自己的课程账号与私钥，运行 `tcloud env ls` 查看环境名。
+
+**只填一份表。** 在仓库根目录运行 `./scripts/local-research configure`。首次运行会生成本机私有的 `.env.local-research`。打开它填写下表，再运行同一命令。脚本安装后端依赖，从组件模板生成或更新 `backend/.env` 和 `agent/.env`，并将两份文件权限设为仅当前用户可读写。
+
+| 填写项 | 用途 |
+| --- | --- |
+| `SMTP_USERNAME`、`SMTP_AUTH_CODE` | 网站发件邮箱及其客户端授权码，用来发送注册验证邮件。QQ 和 163 自动选用对应的 SMTP 主机与 465 端口。使用 163 时，在网页版「设置 → POP3/SMTP/IMAP」中开启服务并新增授权密码。[网易邮箱说明](https://help.mail.126.com/faqDetail.do?code=d7a5dc8471cd0c0e8b4b8f4f8e49998b374173cfe9171305fa1ce630d7f67ac286624f309a1a7089) |
+| `BAILIAN_API_KEY` | 你在百炼工作空间创建的 API key。若工作空间的地址或模型有差异，同表填写 `MODEL_BASE_URL` 和 `MODEL_NAME`。 |
+| `ARXIV_CONTACT_EMAIL` | 网页搜索和导入论文时提供给 arXiv 的联系邮箱。首次配置留空会使用发件地址；已有配置会保留原联系人。注册表单中的收件邮箱由注册人自行填写。 |
+| `AGENT_TCLOUD_ENV_NAME` | 课程 SDK 列出的作业环境名，默认 `acs-network-probe`。 |
+| `TAVILY_API_KEY` | 独立 Agent 用 Tavily 搜索外部 arXiv 论文时使用。留空保留已有值。 |
+| `AGENT_DATABASE_URL` | 独立 Agent 开启 `--persist` 时的 PostgreSQL 连接。填 Neon 连接串可写入 Neon，填 `local` 可写入本机开发库的 `agt_baseline` schema。切换影响后续运行，已有记录保存在原库。 |
+| `EMBEDDING_BASE_URL`、`EMBEDDING_MODEL`、`EMBEDDING_DIMENSIONS` | Retrieval Extension 的嵌入配置，可按需覆盖默认值。 |
+
+首次创建后端配置时，脚本生成本机 PostgreSQL 密码、登录密钥和邮件加密密钥，并启用网页 arXiv 搜索与 TACC 派发。已有开发环境会保留数据库连接、存储路径及现有密钥。修改表单后重新运行 `configure`，再重启服务即可生效。已配置的组件可直接使用 `up`。
+
+**安装前端依赖。** 在仓库根目录运行 `npm --prefix frontend ci`。本阶段的空预选验收使用自己的论文库，网页搜索使用 arXiv 接口。独立 Agent 的 Tavily 搜索目前仍待接入 TACC 派发。
+
+**准备数据库。** 首次运行或代码带来新迁移时，在备份已有数据后执行：
+
+```sh
+(cd backend && docker compose up -d --wait postgres && uv run --locked alembic upgrade head)
+```
+
+**注册验收。** 先运行 `./scripts/local-research check-mail`，用邮件 Worker 相同的网络路径验证 TLS 和 SMTP 登录。再按下一节启动服务；如果刚修改了正在运行的服务配置，先结束现有任务，在启动终端按 Ctrl+C 后重新运行。用同一台电脑打开[注册页](http://127.0.0.1:5173/register)，填写新用户名、尚未注册的收件邮箱和密码。打开验证邮件中的链接，输入注册时的密码完成验证，再用用户名登录。新账号有独立论文库，需要自己上传测试 PDF。若收不到邮件，先检查垃圾箱和 `./scripts/local-research logs mail`。[账号接口](../docs/api-contract.md#2-账号与会话)
+
 <a id="已启动预览时直接从网页提交"></a>
 
 ## 本机一键启动
 
-在 macOS 上启动 Docker Desktop，安装前后端依赖并配置下节的课程 SDK 和百炼凭据。后端使用 `backend/.env` 指定的数据库与 `STORAGE_ROOT`。默认网页地址为 `http://127.0.0.1:5173`。在仓库根目录运行：
+在 macOS 上启动 Docker Desktop，完成上面的首次配置。后端使用 `backend/.env` 指定的数据库与 `STORAGE_ROOT`。默认网页地址为 `http://127.0.0.1:5173`。在仓库根目录运行：
 
 ```sh
 ./scripts/local-research up
@@ -34,46 +64,9 @@
 
 日志同时写入 `backend/runtime/local-research/<服务名>.log`，每次启动该服务会重写对应文件。需要单独跟踪时，另开终端运行 `./scripts/local-research logs worker`，或运行 `./scripts/local-research logs` 查看全部服务。两条命令都会先显示最近 20 行，再跟踪新输出。在这个查看窗口按 Ctrl+C 只退出日志查看。
 
-网页「搜索论文」使用 `ARXIV_ENABLED=true` 和 `ARXIV_CONTACT_EMAIL`，用户确认导入后由导入 Worker 下载原文。网页注册使用 SMTP 验证邮件，已有已验证账号可直接登录。[账号配置](../backend/README.md#10-账号与邮件)
+### 单独启动进程
 
-<a id="从头启动本机环境"></a>
-
-## 首次配置与逐进程启动
-
-1. 按[后端启动说明](../backend/README.md#1-首次启动)准备本机测试数据库、文件存储和可登录账号。从 `backend/` 执行 `uv sync --locked` 和 `uv run --locked alembic upgrade head`。API、论文库入口、Parser 和研究 Worker 共用这套数据库、存储和后端鉴权配置。
-2. 在运行 Worker 的机器上初始化课程 SDK，运行 `tcloud env ls`。模板使用本账号的 `acs-network-probe`，其他账号可将模板的环境名改为自己可用的 Python 3.10+ 环境。作业首次运行会将 Python 3.12 和锁定依赖缓存到 `TACC_USERDIR/acs-research/runtime/`，后续作业从缓存解压到节点临时盘。[平台命令](README.md#常用-tcloud-命令) · [环境模板](research/tuxiv.conf) · [SDK 官方说明](https://github.com/turingaicloud/tcloud-sdk)
-3. 手动启动时，用下列命令分别启动论文库入口和 Cloudflare Quick Tunnel。把隧道输出的 HTTPS 地址填入下方 Worker 配置，保持两个进程运行到结果返回。已有计算节点可访问的 HTTPS 后端时，直接填其地址。[论文库接口](../docs/api-contract.md#41-agent-论文库)
-
-   ```sh
-   # 在 backend/ 中运行
-   uv run --locked uvicorn app.main:create_library_app --factory --host 127.0.0.1 --port 8001
-   # 另开终端
-   cloudflared tunnel --url http://127.0.0.1:8001
-   ```
-
-4. 在 `backend/.env` 设置以下变量。一键启动使用自动隧道时留空 `AGENT_LIBRARY_PUBLIC_URL`。在指定的私有模型配置文件中填写 `MODEL_PROVIDER=bailian`、百炼的 `MODEL_BASE_URL`、账号可用的 `MODEL_NAME` 及 `BAILIAN_API_KEY`。macOS/Linux 上用 `chmod 600` 限制该文件权限。Worker 为每个作业向百炼申请临时 key，最长 30 分钟，并自动签发该任务的论文库只读令牌。用户登录网页即可提交。[模型配置示例](../agent/.env.example) · [百炼临时凭据](https://help.aliyun.com/zh/model-studio/generate-temporary-api-key)
-
-   ```dotenv
-   TASK_RUNNER=agent
-   AGENT_DISPATCH_ENABLED=true
-   AGENT_TRANSPORT=tcloud
-   AGENT_POLL_SECONDS=30
-   AGENT_LIBRARY_PUBLIC_URL=https://YOUR-TUNNEL.trycloudflare.com
-   AGENT_TCLOUD_MODEL_ENV_FILE=/absolute/path/to/agent/.env
-   ```
-
-5. 从 `backend/` 在三个终端分别启动 API、Parser 和研究 Worker。从 `frontend/` 安装前端依赖并启动网页。
-
-   ```sh
-   uv run --locked uvicorn app.main:create_app --factory --host 127.0.0.1 --port 8000
-   uv run --locked python -m app.parser_worker
-   uv run --locked python -m app.runner_worker
-   ```
-
-   ```sh
-   npm ci
-   npm run dev
-   ```
+需要逐项调试时，在 `backend/` 运行 `uv run --locked uvicorn app.main:create_library_app --factory --host 127.0.0.1 --port 8001`，另开终端运行 `cloudflared tunnel --url http://127.0.0.1:8001`。将输出的 HTTPS 地址填入 `AGENT_LIBRARY_PUBLIC_URL`，按[后端启动说明](../backend/README.md#1-首次启动)分别启动主 API 和所需 Worker，再按[前端说明](../frontend/README.md#本地开发)启动网页。
 
 ## 从网页验证
 
