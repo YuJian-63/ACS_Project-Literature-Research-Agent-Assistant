@@ -1,6 +1,6 @@
 from uuid import UUID
 
-from app.agent_bridge.contracts import AgentTask, DispatchManifest, RuntimeOptions, SourceFile
+from app.agent_bridge.contracts import AgentTask, DispatchManifest, ResearchOptions, RuntimeOptions, SourceFile
 from app.config import Settings
 from app.tasks.language import answer_language_instruction
 
@@ -14,13 +14,15 @@ def _source_files(papers):
 
 
 def build_research_manifest(task_id: UUID, dispatch_id: UUID, question: str,
-    papers: list[dict], settings: Settings, *, allow_search: bool) -> DispatchManifest:
+    papers: list[dict], settings: Settings, *, allow_search: bool, research: ResearchOptions | None = None) -> DispatchManifest:
     sources = _source_files(papers)
     capacity = min(20, len(sources) + settings.agent_search_max_papers) if allow_search else len(sources)
     instruction = (
         "Research the user's question using original paper evidence. Start with the supplied papers, "
-        "if any. Choose an explanation, summary or Markdown comparison table according to the question. "
-        "Cite original evidence for factual claims and explicitly state evidence gaps. "
+        "if any. Choose the answer format according to the question. "
+        "Cite original evidence for factual claims and state evidence gaps. "
+        "Use a separate table for requested comparisons and cite the evidence in each row. "
+        "Leave comparison_table empty for ordinary single-paper summaries. "
     )
     instruction += ("Search for additional papers only when needed. " if allow_search
         else "Use only the supplied papers; do not search for other papers. ")
@@ -31,7 +33,8 @@ def build_research_manifest(task_id: UUID, dispatch_id: UUID, question: str,
         timeout_seconds=min(settings.agent_timeout_seconds, 300 + 60 * capacity),
         max_output_tokens=min(settings.agent_output_tokens, settings.agent_context_tokens - 2048,
             4096 + max(0, capacity - 1) * 768)),
-        sources=sources, runtime=RuntimeOptions(context_window=settings.agent_context_tokens))
+        sources=sources, runtime=RuntimeOptions(context_window=settings.agent_context_tokens, research=research,
+            persist=settings.agent_transport == "tcloud" and settings.agent_persist))
 
 
 def build_manifest(task_id: UUID, dispatch_id: UUID, task_type: str, question: str | None,

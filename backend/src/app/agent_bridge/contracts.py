@@ -44,9 +44,25 @@ class SourceFile(Contract):
         return self
 
 
+class ResearchOptions(Contract):
+    workflow: Literal["baseline", "extension"] = "baseline"
+    planner: bool = Field(default=False, strict=True)
+    reflection: bool = Field(default=False, strict=True)
+    context_policy: Literal["full", "compact"] = "full"
+    context_finalize_ratio: float | None = Field(default=0.9, gt=0, le=1, allow_inf_nan=False)
+
+    @model_validator(mode="after")
+    def extension_features(self):
+        if self.workflow == "baseline" and (self.planner or self.reflection):
+            raise ValueError("Planner and Reflection require the retrieval extension")
+        return self
+
+
 class RuntimeOptions(Contract):
     context_window: int = Field(ge=4096, strict=True)
-    persist: Literal[False] = False
+    persist: bool = Field(default=False, strict=True)
+    # Omit the optional field for byte-identical serialization of existing signed bundles.
+    research: ResearchOptions | None = Field(default=None, exclude_if=lambda value: value is None)
 
 
 class DispatchManifest(Contract):
@@ -115,3 +131,4 @@ class ResultEnvelope(Contract):
     input_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
     remote_job_id: str | None = Field(default=None, min_length=1, max_length=256)
     result: AgentResult
+    parsed_papers: list[dict[str, Any]] = Field(default_factory=list, max_length=20)

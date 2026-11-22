@@ -22,6 +22,15 @@ class LibraryClient:
     base_url: str
     token: str = field(repr=False)
 
+    def search_arxiv(self, query, *, max_results, include_domains, timeout):
+        if include_domains != ["arxiv.org"]:
+            raise ValueError("Job search only supports arxiv.org")
+        response = httpx.get(f"{self.base_url.rstrip('/')}/api/v1/agent/search-arxiv",
+            params={"q": query, "limit": max_results}, headers={"Authorization": f"Bearer {self.token}"}, timeout=timeout)
+        if response.is_error:
+            raise ValueError(f"Job arXiv search failed (HTTP {response.status_code})")
+        return response.json()
+
     @classmethod
     def from_env(cls) -> "LibraryClient | None":
         load_env()

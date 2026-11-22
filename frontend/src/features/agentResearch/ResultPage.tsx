@@ -47,7 +47,7 @@ export default function ResultPage() {
         setRecord(next); setError(undefined); setCheckedAt(Date.now());
         poll = next.status === 'queued' || next.status === 'running';
       } catch (failure) { if (!pending.signal.aborted && !isCanceled(failure)) setError(asApiError(failure)); }
-      finally { if (!pending.signal.aborted) { setLoading(false); if (poll) timer = setTimeout(() => void load(), 2000); } }
+      finally { if (!pending.signal.aborted) { setLoading(false); if (poll) timer = setTimeout(() => void load(), 30_000); } }
     }
     void load(); return () => { pending.abort(); clearTimeout(timer); };
   }, [taskId, revision]);

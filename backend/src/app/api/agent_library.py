@@ -2,6 +2,7 @@ from datetime import datetime
 from typing import Annotated, Literal
 from uuid import UUID
 
+import httpx
 from fastapi import APIRouter, Depends, Query, Request
 from pydantic import BaseModel
 from sqlalchemy import and_, func, or_, select
@@ -83,6 +84,28 @@ def download_library_pdf(request: Request, paper_id: UUID, access: LibraryGrant)
         raise APIError(404, "PAPER_NOT_FOUND", "论文不存在")
     with request.app.state.sessions() as session:
         return stream_paper_file(request, get_paper(session, paper_id, access.user_id), disposition="attachment")
+
+
+@read_router.get("/search-arxiv")
+def search_arxiv(request: Request, access: LibraryGrant,
+    q: Annotated[str, Query(min_length=1, max_length=400)], limit: Annotated[int, Query(ge=1, le=5)] = 5):
+    from app.auth.rates import rate_limits
+
+    if access.dispatch_id is None or access.selected_only is not None:
+        raise APIError(403, "AGENT_SEARCH_DISABLED", "此作业未获外部搜索授权")
+    settings = request.app.state.settings
+    if not settings.tavily_api_key or not settings.tavily_api_key.get_secret_value():
+        raise APIError(503, "TAVILY_NOT_CONFIGURED", "未配置 Tavily 搜索")
+    rate_limits(request.app.state.sessions, settings, [("agent_search", str(access.dispatch_id), settings.agent_max_steps, 1800)])
+    try:
+        response = httpx.post("https://api.tavily.com/search", timeout=30,
+            headers={"Authorization": "Bearer " + settings.tavily_api_key.get_secret_value()},
+            json={"query": q, "include_domains": ["arxiv.org"], "max_results": limit, "search_depth": "basic"})
+        response.raise_for_status()
+        rows = response.json()["results"]
+        return {"results": [{k: row.get(k, "") for k in ("url", "title", "content")} for row in rows[:limit]]}
+    except (httpx.HTTPError, ValueError, KeyError, TypeError, AttributeError):
+        raise APIError(502, "TAVILY_SEARCH_FAILED", "Tavily 搜索失败") from None
 
 
 router.include_router(read_router)

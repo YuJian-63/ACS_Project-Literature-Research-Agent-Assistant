@@ -26,6 +26,7 @@ library_bearer = HTTPBearer(auto_error=False, scheme_name="AgentLibraryToken")
 class LibraryAccess:
     user_id: UUID
     selected_only: frozenset[UUID] | None = None
+    dispatch_id: UUID | None = None
 
 
 def library_signature(settings, claims: str) -> str:
@@ -94,7 +95,7 @@ def require_library_access(
                 raise library_unauthorized()
             manifest = DispatchManifest.model_validate(row.manifest)
             selected_only = None if manifest.task.allow_search else frozenset(source.paper_id for source in manifest.sources)
-            return LibraryAccess(row.user_id, selected_only)
+            return LibraryAccess(row.user_id, selected_only, UUID(hex=dispatch_id))
 
     parsed = TOKEN_FORMAT.fullmatch(token)
     if parsed is None:

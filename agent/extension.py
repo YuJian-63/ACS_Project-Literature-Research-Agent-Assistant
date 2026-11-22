@@ -32,6 +32,7 @@ from baseline import (
     make_result,
     normalize_citations,
     paper_tools,
+    persist_result,
     parse_json_response,
     read_paper,
     remember,
@@ -347,7 +348,7 @@ def run_task(
     embedding_model: str | None = None,
     embedding_namespace: str | None = None,
     index_dir: Path = DATA_DIR / "retrieval",
-    persist: bool = False,
+    persist: bool | Callable = False,
     context_window: int | None = 32000,
     context_policy: str | Callable = prepare_context,
     context_finalize_ratio: float | None = DEFAULT_FINALIZE_RATIO,
@@ -436,14 +437,7 @@ def run_task(
         reflection=reflection,
     )
     if persist:
-        from apis.database import save_paper, save_run
-
-        try:
-            for paper in {p["source_id"]: p for p in context.papers.values()}.values():
-                save_paper(paper)
-            save_run(result.model_dump(mode="json"), storage_key=f"extension/{task.task_id}")
-        except Exception as exc:  # noqa: BLE001 - return the local result on persistence failure
-            result.errors.append({"stage": "persistence", "type": type(exc).__name__})
+        persist_result(result, context, persist, storage_key=f"extension/{task.task_id}")
     return result
 
 

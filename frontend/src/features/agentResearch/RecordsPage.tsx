@@ -1,10 +1,10 @@
-import { agentResearch, type AgentResearchSummary } from '../../api/agentResearch';
+import { agentResearch, type AgentResearchSummary, type AgentSource } from '../../api/agentResearch';
 import { t, useLocale } from '../../i18n';
 import { useCallback, useEffect, useRef, useState, type Key } from 'react';
 import { notification as notificationApi, App, Button, Empty, Select, Table } from 'antd';
 import type { TableColumnsType } from 'antd';
-import { PlusOutlined, ReloadOutlined } from '@ant-design/icons';
-import { Link } from 'react-router-dom';
+import { DownloadOutlined, PlusOutlined, ReloadOutlined } from '@ant-design/icons';
+import { Link, useNavigate } from 'react-router-dom';
 import { asApiError, isCanceled } from '../../api/client';
 import type { TaskStatus } from '../../api/types';
 import { ErrorNotice } from '../../shared/components/ErrorNotice';
@@ -15,12 +15,21 @@ import { useResource } from '../../shared/hooks/useResource';
 import { errorText } from '../../i18n/diagnostics';
 import { dateTime, taskStatusLabels } from '../../shared/lib/format';
 import { paperReaderUrl } from '../../shared/lib/paperReader';
+import SourceImportDialog from './SourceImportDialog';
 
-const columns = (onDelete: (task: AgentResearchSummary) => void, deleting: boolean): TableColumnsType<AgentResearchSummary> => [
+const columns = (onDelete: (task: AgentResearchSummary) => void, deleting: boolean, onImport: (source: AgentSource) => void): TableColumnsType<AgentResearchSummary> => [
   { title: t("研究任务"), key: 'task', render: (_value, task) => <div className="task-name"><Link to={`/tasks/${task.id}`}>{task.question || t("研究任务")}</Link><span className="task-identifier">{task.id.slice(0, 8)}</span></div> },
-  { title: t('研究论文'), key: 'papers', width: 280, render: (_value, task) => <div className="task-paper-links">{task.papers?.length ? task.papers.map((paper) => <Link key={paper.id} to={paperReaderUrl(paper.id)}>{paper.title}</Link>) : '—'}</div> },
+  { title: t('研究论文'), key: 'papers', width: 280, render: (_value, task) => <div className="task-paper-links">
+    {task.papers.length ? task.papers.map(paper => paper.id !== null
+      ? <Link key={paper.id} to={paperReaderUrl(paper.id)}>{paper.title}</Link>
+      : <div key={paper.source_id} className="task-paper-import">
+          <span>{paper.title}</span>
+          <Button type="text" size="small" icon={<DownloadOutlined />} onClick={() => onImport(paper)}
+            aria-label={t('导入并阅读《{0}》', [paper.title])} title={t('导入并阅读')} />
+        </div>) : '—'}
+  </div> },
   { title: t("状态"), dataIndex: 'status', width: 124, render: (status: TaskStatus) => <StatusBadge status={status} /> },
-  { title: t("资料"), dataIndex: 'paper_ids', width: 84, render: (ids: string[]) => t("{0} 篇", [ids.length]) },
+  { title: t("资料"), key: 'paperCount', width: 84, render: (_value, task) => t("{0} 篇", [task.papers.length]) },
   { title: t("创建时间"), dataIndex: 'created_at', width: 144, render: dateTime },
   { title: '', key: 'action', width: 160, render: (_value, task) => <div className="selection-actions"><Link aria-label={t("查看任务 {0}", [task.id.slice(0, 8)])} to={`/tasks/${task.id}`}>{t("查看")}</Link><Button danger type="text" disabled={deleting || task.status === 'running'} onClick={() => onDelete(task)} aria-label={t("删除研究记录 {0}", [task.id.slice(0, 8)])}>{t("删除")}</Button></div> },
 ];
@@ -29,6 +38,8 @@ const deletionNotifications = { placement: 'top', duration: 3, maxCount: 3, stac
 
 export default function TasksPage() {
   useLocale();
+  const navigate = useNavigate();
+  const [importSource, setImportSource] = useState<AgentSource>();
   const [page, setPage] = useState(1);
   const [status, setStatus] = useState<TaskStatus>();
   const load = useCallback((signal: AbortSignal) => agentResearch.list({ limit: 20, offset: (page - 1) * 20, status }, signal), [page, status]);
@@ -80,6 +91,8 @@ export default function TasksPage() {
   }
   return <>
     {holder}
+    {importSource && <SourceImportDialog source={importSource} onClose={() => setImportSource(undefined)}
+      onRead={id => { setImportSource(undefined); resource.reload(); navigate(paperReaderUrl(id)); }} />}
     <PageHeader title={t("研究记录")} description={t("查看和管理已经保存的研究结果。")} action={<Link to="/tasks/new"><Button type="primary" icon={<PlusOutlined />}>{t("新建任务")}</Button></Link>} />
     <section className="content-panel">
       <div className="filter-toolbar">
@@ -88,7 +101,7 @@ export default function TasksPage() {
       </div>
       {selected.length > 0 && <div className="selection-notice"><span>{t('已选择 {0} 条研究记录', [selected.length])}</span><div className="selection-actions"><Button danger disabled={deleting} loading={deleting} onClick={() => confirmDelete(selected.map(String))}>{t('删除已选研究')}</Button><Button type="link" disabled={deleting} onClick={() => setSelected([])}>{t('清空选择')}</Button></div></div>}
       {resource.error && <ErrorNotice error={resource.error} retry={resource.reload} />}
-      <Table<AgentResearchSummary> className="research-records-table" rowKey="id" columns={columns((task) => confirmDelete([task.id]), deleting).map((column) => ({ ...column, align: 'left' as const }))} rowSelection={{ align: 'left', selectedRowKeys: selected, preserveSelectedRowKeys: true, onChange: setSelected, getCheckboxProps: (task) => ({ disabled: deleting || task.status === 'running', 'aria-label': t('选择研究记录 {0}', [task.id.slice(0, 8)]) }) }} dataSource={resource.data?.items || []} loading={resource.loading} pagination={false} scroll={{ x: 980 }} locale={{ emptyText: <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={status ? t("没有匹配的任务") : t("还没有研究任务")}>{!status && <Link to="/tasks/new"><Button>{t("创建第一个任务")}</Button></Link>}</Empty> }} />
+      <Table<AgentResearchSummary> className="research-records-table" rowKey="id" columns={columns((task) => confirmDelete([task.id]), deleting, setImportSource).map((column) => ({ ...column, align: 'left' as const }))} rowSelection={{ align: 'left', selectedRowKeys: selected, preserveSelectedRowKeys: true, onChange: setSelected, getCheckboxProps: (task) => ({ disabled: deleting || task.status === 'running', 'aria-label': t('选择研究记录 {0}', [task.id.slice(0, 8)]) }) }} dataSource={resource.data?.items || []} loading={resource.loading} pagination={false} scroll={{ x: 980 }} locale={{ emptyText: <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={status ? t("没有匹配的任务") : t("还没有研究任务")}>{!status && <Link to="/tasks/new"><Button>{t("创建第一个任务")}</Button></Link>}</Empty> }} />
       {resource.data && <PaginationBar total={resource.data.total} page={page} onChange={setPage} />}
     </section>
   </>;

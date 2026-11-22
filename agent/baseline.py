@@ -819,13 +819,16 @@ def make_result(state: GraphState, context: PaperContext) -> TaskResult:
     )
 
 
-def persist_result(result: TaskResult, context: PaperContext) -> None:
-    from apis.database import save_paper, save_run
-
+def persist_result(result: TaskResult, context: PaperContext, persist=True, *, storage_key=None) -> None:
+    papers = list({p["source_id"]: p for p in context.papers.values()}.values())
     try:
-        for paper in {p["source_id"]: p for p in context.papers.values()}.values():
+        if callable(persist):
+            persist(papers)
+            return
+        from apis.database import save_paper, save_run
+        for paper in papers:
             save_paper(paper)
-        save_run(result.model_dump(mode="json"))
+        save_run(result.model_dump(mode="json"), storage_key=storage_key)
     except Exception as exc:  # noqa: BLE001 - retain the result on persistence failure
         result.errors.append({"stage": "persistence", "type": type(exc).__name__})
 
@@ -846,7 +849,7 @@ def run_task(
     search: Callable = search_web,
     reader: Callable = read_paper_api,
     library: LibraryClient | None = None,
-    persist: bool = False,
+    persist: bool | Callable = False,
     context_window: int | None = 32000,
     context_policy: str | Callable = prepare_context,
     context_finalize_ratio: float | None = DEFAULT_FINALIZE_RATIO,
@@ -904,7 +907,7 @@ def run_task(
         state = graph.invoke(state, config={"recursion_limit": 2 * task.max_steps + 2})
     result = make_result(state, context)
     if persist:
-        persist_result(result, context)
+        persist_result(result, context, persist)
     return result
 
 

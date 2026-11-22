@@ -32,9 +32,19 @@ await page.waitForURL('**/tasks/'+taskid);
 if(submitted[0].paper_ids.length!==0||!submitted[0].allow_search)throw Error('Question-only request contract invalid');
 await page.goto(BASE+'/tasks/new?paper_id='+id);
 await page.locator('.research-submit-panel li').filter({hasText:paper.title}).waitFor();
+if (!(await page.getByRole('radio', {name:'Baseline', exact:true}).isChecked())) throw Error('Expected default Baseline');
+await page.getByText('Extension', {exact:true}).click();
+if (submitted[0].research.context_policy !== 'compact' || submitted[0].research.planner || submitted[0].research.reflection) throw Error('Incorrect Baseline defaults');
+for (const name of ['Planner', 'Reflection']) {
+  if (!(await page.getByRole('checkbox', {name, exact:true}).isChecked())) throw Error(name + ' should default to enabled');
+}
+await page.getByText('Planner', {exact:true}).click();
+await page.getByText('Baseline', {exact:true}).click();
+await page.getByText('Extension', {exact:true}).click();
 await page.locator('textarea').fill('研究方法是什么？');
 await page.getByRole('button',{name:'开始研究',exact:true}).click();await page.waitForURL('**/tasks/'+taskid);
 if(submitted[1].paper_ids[0]!==id||!submitted[1].allow_search)throw Error('Reference paper request invalid');
+if(submitted[1].research.workflow!=='extension'||submitted[1].research.context_policy!=='compact'||submitted[1].research.planner||!submitted[1].research.reflection)throw Error('Extension options missing');
 await page.goto(BASE+'/tasks/new');await page.getByRole('button',{name:'English',exact:true}).click();
 await page.getByRole('heading',{name:'Reference papers (optional)',exact:true}).waitFor();
 await page.getByText('No reference papers selected. Relevant material will be found for your research question.',{exact:true}).waitFor();

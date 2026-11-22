@@ -9,7 +9,7 @@ from app.agent_bridge.contracts import AgentResult, DispatchManifest, ResultEnve
 ARXIV_SOURCE = re.compile(
     r"arxiv:(?P<base>(?:\d{2}(?:0[1-9]|1[0-2])\.\d{4,5}|"
     r"[A-Za-z][A-Za-z.-]*/\d{2}(?:0[1-9]|1[0-2])\d{3}))"
-    r"(?:(?P<version>v[1-9]\d*)|@[0-9a-f]{12})"
+    r"(?:(?P<version>v[1-9]\d*)|@(?P<sha>[0-9a-f]{12}))"
 )
 LIBRARY_SOURCE = re.compile(
     r"local:(?P<paper>[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12})@(?P<sha>[0-9a-f]{64})"
@@ -79,8 +79,32 @@ def validate_delivery(manifest: DispatchManifest, envelope: ResultEnvelope) -> d
     result = envelope.result
     if result.task_id != manifest.task.task_id or result.question != manifest.task.question:
         raise ValueError("Result task identity does not match dispatch")
+    research = manifest.runtime.research
+    if research and result.configuration.get("workflow", "baseline") != research.workflow:
+        raise ValueError("Delivered workflow differs from requested workflow")
+    if research and research.workflow == "extension" and any(
+        result.configuration.get(flag) is not getattr(research, flag) for flag in ("planner", "reflection")
+    ):
+        raise ValueError("Delivered extension options differ from requested options")
     sources = {source.source_id: source for source in manifest.sources}
     external, discovered = _search_sources(manifest, result)
+    if envelope.parsed_papers or manifest.runtime.persist:
+        expected = {source.get("source_id"): source.get("paper_id") for source in result.sources}
+        if any(not isinstance(identity, str) or not isinstance(paper_id, str) for identity, paper_id in expected.items()):
+            raise ValueError("Invalid result source for persistence")
+        seen = set()
+        for paper in envelope.parsed_papers:
+            identity = paper.get("source_id")
+            if (not isinstance(identity, str) or identity in seen or identity not in expected
+                or paper.get("paper_id") != expected[identity]):
+                raise ValueError("Parsed paper does not match opened sources")
+            library = LIBRARY_SOURCE.fullmatch(identity)
+            if library and (paper["paper_id"] != library["paper"] or paper.get("sha256") != library["sha"]):
+                raise ValueError("Persisted document differs from the authorized PDF")
+            seen.add(identity)
+        failed = any(e.get("stage") == "persistence" for e in result.errors)
+        if not manifest.runtime.persist or (not failed and seen != expected.keys()):
+            raise ValueError("Unexpected or missing persistence payload")
     chunks = set()
     for citation in result.citations:
         source = sources.get(citation.source_id)

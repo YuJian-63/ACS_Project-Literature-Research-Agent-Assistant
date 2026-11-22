@@ -1,7 +1,13 @@
 import type { Page, TaskStatus } from './types';
 import { request } from './client';
-// v3-only unified research API; execution is reserved for the Agent integration.
-export interface AgentResearchRequest { question: string; paper_ids?: string[]; allow_search?: boolean }
+export interface ResearchOptions {
+  workflow: 'baseline' | 'extension';
+  context_policy: 'full' | 'compact';
+  planner: boolean;
+  reflection: boolean;
+}
+export const defaultResearch: ResearchOptions = { workflow: 'baseline', context_policy: 'compact', planner: false, reflection: false };
+export interface AgentResearchRequest { question: string; paper_ids?: string[]; allow_search?: boolean; research?: ResearchOptions }
 export interface AgentSource { source_id: string; paper_id: string; version?: string | number | null; url: string; title: string }
 export interface AgentEvidence extends AgentSource { chunk_id: string; page: number; source_text: string }
 export interface AgentResult { task_id: string; question: string; answer: string; comparison_table: string; citations: AgentEvidence[]; unresolved: string[]; stop_reason: string; usage: { agent_steps: number; model_calls: number; tool_calls: number; input_tokens: number | null; output_tokens: number | null; total_tokens: number | null; token_usage_complete: boolean; elapsed_seconds: number }; trace: unknown[]; errors: { stage: string; type: string }[]; configuration: Record<string, unknown>; sources: AgentSource[] }
@@ -18,7 +24,7 @@ export interface AgentResearchSummary {
   id: string;
   question: string;
   paper_ids: string[];
-  papers: { id: string; title: string }[];
+  papers: ({ id: string; title: string } | (AgentSource & { id: null }))[];
   status: TaskStatus;
   created_at: string;
 }

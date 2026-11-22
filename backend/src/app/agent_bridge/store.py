@@ -1,3 +1,7 @@
+import os
+import subprocess
+import sys
+from pathlib import Path
 from dataclasses import dataclass
 from datetime import timedelta
 from uuid import UUID
@@ -5,7 +9,7 @@ from uuid import UUID
 from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 
-from app.agent_bridge.bundles import manifest_digest
+from app.agent_bridge.bundles import canonical_json, manifest_digest
 from app.agent_bridge.contracts import DispatchManifest, ResultEnvelope
 from app.agent_bridge.results import present_result, validate_delivery
 from app.config import Settings
@@ -89,6 +93,29 @@ def read_missing_page_counts(sessions, task_id, settings, discovered, cited_page
     return counts
 
 
+def persist_dispatch(settings, manifest, envelope):
+    result = envelope.result
+    if any(item.get("stage") == "persistence" for item in result.errors):
+        result.configuration["persistence"] = "failed"
+        return
+    result.configuration["persistence"] = "saved"
+    key = result.task_id
+    if manifest.runtime.research and manifest.runtime.research.workflow == "extension":
+        key = f"extension/{key}"
+    try:
+        if not settings or not settings.agent_persist_database_url or not settings.agent_persist_database_url.get_secret_value():
+            raise ValueError("No Agent persistence database configured")
+        subprocess.run([sys.executable, "-m", "apis.database", "--save-dispatch"],
+            cwd=Path(__file__).resolve().parents[4] / "agent",
+            env={**os.environ, "DATABASE_URL": settings.agent_persist_database_url.get_secret_value()},
+            input=canonical_json({"storage_key": key, "papers": envelope.parsed_papers,
+                "result": result.model_dump(mode="json")}),
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=35, check=True)
+    except (OSError, ValueError, subprocess.SubprocessError) as exc:
+        result.configuration["persistence"] = "failed"
+        result.errors.append({"stage": "persistence", "type": type(exc).__name__})
+
+
 def complete_delivery(sessions: sessionmaker[Session], task_id: UUID, owner: UUID,
     manifest: DispatchManifest, envelope: ResultEnvelope, *, settings: Settings | None = None) -> bool:
     discovered = validate_delivery(manifest, envelope)
@@ -128,6 +155,9 @@ def complete_delivery(sessions: sessionmaker[Session], task_id: UUID, owner: UUI
                         raise ValueError("Citation exceeds verified library PDF pages")
                 session.add(TaskPaper(task_id=task_id, user_id=task.user_id, paper_id=paper.id,
                     paper_sha256=paper.sha256, selection_order=None))
+        if manifest.runtime.persist:
+            persist_dispatch(settings, manifest, envelope)
+            now = database_time(session)
         run.result = result.model_dump(mode="json")
         run.stop_reason = result.stop_reason
         run.remote_job_id = envelope.remote_job_id

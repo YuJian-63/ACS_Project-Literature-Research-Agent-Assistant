@@ -3,7 +3,7 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
-from app.agent_bridge.contracts import AgentResult
+from app.agent_bridge.contracts import AgentResult, ResearchOptions
 from app.api.schemas import Error, TaskStatus
 
 
@@ -13,6 +13,8 @@ class AgentResearchCreate(BaseModel):
     question: str = Field(min_length=1, max_length=8000)
     paper_ids: list[UUID] = Field(default_factory=list, max_length=20)
     allow_search: bool = Field(default=True, strict=True)
+
+    research: ResearchOptions | None = Field(default=None, exclude_if=lambda value: value is None)
 
     @field_validator("question")
     @classmethod
@@ -45,11 +47,20 @@ class ResearchPaperReference(BaseModel):
     title: str
 
 
+class ExternalResearchPaper(BaseModel):
+    id: None
+    title: str
+    source_id: str
+    paper_id: str
+    url: str
+    version: str | int | None = None
+
+
 class AgentResearchSummary(BaseModel):
     id: UUID
     question: str
     paper_ids: list[UUID]
-    papers: list[ResearchPaperReference]
+    papers: list[ResearchPaperReference | ExternalResearchPaper]
     status: TaskStatus
     created_at: datetime
 

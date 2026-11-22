@@ -40,6 +40,7 @@
 ```
 
 - `question` 必填，非空，最多 8000 字符。`paper_ids` 默认为空数组，最多 20 个不重复的本账号论文 UUID，按提交顺序保存。允许使用 `uploaded`、`processing`、`ready` 的原件；已解析失败的预选论文返回 `409 PAPER_NOT_READY`。
+- `research` 可省略。支持 `workflow=baseline|extension`、`context_policy=full|compact`、`context_finalize_ratio`（默认 0.9，可为 null）和仅在 Extension 下启用的 `planner`、`reflection`。默认 Baseline、完整上下文、两个开关关闭。
 - `allow_search` 默认为 `true`，允许 Agent 按需补充来源，包括本账号的论文；设为 `false` 时至少预选一篇，仅使用指定论文。执行预算由后端在创建时确定。
 - 可选请求头 `Idempotency-Key` 为 1–128 个不含空白的可见 ASCII 字符。同账号同键同输入返回原任务；更换问题、论文顺序或搜索开关却沿用同键，返回 `409 IDEMPOTENCY_CONFLICT`。
 - 首次创建返回 `202` 和 `{"task_id":"<uuid>","status":"queued"}`。幂等重放同样返回 202，`task_id` 保持一致，`status` 为该任务当前状态。响应头 `Location` 指向详情接口，`Idempotency-Replayed` 标记是否重放。派发未启用返回 `503 AGENT_NOT_CONNECTED`，传输配置不完整返回 `503 RUNNER_NOT_CONFIGURED`。
@@ -53,6 +54,8 @@
 | `DELETE /agent-research/{task_id}` | 成功返回 204。运行中或已开始后重新排队的任务返回 `409 TASK_RUNNING`。失败且仍待确认远端停止的作业返回 `409 AGENT_STOP_PENDING`。原 PDF 保留在论文库。 |
 
 `paper_ids` 始终表示提交时的预选论文。第一次请求可以为空；运行中发现的论文出现在 `result.sources`。后端按用户归属、UUID、SHA-256、论文数量以及所引物理页校验库内检索结果，再保存任务关联。
+
+研究记录列表的 `papers` 包含预选论文、库内检索后使用的论文和本次研究打开的 arXiv 来源，篇数取 `papers.length`。已入库的论文按本地 UUID 去重，标题链接直接打开 PDF。未入库的来源返回 `id: null` 以及原始来源标识、版本和标题，网页显示灰色标题及下载按钮，复用引用的「导入并阅读」弹窗。导入匹配版本后，再次读取列表即返回本地 UUID。
 
 `result` 在交付前为 `null`。交付后包含 `answer`、`comparison_table`、`sources`、`citations`、`trace`、`usage`、`errors`、`configuration`、`stop_reason` 和 `unresolved`。`completed` 和 `partial` 对应 `status=succeeded`，部分完成时应同时展示未解决项。失败时查看 `error`；如 Agent 已交付失败结果，仍可读取 `result`。
 

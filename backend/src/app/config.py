@@ -23,10 +23,14 @@ class Settings(BaseSettings):
     parser_timeout_seconds: float = Field(default=120, ge=1, le=600, allow_inf_nan=False)
     task_runner: Literal["agent"] = "agent"
     agent_dispatch_enabled: bool = False
+    agent_persist: bool = False
+    agent_persist_database_url: SecretStr | None = None
+    tavily_api_key: SecretStr | None = None
     agent_exchange_root: Path | None = None
     agent_library_public_url: str | None = None
     agent_transport: Literal["manual", "local", "tacc", "tcloud"] = "manual"
     agent_tcloud_cli: str = Field(default="tcloud", min_length=1)
+    agent_tcloud_env_name: str = Field(default="acs-network-probe", pattern=r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
     agent_tcloud_submit_timeout_seconds: float = Field(default=180, ge=1, le=1800, allow_inf_nan=False)
     agent_tcloud_model_env_file: Path | None = None
     agent_local_root: Path | None = None

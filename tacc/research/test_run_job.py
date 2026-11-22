@@ -53,6 +53,10 @@ def staged(tmp_path, monkeypatch, request):
         "sources": sources,
         "runtime": {"persist": False, "context_window": 16000},
     }
+    if getattr(request, "param", None) == "extension":
+        manifest["runtime"].update(persist=True, research={"workflow": "extension", "planner": True,
+            "reflection": True, "context_policy": "compact", "context_finalize_ratio": 0.8})
+        task["allow_search"] = True
     raw = json.dumps(manifest).encode()
     with ZipFile("input.zip", "w") as archive:
         archive.writestr("manifest.json", raw)
@@ -125,3 +129,21 @@ def test_expired_job_skips_model(staged):
         == "AGENT_PLATFORM_TIMEOUT"
     )
     assert not (out / "result.json").exists()
+
+@pytest.mark.parametrize("staged", ["extension"], indirect=True)
+def test_extension_search_and_persistence_cross_job_boundary(staged, monkeypatch):
+    import extension
+    from schemas import TaskResult, Usage
+
+    _, out = staged
+    def run(task, *, library, search, persist, context_window, index_dir, **options):
+        assert search == library.search_arxiv and task.allow_search
+        assert context_window == 16000 and index_dir.name == "retrieval"
+        assert options == dict(context_policy="compact", context_finalize_ratio=0.8, planner=True, reflection=True)
+        persist([{"source_id": task.sources[0], "pages": [{"text": "original"}]}])
+        return TaskResult(task_id=task.task_id, question=task.question, stop_reason="partial", usage=Usage())
+    monkeypatch.setattr(extension, "run_task", run)
+    assert run_job.main() == 0
+    envelope = json.loads((out / "result.json").read_text())
+    assert envelope["parsed_papers"][0]["pages"][0]["text"] == "original"
+    assert envelope["result"]["configuration"]["workflow"] == "extension"

@@ -21,6 +21,11 @@ try {
   assert.match(first.key, /^[0-9a-f-]{36}$/);
   assert.equal(researchSubmission({ ...input, question: 'Research question' }, first).key, first.key);
   assert.notEqual(researchSubmission({ ...input, allow_search: false }, first).key, first.key);
+  const research = { workflow: 'extension', planner: true, reflection: true, context_policy: 'compact' };
+  assert.notEqual(researchSubmission({ ...input, research }, first).key, first.key);
+  saveResearchDraft('alice', { question: input.question, paperIds: input.paper_ids, research, allowSearch: false });
+  assert.deepEqual(readResearchDraft('alice').research, research);
+  assert.equal(readResearchDraft('alice').allowSearch, false);
   saveResearchDraft('alice', { question: input.question, paperIds: input.paper_ids, submission: first });
   assert.deepEqual(readResearchDraft('alice'), { question: input.question, paperIds: input.paper_ids, submission: first });
   assert.equal(readResearchDraft('bob'), undefined);

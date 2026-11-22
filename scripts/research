@@ -1,0 +1,28 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+if [[ $# != 1 || ${1:-} != up ]]; then
+  echo "用法: ./scripts/research up" >&2
+  exit 2
+fi
+cd "$(dirname "$0")/../backend"
+
+# Check for the installed application unit even when all ECS services are stopped.
+if ! command -v systemctl >/dev/null || ! systemctl list-unit-files --no-legend acs-api.service |
+    awk '$1 == "acs-api.service" { found = 1 } END { exit !found }'; then
+  exec ../scripts/local-research up
+fi
+
+# systemd services read the deployment's configuration independently of this shell.
+env -u AGENT_LIBRARY_PUBLIC_URL .venv/bin/python - <<'PY'
+from app.config import Settings
+
+if not Settings(_env_file=".env").agent_library_public_url:
+    raise SystemExit("请在服务器的 backend/.env 设置 AGENT_LIBRARY_PUBLIC_URL 后重新启动。")
+PY
+
+systemctl start acs-api.service
+curl --noproxy '*' --retry 20 --retry-connrefused --retry-delay 1 --max-time 5 \
+  -fsS -o /dev/null http://127.0.0.1:8000/ready
+systemctl start acs-runner.service acs-parser.service acs-import.service acs-mail.service nginx.service
+echo "ECS 服务已启动，Nginx 提供已部署的前端。"

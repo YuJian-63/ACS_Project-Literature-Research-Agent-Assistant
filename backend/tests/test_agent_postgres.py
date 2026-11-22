@@ -228,6 +228,55 @@ class AgentPostgresTests(unittest.TestCase):
                 "usage": {"model_calls": 2, "tool_calls": 3},
                 "unresolved": ["missing evidence"] if reason == "partial" else []}})
 
+    def test_history_includes_matching_imports_added_after_research(self):
+        from app.db.models import PaperSource
+
+        client = self.research_client()
+        path = "/api/v1/agent-research"
+        client.post(path, json={"question": "Compare", "paper_ids": [str(self.paper_id)]}).raise_for_status()
+        task_id = claim_task(self.sessions, self.owner, "agent")
+        self.assertTrue(set_task_stage(self.sessions, task_id, self.owner, "agent_packaging", "agent_waiting", "waiting"))
+        with self.sessions() as session:
+            run = session.get(AgentRun, task_id)
+            manifest = DispatchManifest.model_validate(run.manifest)
+            envelope = self.envelope(manifest, run.input_sha256)
+        opened = [("1706.03762", "v7"), ("1810.04805", "@" + "a" * 12)]
+        envelope.result.sources = [
+            {"source_id": "arxiv:" + base + suffix, "paper_id": "arxiv:" + base, "title": base,
+             "url": "https://arxiv.org/abs/" + base + (suffix if suffix.startswith("v") else ""),
+             "version": 7 if suffix == "v7" else 1} for base, suffix in opened]
+        envelope.result.trace = [{"kind": "tool", "name": "search_papers", "observation": {"results": [
+            {"source": "1706.03762", "title": "[1706.03762] Attention Is All You Need"},
+            {"source": "1810.04805v2", "title": "Different version"}]}}]
+        self.assertTrue(complete_delivery(self.sessions, task_id, self.owner, manifest, envelope))
+
+        def add_import(user_id, external_id, sha):
+            paper_id = uuid4()
+            with self.sessions.begin() as session:
+                session.add(Paper(id=paper_id, user_id=user_id, title=external_id, original_filename="import.pdf",
+                    storage_key=f"uploads/{paper_id}.pdf", size_bytes=20, sha256=sha, status="uploaded"))
+                session.flush()
+                session.add(PaperSource(user_id=user_id, paper_id=paper_id, provider="arxiv",
+                    external_id=external_id, source_metadata={}))
+            return str(paper_id)
+
+        def check_history(first=None, second=None):
+            record = client.get(path).json()["items"][0]
+            self.assertEqual(record["paper_ids"], [str(self.paper_id)])
+            self.assertEqual([p["id"] for p in record["papers"]], [str(self.paper_id), first, second])
+            for paper, source in zip(record["papers"][1:], envelope.result.sources):
+                if paper["id"] is None:
+                    title = "Attention Is All You Need" if source["paper_id"] == "arxiv:1706.03762" else source["title"]
+                    self.assertEqual(paper, {**source, "id": None, "title": title})
+
+        add_import(self.other_user, "1706.03762v7", "a" * 64)
+        add_import(self.user_id, "1706.03762v6", "b" * 64)
+        check_history()
+        second = add_import(self.user_id, "1810.04805v1", "a" * 64)
+        check_history(second=second)
+        first = add_import(self.user_id, "1706.03762v7", "c" * 64)
+        check_history(first, second)
+
     def test_discovered_library_citation_checks_owner_digest_and_page_without_changing_selection(self):
         from io import BytesIO
         from uuid import UUID
@@ -272,6 +321,8 @@ class AgentPostgresTests(unittest.TestCase):
             self.assertTrue(deliver(paper["id"], paper["sha256"], 1))
             response = client.get(f"/api/v1/agent-research/{task_id}").json()
             self.assertEqual(response["paper_ids"], selected)
+            summary = next(row for row in client.get("/api/v1/agent-research").json()["items"] if row["id"] == str(task_id))
+            self.assertEqual([p["id"] for p in summary["papers"]], [*selected, paper["id"]])
             self.assertEqual(response["result"], envelope.result.model_dump(mode="json"))
             with self.sessions() as session:
                 stored = session.get(TaskPaper, (task_id, UUID(paper["id"])))
