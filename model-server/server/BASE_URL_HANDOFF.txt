@@ -6,6 +6,6 @@ AGENT_BASE_URL=http://<TACC-node>:8000/v1
 
 固定模型名：qwen3.8-27b
 固定接口：POST ${AGENT_BASE_URL}/chat/completions
-固定客户端参数：stream=true、n=1、api_key=EMPTY、max_tokens不超过4096。
+固定客户端参数：stream=false、n=1、api_key=EMPTY、max_tokens不超过4096。
 
 Agent 不需要知道部署者的服务目录，也不需要模型权重、vLLM环境、GPU目录或私有优化目录。工具 schema和工具执行函数由Agent自己提供；服务端返回tool_calls，Agent执行工具后继续请求。

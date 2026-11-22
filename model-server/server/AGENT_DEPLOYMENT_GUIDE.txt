@@ -80,7 +80,7 @@ http://10.0.3.10:8000/v1
 base_url = 该地址
 model = qwen3.8-27b
 api_key = EMPTY
-stream = true
+stream = false
 n = 1
 max_tokens <= 4096
 ```
@@ -93,7 +93,7 @@ Agent 必须在能访问 TACC 内网的环境运行；普通外网电脑不能�
 
 ```bash
 BASE_URL='http://本轮实际节点IP:8000/v1'
-curl -N -sS -H 'Content-Type: application/json' \\
+curl -fsS -H 'Content-Type: application/json' \\
   "$BASE_URL/chat/completions" \\
   --data-binary @text.request.json
 ```
@@ -104,40 +104,39 @@ curl -N -sS -H 'Content-Type: application/json' \\
 {
   "model": "qwen3.8-27b",
   "messages": [{"role": "user", "content": "Reply with exactly: connection_ok"}],
-  "stream": true,
-  "stream_options": {"include_usage": true},
+  "stream": false,
   "max_tokens": 128,
   "temperature": 0
 }
 ```
 
-流式响应中的普通增量读取 `choices[0].delta.content`。最后可能有一个 `choices=[]` 的 usage 事件，然后才是 `data: [DONE]`；客户端不能对每个事件都直接访问 `choices[0]`。
+读取完整 JSON 响应中的 `choices[0].message.content` 和 `usage`。
 
 六、Agent 工具调用测试
 
 工具 schema 和工具执行函数由 Agent 客户端准备，模型服务不会替 Agent 执行函数。
 
 ```bash
-curl -N -sS -H 'Content-Type: application/json' \\
+curl -fsS -H 'Content-Type: application/json' \\
   "$BASE_URL/chat/completions" \\
   --data-binary @tool.request.json
 ```
 
 Agent 需要：
 
-1. 合并多个流式 `delta.tool_calls` 事件。
-2. 等 `function.arguments` 拼成完整 JSON 后执行本地函数。
+1. 从完整响应的 `choices[0].message.tool_calls` 读取工具调用。
+2. 解析 `function.arguments` 中的 JSON 并执行本地函数。
 3. 把模型返回的 `assistant.tool_calls` 原样追加到 messages。
 4. 把工具结果作为 `role=tool`，使用匹配的 `tool_call_id` 追加。
 5. 再次请求 `/chat/completions`，让模型生成最终回答。
 
-服务端只提供模型推理和流式 tool_calls，不知道 Agent 的本地函数、数据库或外部 API 凭据。
+服务端只提供模型推理和 tool_calls，不知道 Agent 的本地函数、数据库或外部 API 凭据。
 
 七、指标和结果
 
-流式结束的 usage 事件包含输入、输出、总 token；原生 metrics 包含 TTFT、TPOT/mean_itl、排队时间和 tokens/sec；`metrics.telemetry` 包含服务端耗时、缓存口径、prefill 计算 token、完成时 GPU/KV 快照。
+完整响应的 `usage` 包含输入、输出和总 token。原生 metrics 包含 TTFT、TPOT/mean_itl、排队时间和 tokens/sec；`metrics.telemetry` 包含服务端耗时、缓存口径、prefill 计算 token、完成时 GPU/KV 快照。
 
-客户端实际收到首包和最后一包的端到端时间必须由 Agent 自己计时。GPU 利用率、显存和 KV 占用是响应结束时的共享快照，不是单个请求的平均值或峰值。
+非流式客户端可记录整次请求的耗时。GPU 利用率、显存和 KV 占用是响应结束时的共享快照，不是单个请求的平均值或峰值。
 
 服务端不启动定时 `/metrics` 轮询。请求指标保存到 TACC 用户目录的 `requests.jsonl`；如需下载，由服务作业所有者执行：
 

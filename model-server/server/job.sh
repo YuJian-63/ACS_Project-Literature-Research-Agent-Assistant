@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 umask 077
+echo "VERIFY_STARTED_AT=$(date +%s)"
 : "${TACC_WORKDIR:?Submit with tcloud submit}"
 : "${TACC_USERDIR:?Submit with tcloud submit}"
 : "${SLURM_JOB_ID:?Submit with tcloud submit}"
@@ -10,6 +11,11 @@ test "$CONDA_PREFIX" = /mnt/home/public/course-envs/CSIT6000V/common/proxy || {
     exit 1
 }
 printf 'SDK_BOOTSTRAP=%s\n' "$CONDA_PREFIX"
+if [[ -f "$TACC_WORKDIR/service-generation" ]]; then
+    generation=$(cat "$TACC_WORKDIR/service-generation")
+    [[ "$generation" =~ ^[0-9a-f-]{36}$ ]]
+    printf '%s\n' "$SLURM_JOB_ID" > "$TACC_USERDIR/model-${generation}.id"
+fi
 project="$TACC_USERDIR/CSIT6000V-private-vllm-latency"
 runtime_mode=$(tr -d '\r\n' < "$TACC_WORKDIR/runtime-mode.txt")
 export QWEN_RUNTIME_MODE="$runtime_mode"
