@@ -25,7 +25,8 @@ class MigrationGraphTests(unittest.TestCase):
         script = ScriptDirectory.from_config(config)
         revisions = list(script.walk_revisions())
         self.assertEqual(len(revisions), len({revision.revision for revision in revisions}))
-        self.assertEqual(script.get_heads(), ["20261122_0013"])
+        self.assertEqual(script.get_heads(), ["20261122_0014"])
+        self.assertEqual(script.get_revision("20261122_0014").down_revision, "20261122_0013")
         self.assertEqual(script.get_revision("20261118_0006").path,
             str(BACKEND / "alembic/versions/20261118_0006_import_metadata.py"))
 
@@ -50,7 +51,8 @@ class MergeMigrationPostgresTests(unittest.TestCase):
         self.admin.dispose()
 
     def check_head(self, connection):
-        self.assertEqual(connection.scalar(text("SELECT version_num FROM alembic_version")), "20261122_0013")
+        self.assertEqual(connection.scalar(text("SELECT version_num FROM alembic_version")), "20261122_0014")
+        self.assertTrue(inspect(connection).has_table("task_evaluations"))
         self.assertIn("source_metadata", {column["name"] for column in inspect(connection).get_columns("paper_imports")})
         self.assertTrue(inspect(connection).has_table("agent_runs"))
         command.check(self.config)
@@ -73,6 +75,29 @@ class MergeMigrationPostgresTests(unittest.TestCase):
             self.assertFalse(inspect(connection).has_table("agent_runs"))
             command.upgrade(self.config, "head")
             self.check_head(connection)
+
+    def test_evaluation_downgrade_preserves_existing_research(self):
+        with self.engine.connect() as connection:
+            self.config.attributes["connection"] = connection
+            command.upgrade(self.config, "20261122_0013")
+            user_id, task_id, artifact_id = uuid4(), uuid4(), uuid4()
+            connection.execute(text("INSERT INTO users (id, username, username_key, email, email_key, password_hash) "
+                "VALUES (:id, 'judgefixture', 'judgefixture', 'judge@example.com', 'judge@example.com', 'unused')"), {"id": user_id})
+            connection.execute(text("INSERT INTO tasks (id, user_id, task_type, runner_type, workflow_version, request_hash) "
+                "VALUES (:id, :user, 'summary', 'agent', 'agent-io-v1', :digest)"),
+                {"id": task_id, "user": user_id, "digest": "a" * 64})
+            connection.execute(text("INSERT INTO artifacts (id, task_id, title, content_markdown) "
+                "VALUES (:id, :task, 'Saved research', 'Original answer')"), {"id": artifact_id, "task": task_id})
+            command.upgrade(self.config, "head")
+            connection.execute(text("INSERT INTO task_evaluations (task_id, artifact_id, input_sha256, config_sha256, input_payload, config) "
+                "VALUES (:task, :artifact, :digest, :digest, '{}'::jsonb, '{}'::jsonb)"),
+                {"task": task_id, "artifact": artifact_id, "digest": "b" * 64})
+            command.downgrade(self.config, "20261122_0013")
+            self.assertFalse(inspect(connection).has_table("task_evaluations"))
+            self.assertEqual(connection.scalar(text("SELECT content_markdown FROM artifacts WHERE id=:id"), {"id": artifact_id}), "Original answer")
+            command.upgrade(self.config, "head")
+            self.check_head(connection)
+            self.assertEqual(connection.scalar(text("SELECT count(*) FROM task_evaluations")), 0)
 
     def test_pdf_limit_upgrade_preserves_existing_paper_and_enforces_boundary(self):
         with self.engine.connect() as connection:

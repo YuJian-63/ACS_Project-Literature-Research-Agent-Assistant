@@ -1,5 +1,7 @@
 # 后端开发
 
+可选的 [DeepSeek 研究结果评分](docs/deepseek-evaluation.md) 使用独立异步 Worker，默认关闭；评分不影响研究结果交付。
+
 后端管理账号、论文原件、研究任务和结果。网页通过 `POST /api/v1/agent-research` 提交问题，研究 Worker 将任务交给独立 Agent。课程 TACC 使用 `tcloud` 提交 CPU 作业，模型推理由百炼提供。[TACC 启动与网页验收](../tacc/TACC.md) · [HTTP API 契约](../docs/api-contract.md)
 
 ## 1. 首次启动

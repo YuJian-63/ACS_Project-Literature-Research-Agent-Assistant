@@ -1,10 +1,11 @@
-from datetime import datetime
+from datetime import date, datetime
 from typing import Any
 from uuid import UUID
 
 from sqlalchemy import (
     BigInteger,
     CheckConstraint,
+    Date,
     DateTime,
     ForeignKey,
     ForeignKeyConstraint,
@@ -464,4 +465,46 @@ class AgentQueueSettings(Base):
     __table_args__ = (
         CheckConstraint("id = 1"),
         CheckConstraint("concurrency BETWEEN 1 AND 4"),
+    )
+
+
+class EvaluationDailyQuota(Base):
+    __tablename__ = "evaluation_daily_quotas"
+
+    user_id: Mapped[UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), primary_key=True)
+    day: Mapped[date] = mapped_column(Date, primary_key=True)
+    reserved: Mapped[int] = mapped_column(Integer, server_default=text("0"))
+
+    __table_args__ = (CheckConstraint("reserved >= 0", name="evaluation_daily_quotas_reserved"),)
+
+
+class TaskEvaluation(UUIDPrimaryKey, CreatedAt, UpdatedAt, Base):
+    __tablename__ = "task_evaluations"
+
+    task_id: Mapped[UUID] = mapped_column(ForeignKey("tasks.id", ondelete="CASCADE"))
+    artifact_id: Mapped[UUID | None]
+    input_sha256: Mapped[str] = mapped_column(String(64))
+    config_sha256: Mapped[str] = mapped_column(String(64))
+    input_payload: Mapped[dict[str, Any]] = mapped_column(JSONB)
+    config: Mapped[dict[str, Any]] = mapped_column(JSONB)
+    evidence: Mapped[dict[str, Any] | None] = mapped_column(JSONB(none_as_null=True))
+    evidence_sha256: Mapped[str | None] = mapped_column(String(64))
+    status: Mapped[str] = mapped_column(Text, server_default=text("'pending'"))
+    report: Mapped[dict[str, Any] | None] = mapped_column(JSONB(none_as_null=True))
+    usage: Mapped[dict[str, Any] | None] = mapped_column(JSONB(none_as_null=True))
+    error_code: Mapped[str | None] = mapped_column(String(64))
+    attempts: Mapped[int] = mapped_column(Integer, server_default=text("0"))
+    lease_token: Mapped[UUID | None]
+    lease_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    next_attempt_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=text("now()"))
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+    __table_args__ = (
+        ForeignKeyConstraint(["artifact_id", "task_id"], ["artifacts.id", "artifacts.task_id"], ondelete="CASCADE"),
+        UniqueConstraint("task_id", "input_sha256", "config_sha256", name="task_evaluations_identity"),
+        CheckConstraint("status IN ('pending', 'running', 'succeeded', 'failed', 'skipped')", name="task_evaluations_status"),
+        CheckConstraint("attempts >= 0", name="task_evaluations_attempts"),
+        Index("task_evaluations_queue_idx", "status", "next_attempt_at"),
+        Index("task_evaluations_task_created_idx", "task_id", "created_at"),
     )

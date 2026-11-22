@@ -1,0 +1,25 @@
+[Unit]
+Description=ACS DeepSeek result evaluation worker
+Wants=network-online.target
+After=network-online.target acs-runner.service
+PartOf=acs-runner.service
+
+[Service]
+Type=simple
+User=acs
+Group=acs
+WorkingDirectory=/home/acs/ACS_Project-Literature-Research-Agent-Assistant/backend
+ExecStart=/home/acs/ACS_Project-Literature-Research-Agent-Assistant/backend/.venv/bin/python -m app.evaluation_worker
+Environment=PYTHONUNBUFFERED=1
+Environment=PYTHONNOUSERSITE=1
+UMask=0077
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=300
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=read-only
+
+[Install]
+WantedBy=acs-runner.service

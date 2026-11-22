@@ -178,6 +178,9 @@ def complete_delivery(sessions: sessionmaker[Session], task_id: UUID, owner: UUI
                 message = "课程模型调用失败，请在模型管理中检查 GPU 作业状态后重试"
             mark_failed(session, task, now, "AGENT_" + result.stop_reason.upper(), message)
             task.error_details = {"stop_reason": result.stop_reason, "unresolved": result.unresolved}
+            if settings and settings.evaluation_enabled:
+                from app.evaluations.service import enqueue_evaluation
+                enqueue_evaluation(session, task, settings, automatic=True)
             return True
         artifact = Artifact(task_id=task_id,
             title={"summary": "论文摘要", "qa": "论文问答", "review": "论文综述"}[task.task_type],
@@ -196,6 +199,9 @@ def complete_delivery(sessions: sessionmaker[Session], task_id: UUID, owner: UUI
         task.error_code = None
         task.error_message = None
         task.error_details = None
+        if settings and settings.evaluation_enabled:
+            from app.evaluations.service import enqueue_evaluation
+            enqueue_evaluation(session, task, settings, automatic=True)
         if result.stop_reason == "partial" or result.unresolved:
             append_event(session, task, now, "Agent 已返回可用结果，仍有未解决项", "warning",
                 {"stop_reason": result.stop_reason, "unresolved": result.unresolved})

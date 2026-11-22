@@ -67,6 +67,32 @@ class Settings(BaseSettings):
     user_daily_tasks: int = Field(default=20, ge=1, le=10000)
     arxiv_enabled: bool = False
     arxiv_contact_email: str | None = None
+    evaluation_enabled: bool = False
+    evaluation_base_url: str = "https://api.deepseek.com"
+    evaluation_model: str = Field(default="", max_length=256)
+    evaluation_api_key: SecretStr | None = None
+    evaluation_timeout_seconds: float = Field(default=90, ge=1, le=180, allow_inf_nan=False)
+    evaluation_max_output_tokens: int = Field(default=4096, ge=512, le=16384)
+    evaluation_max_input_bytes: int = Field(default=64000, ge=4000, le=256000)
+    evaluation_max_response_bytes: int = Field(default=262144, ge=4096, le=1048576)
+    evaluation_max_attempts: int = Field(default=3, ge=1, le=5)
+    evaluation_daily_limit: int = Field(default=30, ge=1, le=1000)
+    evaluation_evidence_timeout_seconds: float = Field(default=20, ge=1, le=60, allow_inf_nan=False)
+    evaluation_max_original_pages: int = Field(default=12, ge=0, le=40)
+
+    @field_validator("evaluation_base_url")
+    @classmethod
+    def validate_evaluation_url(cls, value: str) -> str:
+        parsed = urlsplit(value)
+        if (parsed.scheme != "https" or not parsed.hostname or parsed.username is not None
+            or parsed.password is not None or parsed.query or parsed.fragment or parsed.path not in {"", "/", "/v1", "/v1/"}):
+            raise ValueError("EVALUATION_BASE_URL must be an HTTPS API origin, optionally ending in /v1")
+        return value.rstrip("/")
+
+    @property
+    def evaluation_configured(self) -> bool:
+        return bool(self.evaluation_enabled and self.evaluation_model.strip()
+            and self.evaluation_api_key and self.evaluation_api_key.get_secret_value().strip())
 
     @field_validator("arxiv_contact_email")
     @classmethod
