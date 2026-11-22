@@ -249,6 +249,7 @@ test-results/
 blob-report/
 
 # Local research data and service state (keep samples and fixtures tracked)
+/test-cases/
 /runtime/
 /backend/runtime/
 /data/uploads/

@@ -81,7 +81,21 @@ esac
   echo "请先安装 backend 和 frontend 依赖，见 tacc/TACC.md" >&2
   exit 1
 }
-# Check before opening any ports or starting background services.
+# The shell holds the locked file description until shutdown, even after Python exits.
+mkdir -p "$state"
+exec 9>>"$state/up.lock"
+lock_status=$("$python" - <<'PY'
+import fcntl
+try:
+    fcntl.flock(9, fcntl.LOCK_EX | fcntl.LOCK_NB)
+except BlockingIOError:
+    print("busy")
+PY
+)
+if [[ "$lock_status" == busy ]]; then
+  echo "本项目已有启动器在运行，请查看原终端。网页地址：$web"
+  exit 0
+fi
 "$python" - <<'PY'
 import shutil
 import socket
@@ -102,7 +116,6 @@ for port in (5173, 8000, 8001):
             raise SystemExit(f"本机端口 {port} 已占用")
 PY
 docker compose up -d --wait postgres
-mkdir -p "$state"
 pids=()
 names=()
 tunnel_id=''
@@ -110,7 +123,7 @@ start() {
   local name=$1
   shift
   # Keep $! pointing at the service so supervision and shutdown still reach it.
-  "$@" > >(while IFS= read -r line || [[ -n "$line" ]]; do
+  "$@" 9>&- > >(while IFS= read -r line || [[ -n "$line" ]]; do
     printf '[%s] %s\n' "$name" "$line"
   done | tee "$state/$name.log") 2>&1 &
   pids+=("$!")
@@ -140,7 +153,7 @@ wait_health() {
   local url=$1 expected=$2 host address
   local route=(--silent)
   for ((attempt=0; attempt<30; attempt++)); do
-    check_services
+    check_services || exit 1
     if curl -fsS --max-time 6 "${route[@]}" "$url" 2>/dev/null | "$python" -c 'import json,sys; sys.exit(json.load(sys.stdin).get("status") != sys.argv[1])' "$expected" 2>/dev/null; then return; fi
     # Some local VPN resolvers return synthetic addresses for new Quick Tunnel hosts.
     # Probe the public A record as well, retaining the hostname for TLS verification.
@@ -163,17 +176,45 @@ start library "$python" -m uvicorn app.main:create_library_app --factory --host 
 wait_health "$library/health" ok
 public_url=$("$python" -c 'from app.config import Settings; print(Settings().agent_library_public_url or "")')
 if [[ -z "$public_url" ]]; then
-  tunnel_id=$(docker run -d --rm --name acs-local-research-tunnel cloudflare/cloudflared:latest \
-    tunnel --no-autoupdate --protocol http2 --url http://host.docker.internal:8001)
-  for ((attempt=0; attempt<45; attempt++)); do
-    public_url=$(docker logs "$tunnel_id" 2>&1 | sed -nE 's/.*(https:\/\/[a-z0-9-]+\.trycloudflare\.com).*/\1/p' | tail -1)
-    [[ -n "$public_url" ]] && break
-    sleep 1
-  done
-  [[ -n "$public_url" ]] || { echo "Cloudflare 未返回隧道地址" >&2; exit 1; }
+  tunnel_name=acs-local-research-tunnel
+  tunnel_image=cloudflare/cloudflared:latest
+  tunnel_args=(tunnel --no-autoupdate --protocol http2 --url http://host.docker.internal:8001)
+  tunnel_url() {
+    docker logs "$tunnel_id" 2>&1 | sed -nE 's/.*(https:\/\/[a-z0-9-]+\.trycloudflare\.com).*/\1/p' | tail -1
+  }
+  existing=$(docker ps -aq --no-trunc --filter "name=^/${tunnel_name}$")
+  if [[ -n "$existing" ]]; then
+    # Older launchers used the same image and arguments without any ownership label.
+    config=$(docker inspect --format '{{.Config.Image}} {{.HostConfig.AutoRemove}} {{join .Config.Cmd " "}}' "$existing")
+    if [[ "$config" != "$tunnel_image true ${tunnel_args[*]}" ]]; then
+      echo "容器 $tunnel_name 的配置与本项目隧道不符，请检查 docker inspect $existing" >&2
+      exit 1
+    fi
+    tunnel_id=$existing
+    public_url=$(tunnel_url)
+    if [[ -n "$public_url" ]] && wait_health "$public_url/health" ok; then
+      echo "已复用上次的论文库隧道"
+    else
+      echo "上次的论文库隧道不可用，正在重建"
+      docker rm -f "$tunnel_id" >/dev/null
+      tunnel_id=''
+      public_url=''
+    fi
+  fi
+  if [[ -z "$tunnel_id" ]]; then
+    tunnel_id=$(docker run -d --rm --name "$tunnel_name" "$tunnel_image" "${tunnel_args[@]}")
+    for ((attempt=0; attempt<45; attempt++)); do
+      public_url=$(tunnel_url)
+      [[ -n "$public_url" ]] && break
+      sleep 1
+    done
+    [[ -n "$public_url" ]] || { echo "Cloudflare 未返回隧道地址" >&2; exit 1; }
+    wait_health "$public_url/health" ok
+  fi
+else
+  wait_health "$public_url/health" ok
 fi
 export AGENT_LIBRARY_PUBLIC_URL="$public_url"
-wait_health "$public_url/health" ok
 start api "$python" -m uvicorn app.main:create_app --factory --host 127.0.0.1 --port 8000
 wait_health "$api/ready" ready
 start parser "$python" -m app.parser_worker

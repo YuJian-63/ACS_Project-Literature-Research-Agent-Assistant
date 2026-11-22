@@ -44,6 +44,8 @@
 
 入口会启动 Compose 数据库、主 API、只读论文库、解析 Worker、研究 Worker 和前端。留空 `AGENT_LIBRARY_PUBLIC_URL` 时，它用 Docker Desktop 创建指向只读论文库的 Cloudflare 临时隧道。配置 arXiv 或 SMTP 后，对应的导入或邮件 Worker 也会启动。等启动器打印以「网页」开头、同时列出网页和论文库地址的一行，即可打开网页。此时数据库、前端代理和论文库公网健康检查均已通过。保持终端打开，作业回传后可按 Ctrl+C 停止本次进程。
 
+同一份仓库重复运行 `up` 时，第二个终端会提示已有启动器。正常按 Ctrl+C 会关闭临时隧道，下次启动会生成新地址。如果异常退出只留下隧道容器，启动器会核对容器配置并通过公网健康检查复用原地址；原隧道不可用时会自动重建。
+
 在[论文库](http://127.0.0.1:5173/papers)上传测试 PDF，从[新建研究](http://127.0.0.1:5173/tasks/new)提交问题。结果页地址最后一段是任务 UUID。另开终端在仓库根目录查询：
 
 ```sh
@@ -85,6 +87,12 @@ tcloud cat slurm_log/acs-DISPATCH_ID-JOBID.log
 tcloud download acs-research/jobs/DISPATCH_ID/status.json ./status.json
 tcloud download acs-research/jobs/DISPATCH_ID/result.json ./result.json
 ```
+
+### 2026-11-22 手动网页提交
+
+预选一篇《SkillOpt》并提交“总结这篇论文”。网页任务 `f55876b8-3a36-4dd4-ae26-cd20786943fe`，派发 UUID `6bfaf09e-fdad-40cb-b2d7-404c12dd959d`，TACC CPU 作业 `30628`。从提交到结果入库共 217 秒，其中 Baseline 执行约 129 秒。百炼模型调用 20 次，工具调用 9 次，覆盖打开原文、分块摘要和分页阅读。
+
+后端状态为 `succeeded`，Agent 返回 `partial` 并列出附录和超参数的证据缺口。抽查正文中的两处结果与上传原件第 9、10 页一致。单篇总结额外生成了比较表，表中各项缺少引用，留待后续核对。此次轨迹没有调用外部搜索。Orchid 空预选和预选的自动化验收见下节，同题手动对照仍待复验。
 
 ### 2026-11-21 百炼验收结果
 
