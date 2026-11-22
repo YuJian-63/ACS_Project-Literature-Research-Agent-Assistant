@@ -1,4 +1,6 @@
 export const english: Record<string, string> = {
+  "以下内容尚未得到充分确认，请结合研究正文和原文证据阅读。": "The following points need further verification. Read them alongside the answer and original evidence.",
+  "项待确认": "items to verify",
   "配置研究模型与全站任务容量": "Manage research models and site-wide capacity",
   "同时运行的研究任务上限，所有账号共享": "Maximum concurrent research jobs, shared by all accounts",
   "在 TACC GPU 节点运行的模型": "Model running on a TACC GPU node",
