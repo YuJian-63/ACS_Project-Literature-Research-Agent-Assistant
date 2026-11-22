@@ -40,7 +40,7 @@
 在 macOS 上启动 Docker Desktop，完成上面的首次配置。后端使用 `backend/.env` 指定的数据库与 `STORAGE_ROOT`。默认网页地址为 `http://127.0.0.1:5173`。在仓库根目录运行：
 
 ```sh
-./scripts/local-research up
+./scripts/research up
 ```
 
 入口会启动 Compose 数据库、主 API、只读论文库、解析 Worker、研究 Worker 和前端。留空 `AGENT_LIBRARY_PUBLIC_URL` 时，它用 Docker Desktop 创建指向只读论文库的 Cloudflare 临时隧道。配置 arXiv 或 SMTP 后，对应的导入或邮件 Worker 也会启动。等启动器打印以「网页」开头、同时列出网页和论文库地址的一行，即可打开网页。此时数据库、前端代理和论文库公网健康检查均已通过。保持终端打开，作业回传后可按 Ctrl+C 停止本次进程。
