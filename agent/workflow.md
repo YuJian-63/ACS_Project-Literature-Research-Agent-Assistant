@@ -20,7 +20,7 @@
 
 主图由 agent 和 tools 两个节点组成。`@tool` 定义的工具按模型请求顺序串行执行，模型提交最终 JSON 时结束。
 
-Agent 优先使用任务 `sources` 中的论文。需要补充论文且 `allow_search=true` 时，提示词要求搜索可用的论文库和 arXiv。同一篇论文选一条结果，比较版本时可分别打开。已知页码可直接调用 `read_paper`，需要查看目录和页数时再调用 `open_paper`。
+Agent 使用任务提供的论文。需要补充论文且允许搜索时，可用搜索工具寻找候选。可先用 `open_paper` 查看目录与页数，再按需要用摘要粗读页段或用 `read_paper` 精读原文。Extension 还可用 `retrieve` 在选定论文中定位相关段落。工具返回 `already_read` 或 `already_summarized` 时，复用对应页段的已有结果。
 
 | 工具或处理 | 行为 |
 |---|---|

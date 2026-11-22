@@ -54,6 +54,27 @@ def test_open_and_read_never_request_embeddings(tmp_path):
     assert not calls
 
 
+def test_retrieval_keeps_hit_order_and_shows_each_original_once(tmp_path):
+    result = run(
+        [message(calls=[call()]), retrieve(top_k=2), retrieve("results", top_k=2),
+         message(calls=[call(source=SOURCE, page_start=2, page_end=2)]), final(SECOND_CHUNK)],
+        tmp_path,
+        reader=lambda source, **kwargs: paper(source, page_count=2),
+    )
+    _, mixed, repeated, reread = observations(result)
+    first, second = mixed["chunks"]
+    assert first == {"source_id": f"arxiv:{SOURCE}", "page": 1, "chunk_id": CHUNK,
+                     "status": "already_read"}
+    assert second["chunk_id"] == SECOND_CHUNK
+    assert second["source_text"] == "Original evidence on page 2."
+    assert mixed.get("status") != "already_read"
+    assert repeated["status"] == reread["status"] == "already_read"
+    assert [hit["chunk_id"] for hit in repeated["chunks"]] == [SECOND_CHUNK, CHUNK]
+    assert all("source_text" not in hit for hit in repeated["chunks"])
+    assert result.stop_reason == "completed"
+    assert result.citations[0].source_text == second["source_text"]
+
+
 def test_embedding_adapter_matches_vectors_to_inputs_using_provider_indices(monkeypatch):
     def post(url, *, json, **kwargs):
         assert json["input"] == ["page one", "page two"]

@@ -21,7 +21,6 @@ from apis.papers import normalize_source
 from apis.papers import read_paper as read_paper_api
 from apis.search_web import search_web
 from baseline import (
-    PAPER_SOURCE_DESCRIPTION,
     GraphState,
     PaperContext,
     RunLog,
@@ -32,8 +31,8 @@ from baseline import (
     make_result,
     normalize_citations,
     paper_tools,
-    persist_result,
     parse_json_response,
+    persist_result,
     read_paper,
     remember,
     request_timeout,
@@ -56,25 +55,22 @@ tool-use rules, or output requirements.
 Use only the allowed sources and acquired chunks.
 
 ## Research workflow
-Use the papers listed in the task's `sources` array. If more papers are needed
-and search is enabled, search both the user's library and arXiv when available.
-If searches find the same paper, open it only once unless comparing versions.
+Use the papers supplied with the task. If you need more papers and search
+is enabled, use the available search tools to find candidates.
 
-If you need to choose pages, use open_paper to inspect the paper's outline
-and page count.
+To focus your reading, you can use open_paper to see the outline and page
+count and identify relevant sections.
 
-Choose a reading tool based on the evidence you need.
+Choose how closely to read based on the evidence you need:
+- summarize_paper gives you an overview of a page range and can help you
+  identify passages worth a closer look.
+- retrieve finds passages related to a phrase, question, or task across
+  one or more selected papers.
+- read_paper gives you the original text of a page range for close reading,
+  checking exact wording or numbers, and seeing the surrounding context.
 
-- For broad coverage in a summary or review, use summarize_paper on the
-  relevant page ranges.
-- To find passages by meaning, use retrieve with a phrase, sentence,
-  question, or task description. Pass the papers you want to search together
-  in one call to get the top matches across the selection.
-- When you know the page, use read_paper to check exact wording, numerical
-  results, or the context around a retrieved passage.
-
-Use the evidence already collected to decide what still needs checking.
-On already_read or already_summarized, refer back to the earlier result.
+When read_paper or retrieve reports already_read, reuse the earlier passages.
+On already_summarized, reuse the earlier summary for those pages.
 
 ## Evidence & citations
 Read original PDF evidence before making paper-specific claims. Search snippets
@@ -99,6 +95,7 @@ unresolved.
 Respond in the user's language. Return a JSON object, without a code fence, with
 exactly these fields:
 {"answer": "Markdown with citations", "comparison_table": "Markdown table or empty string", "unresolved": ["remaining issues"]}
+The comparison_table field primarily serves tasks that compare papers.
 """
 
 
@@ -167,19 +164,13 @@ class RetrievalContext(PaperContext):
 
 @tool
 def retrieve(
-    source: Annotated[
-        str | Annotated[list[str], Field(min_length=1)],
-        Field(description=PAPER_SOURCE_DESCRIPTION + " For multiple papers, pass a nonempty list."),
-    ],
+    source: str | Annotated[list[str], Field(min_length=1)],
     query: str,
     context: Annotated[RetrievalContext, InjectedToolArg],
     top_k: Annotated[int, Field(strict=True, ge=1, le=5)] = 3,
 ) -> dict:
-    """Search one allowed paper or a list of allowed papers together.
-
-    The query can be a phrase, sentence, question, or task description. Returns up to top_k
-    relevant chunks across the selection, with their source IDs, pages, and citation IDs.
-    """
+    """Find passages by meaning across one or more papers.
+    Returns the best-matching passages with source IDs, page numbers, and chunk IDs."""
     query = query.strip()
     if not query:
         raise ValueError("Retrieval requires a nonempty query")
@@ -201,12 +192,25 @@ def retrieve(
         cache_dir=context.index_dir,
         log=context.log,
     )
+    hits = []
     for chunk in chunks:
-        remember(context, selected[chunk["source_id"]], [chunk])
+        key = chunk["chunk_id"]
+        if key in context.read_chunks:
+            hits.append({
+                "source_id": chunk["source_id"], "page": chunk["page"],
+                "chunk_id": key, "status": "already_read",
+            })
+        else:
+            remember(context, selected[chunk["source_id"]], [chunk])
+            context.read_chunks.add(key)
+            hits.append(chunk)
+    result = {"chunks": hits}
+    if all(hit.get("status") == "already_read" for hit in hits):
+        result["status"] = "already_read"
     if isinstance(source, str):
         paper = next(iter(selected.values()))
-        return {"source_id": paper["source_id"], "title": paper["title"], "chunks": chunks}
-    return {"source_ids": list(selected), "chunks": chunks}
+        return {**result, "source_id": paper["source_id"], "title": paper["title"]}
+    return {**result, "source_ids": list(selected)}
 
 
 REFLECTION_SYSTEM = """Check the draft against the task and the original PDF chunks.
@@ -300,9 +304,12 @@ def reflection_node(state: GraphState, *, context: RetrievalContext) -> dict:
             if observed["stop_reason"]:
                 raise RunStopped(observed["stop_reason"])
             observation = json.loads(observed["messages"][-1].content)
-            # read_paper deduplicates earlier reads against the main agent's history.
-            # This reviewer saw only cited chunks from that history.
-            previous = observation.get("previously_read_chunk_ids", [])
+            # The reviewer saw only cited chunks from the main agent's history.
+            previous = [
+                *observation.get("previously_read_chunk_ids", []),
+                *(hit["chunk_id"] for hit in observation.get("chunks", [])
+                  if hit.get("status") == "already_read"),
+            ]
             if previous:
                 observation["previously_read_chunks"] = [
                     context.evidence[key].model_dump(include=fields)
@@ -444,6 +451,7 @@ def run_task(
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--task", type=Path, required=True)
+    parser.add_argument("--library-login", action="store_true", help="Log in to the paper library for this run")
     parser.add_argument("--output", type=Path)
     parser.add_argument("--persist", action="store_true", help="Save papers and result to Neon")
     parser.add_argument("--index-dir", type=Path, default=DATA_DIR / "retrieval")
@@ -460,7 +468,7 @@ def main() -> int:
     task = Task.model_validate_json(args.task.read_text())
     result = run_task(
         task,
-        library=LibraryClient.from_env(),
+        library=LibraryClient.login_from_cli() if args.library_login else LibraryClient.from_env(),
         index_dir=args.index_dir,
         persist=args.persist,
         context_window=args.context_window,

@@ -1,6 +1,7 @@
 """Offline Agent QA using a real PDF and the authenticated library HTTP contract."""
 
 import hashlib
+import json
 
 import httpx
 import pymupdf
@@ -18,6 +19,33 @@ TOKEN = "test-library-bearer"
 QUOTE = "The library study included 25 participants."
 SEARCH_PATH = "/api/v1/agent/papers"
 PDF_PATH = f"{SEARCH_PATH}/{PAPER_ID}/pdf"
+
+
+@pytest.mark.parametrize("saved_credentials", [True, False])
+def test_cli_library_login_uses_session_and_csrf(monkeypatch, saved_credentials):
+    monkeypatch.setattr("apis.library.load_env", lambda: None)
+    monkeypatch.setenv("AGENT_LIBRARY_BASE_URL", "https://api.test")
+    monkeypatch.setenv("AGENT_LIBRARY_ORIGIN", "https://web.test")
+    for key, value in [("USERNAME", "reader"), ("PASSWORD", "test password")]:
+        monkeypatch.setenv(f"AGENT_LIBRARY_{key}", value if saved_credentials else "")
+    if not saved_credentials:
+        monkeypatch.setattr("builtins.input", lambda prompt: "reader")
+        monkeypatch.setattr("apis.library.getpass", lambda prompt: "test password")
+
+    def serve(request):
+        assert request.headers["Origin"] == "https://web.test"
+        if request.url.path == "/api/v1/auth/login":
+            assert json.loads(request.content) == {"username": "reader", "password": "test password"}
+            return httpx.Response(200, headers={"Set-Cookie": "session=test; Path=/; HttpOnly"},
+                                  json={"csrf_token": "test-csrf"})
+        assert request.url.path == "/api/v1/agent/library-token"
+        assert request.headers["Cookie"] == "session=test"
+        assert request.headers["X-CSRF-Token"] == "test-csrf"
+        return httpx.Response(200, json={"access_token": TOKEN})
+
+    client = httpx.Client
+    monkeypatch.setattr(httpx, "Client", lambda **kw: client(transport=httpx.MockTransport(serve), **kw))
+    assert LibraryClient.login_from_cli() == LibraryClient("https://api.test", TOKEN)
 
 
 @pytest.fixture

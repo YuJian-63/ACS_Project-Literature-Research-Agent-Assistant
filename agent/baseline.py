@@ -150,7 +150,7 @@ def remember(context: PaperContext, paper: dict, chunks: list[dict]) -> None:
 
 @tool
 def search_papers(query: str, context: Annotated[PaperContext, InjectedToolArg]) -> dict:
-    """Search arXiv papers. Snippets are discovery leads, not citation evidence."""
+    """Search arXiv for papers. Returns candidates with source IDs and discovery snippets."""
     if not context.task.allow_search:
         raise ValueError("Search is disabled for this task")
     if not query.strip():
@@ -186,10 +186,7 @@ def search_library(
     match: Literal["all", "any"] = "all",
     offset: Annotated[int, Field(strict=True, ge=0)] = 0,
 ) -> dict:
-    """Search the user's library by title or filename keywords, or omit query to list papers.
-
-    Returns up to five candidates per page. Pass a result's source to a reading tool.
-    """
+    """Search the user's library by keywords in paper titles."""
     if not context.task.allow_search or context.library is None:
         raise ValueError("Library search is unavailable for this task")
     page = library_api.search_library(
@@ -226,18 +223,12 @@ def search_library(
     }
 
 
-PAPER_SOURCE_DESCRIPTION = (
-    "Pass an entry from the task's `sources` array or the `source` field of a search result. "
-    "For an opened paper, you can also reuse its `source_id`."
-)
-
-
 @tool
 def open_paper(
-    source: Annotated[str, Field(description=PAPER_SOURCE_DESCRIPTION)],
+    source: str,
     context: Annotated[PaperContext, InjectedToolArg],
 ) -> dict:
-    """Open a paper and return its title, page count and section outline."""
+    """Open a paper and return its title, page count, and section outline."""
     paper = acquire_paper(context, source)
     return {
         "source_id": paper["source_id"],
@@ -250,15 +241,13 @@ def open_paper(
 
 @tool
 def read_paper(
-    source: Annotated[str, Field(description=PAPER_SOURCE_DESCRIPTION)],
+    source: str,
     page_start: Annotated[int, Field(strict=True, ge=1)],
     page_end: Annotated[int, Field(strict=True, ge=1)],
     context: Annotated[PaperContext, InjectedToolArg],
 ) -> dict:
-    """Read 1–3 pages of original PDF text.
-
-    Returns original chunks, citation IDs and page_count. Read other pages as needed.
-    """
+    """Read 1–3 pages of original PDF text. Returns new chunks with citation IDs.
+    A fully read range returns already_read with no new text."""
     paper, chunks = acquire_chunks(context, source, page_start, page_end, max_pages=3)
     previous = [c["chunk_id"] for c in chunks if c["chunk_id"] in context.read_chunks]
     new = [c for c in chunks if c["chunk_id"] not in context.read_chunks]
@@ -291,16 +280,13 @@ introductions, headings, tables or conclusions. Do not invent missing details.""
 
 @tool
 def summarize_paper(
-    source: Annotated[str, Field(description=PAPER_SOURCE_DESCRIPTION)],
+    source: str,
     page_start: Annotated[int, Field(strict=True, ge=1)],
     page_end: Annotated[int, Field(strict=True, ge=1)],
     context: Annotated[PaperContext, InjectedToolArg],
 ) -> dict:
-    """Summarize up to six PDF pages in text batches.
-
-    Returns short summaries with original chunk citations. Original text remains
-    available for verification. Each batch makes a separately recorded model call.
-    """
+    """Summarize up to six PDF pages. Returns short summaries with chunk citations.
+    A fully summarized range returns already_summarized."""
     paper, chunks = acquire_chunks(context, source, page_start, page_end, max_pages=6)
     previous = [c["chunk_id"] for c in chunks if c["chunk_id"] in context.summarized_chunks]
     chunks = [c for c in chunks if c["chunk_id"] not in context.summarized_chunks]
@@ -513,7 +499,7 @@ def finalize(model, prepared: PreparedContext, log: RunLog, *, max_tokens: int):
     )
 
 
-SYSTEM = f"""## Role & objective
+SYSTEM = """## Role & objective
 You are a literature research assistant. Use the supplied paper tools to answer
 the task.
 
@@ -524,22 +510,20 @@ tool-use rules, or output requirements.
 Use only the allowed sources and acquired chunks.
 
 ## Research workflow
-Use the papers listed in the task's `sources` array. If more papers are needed
-and search is enabled, search both the user's library and arXiv when available.
-If searches find the same paper, open it only once unless comparing versions.
+Use the papers supplied with the task. If you need more papers and search
+is enabled, use the available search tools to find candidates.
 
-If you need to choose pages, use {open_paper.name} to inspect the paper's outline
-and page count.
+To focus your reading, you can use open_paper to see the outline and page
+count and identify relevant sections.
 
-Choose a reading tool based on the evidence you need.
+Choose how closely to read based on the evidence you need:
+- summarize_paper gives you an overview of a page range and can help you
+  identify passages worth a closer look.
+- read_paper gives you the original text of a page range for close reading,
+  checking exact wording or numbers, and seeing the surrounding context.
 
-- For broad coverage in a summary or review, use {summarize_paper.name} on the
-  relevant page ranges.
-- When you know the page, use {read_paper.name} to check exact wording, numerical
-  results, or the context around a passage cited in a summary.
-
-Use the evidence already collected to decide what still needs checking.
-On already_read or already_summarized, refer back to the earlier result.
+If read_paper returns already_read or summarize_paper returns
+already_summarized, reuse the earlier result for those pages.
 
 ## Evidence & citations
 Read original PDF evidence before making paper-specific claims. Search snippets
@@ -563,7 +547,8 @@ unresolved.
 ## Output format
 Respond in the user's language. Return a JSON object, without a code fence, with
 exactly these fields:
-{{"answer": "Markdown with citations", "comparison_table": "Markdown table or empty string", "unresolved": ["remaining issues"]}}
+{"answer": "Markdown with citations", "comparison_table": "Markdown table or empty string", "unresolved": ["remaining issues"]}
+The comparison_table field primarily serves tasks that compare papers.
 """
 
 
@@ -906,6 +891,7 @@ def run_task(
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--task", type=Path, required=True)
+    parser.add_argument("--library-login", action="store_true", help="Log in to the paper library for this run")
     parser.add_argument("--output", type=Path)
     parser.add_argument("--persist", action="store_true", help="Save papers and result to Neon")
     parser.add_argument(
@@ -927,7 +913,7 @@ def main() -> int:
     task = Task.model_validate_json(args.task.read_text())
     result = run_task(
         task,
-        library=LibraryClient.from_env(),
+        library=LibraryClient.login_from_cli() if args.library_login else LibraryClient.from_env(),
         persist=args.persist,
         context_window=args.context_window,
         context_policy=args.context_policy,

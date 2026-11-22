@@ -292,7 +292,10 @@ def test_compaction_rescues_a_hard_overflow_without_an_extra_model_call(tmp_path
         replies = [
             message(calls=[call(call_id="read")], usage=False),
             message(
-                calls=[call("retrieve", call_id="hits", source=SOURCE, query="method", top_k=2)],
+                calls=[
+                    call("retrieve", call_id="hits", source=SOURCE, query="method", top_k=2),
+                    call(call_id="reread", source=SOURCE, page_start=1, page_end=2),
+                ],
                 usage=False,
             ),
             final(answer=f"Different conditions [{CHUNK}] [{SECOND_CHUNK}]"),
@@ -324,14 +327,15 @@ def test_compaction_rescues_a_hard_overflow_without_an_extra_model_call(tmp_path
         assert result.stop_reason == "completed"
         assert len(model.inputs) == result.usage.agent_steps == result.usage.model_calls == 3
         assert all(invocation["bound"] for invocation in model.invocations)
-        assert result.usage.tool_calls == 2
+        assert result.usage.tool_calls == 3
         applied = [entry for entry in result.trace if entry.get("action") == "compact"]
         assert len(applied) == 1 and applied[0]["outcome"] == "applied"
         assert not any(entry.get("action") == "finalize" for entry in result.trace)
         assert [citation.chunk_id for citation in result.citations] == [CHUNK, SECOND_CHUNK]
         assert result.citations[0].source_text == passage
-        assert observations(result)[1]["chunks"][0]["source_text"] == passage
+        assert observations(result)[1]["chunks"][0]["status"] == "already_read"
         view = [m for m in model.inputs[-1] if isinstance(m, ToolMessage)]
-        assert [m.tool_call_id for m in view] == ["read", "hits"]
+        assert [m.tool_call_id for m in view] == ["read", "hits", "reread"]
         assert sum(m.content.count(passage) for m in view) == 1
-        assert json.loads(view[-1].content)["chunks"][1]["chunk_id"] == SECOND_CHUNK
+        assert json.loads(view[1].content)["chunks"][1]["chunk_id"] == SECOND_CHUNK
+        assert json.loads(view[-1].content)["earlier_chunk_count"] == 2
