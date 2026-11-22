@@ -1,6 +1,6 @@
 # 后端数据库设计
 
-后端使用 PostgreSQL 17、SQLAlchemy 和 Alembic。数据库保存账号、论文元数据、作业状态、研究结果与引用。原始 PDF 存在 `STORAGE_ROOT/uploads/<paper_id>.pdf`，备份和还原时应同时保留数据库与存储目录。本分支的迁移 head 为 `20261121_0009`。[业务模型](../backend/src/app/db/models.py) · [账号模型](../backend/src/app/db/accounts.py) · [迁移目录](../backend/alembic/versions)
+后端使用 PostgreSQL 17、SQLAlchemy 和 Alembic。数据库保存账号、论文元数据、作业状态、研究结果与引用。原始 PDF 存在 `STORAGE_ROOT/uploads/<paper_id>.pdf`，备份和还原时应同时保留数据库与存储目录。本分支的迁移 head 为 `20261122_0013`。[业务模型](../backend/src/app/db/models.py) · [账号模型](../backend/src/app/db/accounts.py) · [迁移目录](../backend/alembic/versions)
 
 ## 账号与权限
 
@@ -31,6 +31,9 @@ API 从认证信息确定用户。`papers`、`tasks`、`paper_sources` 和 `pape
 | 表 | 用途 |
 | --- | --- |
 | `tasks` | 用户提交的问题、运行器、冻结的执行配置与时限、任务状态、Worker 租约、使用量和错误。新任务使用独立 Agent，历史任务保留原运行器类型。 |
+| `course_service` | 记录本轮课程 GPU 服务的启动者、作业号、地址和运行状态。 |
+| `shared_model_endpoints` | 每个用户保存的课程模型服务地址。 |
+| `agent_queue_settings` | 保存全站研究任务并发上限，默认 2，可选 1–4。 |
 | `agent_runs` | 每个 Agent 任务一条执行记录，以 `task_id` 为主键。`dispatch_id` 唯一标识本次派发，`input_sha256` 校验输入清单；另存 `manifest`、平台作业号、停止原因和完整的原生结果 `result`。 |
 | `task_papers` | 联合主键为 `(task_id, paper_id)`。关联当前用户库中的论文，并以 `(paper_id, paper_sha256)` 固定使用的 PDF 内容。 |
 | `task_events` | 以 `(task_id, seq)` 记录有序状态、阶段和警告事件。序号与 `tasks.last_event_seq` 在同一事务更新。 |

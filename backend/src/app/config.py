@@ -62,7 +62,7 @@ class Settings(BaseSettings):
     smtp_from: str | None = None
     smtp_timeout_seconds: float = Field(default=15, ge=1, le=60)
     mail_outbox_key: SecretStr | None = None
-    user_active_tasks: int = Field(default=2, ge=1, le=100)
+    user_active_tasks: int = Field(default=5, ge=1, le=100)
     user_active_imports: int = Field(default=2, ge=1, le=100)
     user_daily_tasks: int = Field(default=20, ge=1, le=10000)
     arxiv_enabled: bool = False

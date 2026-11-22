@@ -15,7 +15,16 @@ const importedId = '33333333-3333-4333-8333-333333333333';
 const importedPaper = {...paper, id:importedId, title:external.title, sha256:'a'.repeat(64),
   source:{provider:'arxiv', external_id:'1706.03762v7'}};
 let showRecord = false, imported = false;
+let concurrency = 2;
 await page.route('**/api/v1/**',route=>{const req=route.request(),path=new URL(req.url()).pathname;calls.push([req.method(),path]);
+if (path === '/api/v1/agent-research/queue/concurrency') {
+  if (req.method() === 'PUT') {
+    const value = req.postDataJSON().concurrency;
+    if (![1, 2, 3, 4].includes(value)) throw Error('Invalid concurrency');
+    concurrency = value;
+  }
+  return route.fulfill({json: {concurrency}});
+}
 if (path === '/api/v1/agent-research' && req.method() === 'GET' && showRecord) {
   const papers = [{id,title:paper.title}, imported ? {id:importedId,title:external.title} : external];
   return route.fulfill({json:{items:[{id:taskid,question:'Compare',paper_ids:[id],papers,
@@ -42,6 +51,14 @@ return route.fulfill({json:{items:path==='/api/v1/papers'?[paper]:[],total:path=
 });
 await page.goto(BASE+'/tasks');
 await page.getByText('还没有研究任务',{exact:true}).waitFor();
+const choices = page.getByRole('radiogroup', {name:'全站研究并发数'});
+for (const limit of [4, 1, 3, 2]) {
+  const saved = page.waitForResponse(res => res.request().method() === 'PUT' &&
+    new URL(res.url()).pathname === '/api/v1/agent-research/queue/concurrency');
+  await choices.getByText(String(limit), {exact:true}).click();
+  await saved;
+  await choices.getByRole('radio', {name:String(limit), checked:true}).waitFor({state:'attached'});
+}
 for(const label of ['论文摘要','论文问答','跨论文综述','全部类型'])if(await page.getByText(label,{exact:true}).count())throw Error('Legacy category remains: '+label);
 if(await page.locator('[aria-label="筛选任务类型"]').count())throw Error('Type selector remains');
 await page.getByRole('button',{name:'English',exact:true}).click();

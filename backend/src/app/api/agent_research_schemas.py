@@ -37,6 +37,11 @@ class AgentResearchCreate(BaseModel):
         return self
 
 
+class QueueConcurrency(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    concurrency: int = Field(strict=True, ge=1, le=4)
+
+
 class AgentResearchAccepted(BaseModel):
     task_id: UUID
     status: TaskStatus

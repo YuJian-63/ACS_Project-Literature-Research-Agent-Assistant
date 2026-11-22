@@ -35,6 +35,7 @@ def make_model(*, max_tokens: int = 2048, timeout: float = 60) -> ChatOpenAI:
         max_tokens=max_tokens,
         timeout=timeout,
         max_retries=0,
+        streaming=False,
         extra_body=thinking,
         use_responses_api=False,
     )

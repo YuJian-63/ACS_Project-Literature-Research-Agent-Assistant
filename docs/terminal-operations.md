@@ -22,7 +22,7 @@ uv run --locked alembic current
 uv run --locked alembic check
 ```
 
-本分支的迁移 head 为 `20261121_0009`。`alembic current` 应与 `alembic heads` 一致，`alembic check` 应报告无新增迁移操作。[迁移维护](../backend/README.md#4-迁移维护)
+本分支的迁移 head 为 `20261122_0013`。`alembic current` 应与 `alembic heads` 一致，`alembic check` 应报告无新增迁移操作。[迁移维护](../backend/README.md#4-迁移维护)
 
 ## 启动服务
 

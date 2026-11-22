@@ -1,3 +1,5 @@
+import re
+from ipaddress import IPv4Address, IPv4Network
 from typing import Any, Literal
 from uuid import UUID
 
@@ -44,7 +46,17 @@ class SourceFile(Contract):
         return self
 
 
+def validate_course_url(value: str) -> str:
+    url = value.strip().rstrip("/")
+    match = re.fullmatch(r"http://([0-9.]+):8000/v1", url)
+    if not match or IPv4Address(match[1]) not in IPv4Network("10.0.0.0/16"):
+        raise ValueError("Expected a TACC URL such as http://10.0.3.10:8000/v1")
+    return url
+
+
 class ResearchOptions(Contract):
+    model_provider: Literal["bailian", "tacc", "custom"] = Field(default="bailian", exclude_if=lambda value: value == "bailian")
+    endpoint_url: str | None = Field(default=None, max_length=128, exclude_if=lambda value: value is None)
     workflow: Literal["baseline", "extension"] = "baseline"
     planner: bool = Field(default=False, strict=True)
     reflection: bool = Field(default=False, strict=True)
@@ -53,12 +65,17 @@ class ResearchOptions(Contract):
 
     @model_validator(mode="after")
     def extension_features(self):
+        if self.endpoint_url is not None:
+            if self.model_provider != "custom":
+                raise ValueError("Only a custom endpoint takes a URL")
+            self.endpoint_url = validate_course_url(self.endpoint_url)
         if self.workflow == "baseline" and (self.planner or self.reflection):
             raise ValueError("Planner and Reflection require the retrieval extension")
         return self
 
 
 class RuntimeOptions(Contract):
+    service_generation: UUID | None = Field(default=None, exclude_if=lambda value: value is None)
     context_window: int = Field(ge=4096, strict=True)
     persist: bool = Field(default=False, strict=True)
     # Omit the optional field for byte-identical serialization of existing signed bundles.

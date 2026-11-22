@@ -571,6 +571,93 @@ class AgentPostgresTests(unittest.TestCase):
         with self.sessions() as session:
             self.assertEqual(session.get(Task, accepted["id"]).status, "succeeded")
 
+    def test_concurrent_claims_share_two_slots_across_users(self):
+        from concurrent.futures import ThreadPoolExecutor
+        from threading import Barrier
+
+        for user_id in (self.user_id, self.other_user):
+            client = self.research_client(user_id)
+            for question in ("First", "Second"):
+                self.assertEqual(client.post("/api/v1/agent-research", json={"question": question}).status_code, 202)
+        ready = Barrier(4)
+
+        def claim(owner):
+            ready.wait(timeout=5)
+            return claim_task(self.sessions, owner)
+
+        with ThreadPoolExecutor(max_workers=4) as pool:
+            claimed = list(pool.map(claim, (uuid4() for _ in range(4))))
+        self.assertEqual(claimed.count(None), 2)
+        with self.sessions() as session:
+            first_two = session.scalars(select(Task.id).order_by(Task.created_at, Task.id).limit(2))
+            self.assertEqual(set(claimed) - {None}, set(first_two))
+
+    def test_history_changes_live_queue_limit_without_restarting_runner(self):
+        from threading import Thread
+        from time import monotonic, sleep
+
+        from app.agent_bridge.bundles import exchange_directory
+        from app.agent_bridge.files import atomic_write
+        from app.agent_bridge.worker import AgentWorker
+
+        client = self.research_client()
+        for question in ("First", "Second", "Third", "Fourth", "Fifth"):
+            response = client.post("/api/v1/agent-research", json={"question": question})
+            self.assertEqual(response.status_code, 202, response.text)
+        with self.sessions() as session:
+            tasks = session.scalars(select(Task).order_by(Task.created_at, Task.id)).all()
+            runs = [session.get(AgentRun, task.id) for task in tasks]
+
+        def deliver(run):
+            envelope = self.envelope(DispatchManifest.model_validate(run.manifest), run.input_sha256)
+            inbox = exchange_directory(self.settings.resolved_agent_exchange_root, "inbox", run.dispatch_id)
+            atomic_write(inbox / "result.json", envelope.model_dump_json().encode())
+
+        def wait_for_stages(*expected):
+            deadline = monotonic() + 10
+            while monotonic() < deadline:
+                with self.sessions() as session:
+                    stages = tuple(session.scalars(select(Task.stage).order_by(Task.created_at, Task.id)))
+                if stages == expected:
+                    return
+                sleep(0.05)
+            self.assertEqual(stages, expected)
+
+        url = "/api/v1/agent-research/queue/concurrency"
+        other = self.research_client(self.other_user)
+        self.assertEqual(client.get(url).json(), {"concurrency": 2})
+        for invalid in (0, 5, True, "4", 1.5):
+            self.assertEqual(client.put(url, json={"concurrency": invalid}).status_code, 422)
+
+        def change(limit):
+            response = client.put(url, json={"concurrency": limit})
+            self.assertEqual(response.status_code, 200, response.text)
+            self.assertEqual(other.get(url).json(), {"concurrency": limit})
+
+        change(1)
+        self.settings.agent_poll_seconds = 0.1
+        runner = AgentWorker(self.sessions, self.settings)
+        thread = Thread(target=runner.run)
+        thread.start()
+        try:
+            for limit in range(1, 5):
+                if limit > 1:
+                    change(limit)
+                wait_for_stages(*(["agent_waiting"] * limit + ["queued"] * (5 - limit)))
+                self.assertIsNone(claim_task(self.sessions, uuid4()))
+            change(1)
+            for index in range(3):
+                deliver(runs[index])
+            wait_for_stages("completed", "completed", "completed", "agent_waiting", "queued")
+            self.assertIsNone(claim_task(self.sessions, uuid4()))
+            deliver(runs[3])
+            wait_for_stages("completed", "completed", "completed", "completed", "agent_waiting")
+            deliver(runs[4])
+            wait_for_stages(*(["completed"] * 5))
+        finally:
+            runner.stopped.set()
+            thread.join()
+
     def test_saved_platform_job_is_fenced_and_delivery_must_match(self):
         task_id, manifest, digest = self.create_and_claim()
         self.assertFalse(record_job(self.sessions, task_id, uuid4(), manifest, "8123"))

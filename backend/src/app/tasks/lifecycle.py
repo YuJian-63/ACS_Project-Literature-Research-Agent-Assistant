@@ -4,9 +4,10 @@ from threading import Event, Thread
 from uuid import UUID
 
 from sqlalchemy import and_, func, or_, select, text
+from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Session, sessionmaker
 
-from app.db.models import Task, TaskEvent
+from app.db.models import AgentQueueSettings, Task, TaskEvent
 
 logger = logging.getLogger(__name__)
 LEASE_SECONDS = 60
@@ -35,15 +36,30 @@ def owns_task(task: Task | None, owner: UUID, now: datetime) -> bool:
     )
 
 
+def lock_agent_queue(session: Session) -> AgentQueueSettings:
+    queue = session.get(AgentQueueSettings, 1, with_for_update=True)
+    if queue is None:
+        session.execute(insert(AgentQueueSettings).values(id=1).on_conflict_do_nothing())
+        queue = session.get_one(AgentQueueSettings, 1, with_for_update=True)
+    return queue
+
+
 def claim_task(sessions: sessionmaker[Session], owner: UUID, runner_type: str = "agent") -> UUID | None:
     if runner_type != "agent":
         raise ValueError("Only the independent Agent runner is supported")
     with sessions.begin() as session:
-        task = session.scalar(
-            select(Task).where(Task.status == "queued", Task.runner_type == "agent")
-            .order_by(Task.created_at, Task.id).limit(1).with_for_update(skip_locked=True)
-        )
+        # Serialize admission across runner processes. The lock ends at commit, before dispatch.
+        queue = lock_agent_queue(session)
+        running = session.scalar(select(func.count()).select_from(Task).where(
+            Task.runner_type == "agent", Task.status == "running",
+        ))
+        # Recover previously dispatched jobs before starting fresh work. A queued
+        # recovery may still be running remotely, so don't skip it if its row is locked.
+        task = session.scalar(select(Task).where(Task.status == "queued", Task.runner_type == "agent")
+            .order_by(Task.started_at.is_(None), Task.created_at, Task.id).limit(1).with_for_update())
         if task is None:
+            return None
+        if running >= queue.concurrency and task.started_at is None:
             return None
         now = database_time(session)
         if task.started_at is not None and task.started_at + timedelta(seconds=task.timeout_seconds) <= now:

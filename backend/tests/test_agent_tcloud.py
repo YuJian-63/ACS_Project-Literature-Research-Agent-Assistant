@@ -57,6 +57,30 @@ class TcloudTests(unittest.TestCase):
                 restarted.submit(self.manifest, "9000", deadline=self.deadline)
         self.assertFalse(list(restarted.jobs(self.manifest).rglob("model.env")))
 
+    def test_course_task_stages_only_its_live_service(self):
+        from app.agent_bridge.contracts import ResearchOptions
+        generation = uuid4()
+        self.manifest.runtime.research = ResearchOptions(model_provider="tacc")
+        self.manifest.runtime.service_generation = generation
+        service = Mock(state="ready", stop_requested=False, generation=generation, base_url="http://10.0.0.8:8000/v1")
+        from unittest.mock import MagicMock
+        self.transport.sessions = MagicMock()
+        self.transport.sessions.return_value.__enter__.return_value.get.return_value = service
+        target = self.fixture.root / "course-stage"
+        self.transport.stage(self.manifest, target, self.deadline)
+        config = (target / "model.env").read_text()
+        self.assertIn("MODEL_BASE_URL=http://10.0.0.8:8000/v1", config)
+        self.assertIn("MODEL_PROVIDER=tacc", config)
+        self.assertNotIn("BAILIAN_API_KEY", config)
+        service.generation = uuid4()
+        with self.assertRaisesRegex(TransportError, "COURSE_MODEL_UNAVAILABLE"):
+            self.transport.stage(self.manifest, self.fixture.root / "stale-stage", self.deadline)
+
+        self.manifest.runtime.research = ResearchOptions(model_provider="custom", endpoint_url="http://10.0.3.10:8000/v1")
+        manual = self.fixture.root / "url-stage"
+        self.transport.stage(self.manifest, manual, self.deadline)
+        self.assertIn("MODEL_BASE_URL=http://10.0.3.10:8000/v1", (manual / "model.env").read_text())
+
     def test_only_proven_pre_submit_failure_can_retry(self):
         failed = (255, "[Tcloud Error] 2026/11/21 tcloudcli.go:322: Failed to upload env repository\n")
         with patch.object(self.transport, "cli", return_value=failed) as command:

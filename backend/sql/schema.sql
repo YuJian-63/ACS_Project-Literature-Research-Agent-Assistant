@@ -383,4 +383,29 @@ CREATE INDEX paper_imports_owner_idx ON paper_imports (user_id);
 -- Verified search metadata reused by independent import workers (20261118_0006).
 ALTER TABLE paper_imports ADD COLUMN source_metadata JSONB;
 
+CREATE TABLE course_service (
+    id integer PRIMARY KEY,
+    state text NOT NULL,
+    generation uuid,
+    owner_id uuid,
+    job_id text,
+    base_url text,
+    detail text,
+    stop_requested boolean NOT NULL DEFAULT false,
+    checked_at timestamptz,
+    requested_at timestamptz
+);
+INSERT INTO course_service (id, state) VALUES (1, 'stopped');
+
+CREATE TABLE shared_model_endpoints (
+    user_id uuid PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+    base_url text NOT NULL
+);
+
+CREATE TABLE agent_queue_settings (
+    id INTEGER PRIMARY KEY CHECK (id = 1),
+    concurrency INTEGER NOT NULL DEFAULT 2 CHECK (concurrency BETWEEN 1 AND 4)
+);
+INSERT INTO agent_queue_settings (id, concurrency) VALUES (1, 2);
+
 COMMIT;

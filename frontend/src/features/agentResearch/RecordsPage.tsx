@@ -1,7 +1,7 @@
 import { agentResearch, type AgentResearchSummary, type AgentSource } from '../../api/agentResearch';
 import { t, useLocale } from '../../i18n';
 import { useCallback, useEffect, useRef, useState, type Key } from 'react';
-import { notification as notificationApi, App, Button, Empty, Select, Table } from 'antd';
+import { notification as notificationApi, App, Button, Empty, Radio, Select, Space, Table } from 'antd';
 import type { TableColumnsType } from 'antd';
 import { DownloadOutlined, PlusOutlined, ReloadOutlined } from '@ant-design/icons';
 import { Link, useNavigate } from 'react-router-dom';
@@ -35,6 +35,7 @@ const columns = (onDelete: (task: AgentResearchSummary) => void, deleting: boole
 ];
 
 const deletionNotifications = { placement: 'top', duration: 3, maxCount: 3, stack: false, classNames: { list: 'search-notification-list' } } as const;
+const pollQueue = () => true;
 
 export default function TasksPage() {
   useLocale();
@@ -44,6 +45,8 @@ export default function TasksPage() {
   const [status, setStatus] = useState<TaskStatus>();
   const load = useCallback((signal: AbortSignal) => agentResearch.list({ limit: 20, offset: (page - 1) * 20, status }, signal), [page, status]);
   const resource = useResource(load);
+  const queue = useResource(agentResearch.getConcurrency, 5000, pollQueue);
+  const [savingLimit, setSavingLimit] = useState(false);
   const { modal, message } = App.useApp();
   const [notification, holder] = notificationApi.useNotification(deletionNotifications);
   const [selected, setSelected] = useState<Key[]>([]);
@@ -52,6 +55,19 @@ export default function TasksPage() {
   const filters = useRef({ status });
   filters.current = { status };
   useEffect(() => () => { request.current?.abort(); notification.destroy(); }, [notification]);
+
+  async function changeLimit(limit: number) {
+    setSavingLimit(true);
+    try {
+      await agentResearch.setConcurrency(limit);
+      void message.success(t('全站并发已设为 {0}', [limit]));
+    } catch (err) {
+      void message.error(errorText(asApiError(err)));
+    } finally {
+      setSavingLimit(false);
+      queue.reload();
+    }
+  }
 
   async function removeTasks(ids: string[]) {
     if (request.current || !ids.length) return;
@@ -98,7 +114,14 @@ export default function TasksPage() {
       <div className="filter-toolbar">
         <Select<TaskStatus> value={status} allowClear placeholder={t("全部状态")} aria-label={t("筛选任务状态")} onChange={(value) => { setStatus(value); setPage(1); }} options={Object.entries(taskStatusLabels()).map(([value, label]) => ({ value: value as TaskStatus, label }))} />
         <Button icon={<ReloadOutlined />} loading={resource.loading} onClick={resource.reload}>{t("刷新")}</Button>
+        <Space wrap>
+          <span id="research-concurrency-label">{t('全站研究并发数')}</span>
+          <Radio.Group aria-labelledby="research-concurrency-label" optionType="button"
+            options={[1, 2, 3, 4]} value={queue.data?.concurrency} disabled={!queue.data || savingLimit}
+            onChange={event => void changeLimit(event.target.value)} />
+        </Space>
       </div>
+      {queue.error && <ErrorNotice error={queue.error} retry={queue.reload} />}
       {selected.length > 0 && <div className="selection-notice"><span>{t('已选择 {0} 条研究记录', [selected.length])}</span><div className="selection-actions"><Button danger disabled={deleting} loading={deleting} onClick={() => confirmDelete(selected.map(String))}>{t('删除已选研究')}</Button><Button type="link" disabled={deleting} onClick={() => setSelected([])}>{t('清空选择')}</Button></div></div>}
       {resource.error && <ErrorNotice error={resource.error} retry={resource.reload} />}
       <Table<AgentResearchSummary> className="research-records-table" rowKey="id" columns={columns((task) => confirmDelete([task.id]), deleting, setImportSource).map((column) => ({ ...column, align: 'left' as const }))} rowSelection={{ align: 'left', selectedRowKeys: selected, preserveSelectedRowKeys: true, onChange: setSelected, getCheckboxProps: (task) => ({ disabled: deleting || task.status === 'running', 'aria-label': t('选择研究记录 {0}', [task.id.slice(0, 8)]) }) }} dataSource={resource.data?.items || []} loading={resource.loading} pagination={false} scroll={{ x: 980 }} locale={{ emptyText: <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={status ? t("没有匹配的任务") : t("还没有研究任务")}>{!status && <Link to="/tasks/new"><Button>{t("创建第一个任务")}</Button></Link>}</Empty> }} />

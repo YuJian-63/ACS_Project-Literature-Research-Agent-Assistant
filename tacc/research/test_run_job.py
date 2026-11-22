@@ -53,6 +53,9 @@ def staged(tmp_path, monkeypatch, request):
         "sources": sources,
         "runtime": {"persist": False, "context_window": 16000},
     }
+    if getattr(request, "param", None) == "custom":
+        manifest["runtime"]["research"] = {"model_provider": "custom", "endpoint_url": "http://10.0.3.10:8000/v1"}
+        (tmp_path / "model.env").write_text("MODEL_PROVIDER=tacc\nMODEL_BASE_URL=http://10.0.3.10:8000/v1\n")
     if getattr(request, "param", None) == "extension":
         manifest["runtime"].update(persist=True, research={"workflow": "extension", "planner": True,
             "reflection": True, "context_policy": "compact", "context_finalize_ratio": 0.8})
@@ -147,3 +150,30 @@ def test_extension_search_and_persistence_cross_job_boundary(staged, monkeypatch
     envelope = json.loads((out / "result.json").read_text())
     assert envelope["parsed_papers"][0]["pages"][0]["text"] == "original"
     assert envelope["result"]["configuration"]["workflow"] == "extension"
+
+@pytest.mark.parametrize("staged", ["custom"], indirect=True)
+def test_custom_endpoint_discovers_name_and_uses_non_streaming_chat(staged, monkeypatch):
+    import baseline
+    import httpx
+    from apis.model import make_model
+    from schemas import TaskResult, Usage
+
+    _, out = staged
+    def get_models(client, url):
+        assert url == "http://10.0.3.10:8000/v1/models"
+        assert "authorization" not in client.headers
+        return httpx.Response(200, request=httpx.Request("GET", url), json={"data": [{"id": "team-model"}]})
+
+    def run(task, **kwargs):
+        model = make_model()
+        assert model.model_name == "team-model" and model.streaming is False
+        assert model.openai_api_key.get_secret_value() == "EMPTY"
+        return TaskResult(task_id=task.task_id, question=task.question, answer="answer", stop_reason="completed", usage=Usage())
+
+    monkeypatch.setattr(httpx.Client, "get", get_models)
+    monkeypatch.setattr(baseline, "run_task", run)
+    for name in ("MODEL_API_KEY", "MODEL_NAME", "NO_PROXY", "no_proxy"):
+        monkeypatch.setenv(name, "")
+    assert run_job.main() == 0
+    result = json.loads((out / "result.json").read_text())["result"]
+    assert result["configuration"]["model_provider"] == "custom"

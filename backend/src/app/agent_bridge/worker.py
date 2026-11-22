@@ -32,12 +32,16 @@ logger = logging.getLogger(__name__)
 
 
 class AgentWorker:
-    def __init__(self, sessions: sessionmaker[Session], settings: Settings, *, transport: Transport | None = None):
+    def __init__(self, sessions: sessionmaker[Session], settings: Settings, *, transport: Transport | None = None,
+        stopped: threading.Event | None = None):
         self.sessions = sessions
         self.settings = settings
         self.transport = transport if transport is not None else create_transport(settings)
+        from app.agent_bridge.tcloud import TcloudTransport
+        if isinstance(self.transport, TcloudTransport):
+            self.transport.sessions = sessions
         self.owner = uuid4()
-        self.stopped = threading.Event()
+        self.stopped = stopped if stopped is not None else threading.Event()
 
     def run_once(self) -> bool:
         task_id = claim_task(self.sessions, self.owner, "agent")
@@ -107,7 +111,11 @@ class AgentWorker:
                     if status is not None and status.state != "running":
                         code = "AGENT_WRAPPER_FAILED" if status.error else "AGENT_RESULT_MISSING"
                         details = {"wrapper_code": status.error.code, "wrapper_type": status.error.type} if status.error else {}
-                        fail_owned(self.sessions, task_id, self.owner, code, "Agent 执行失败或未返回完整研究结果", details=details)
+                        message = "Agent 执行失败或未返回完整研究结果"
+                        if status.error and status.error.code == "MODEL_ENDPOINT_UNAVAILABLE":
+                            code = status.error.code
+                            message = "无法从指定地址读取可用模型，请检查 URL 和服务状态"
+                        fail_owned(self.sessions, task_id, self.owner, code, message, details=details)
                         return
                     retries = 0
                 except TransportError as exc:
@@ -119,7 +127,8 @@ class AgentWorker:
                     continue
                 self.stopped.wait(self.settings.agent_poll_seconds)
         except TransportError as exc:
-            fail_owned(self.sessions, task_id, self.owner, exc.code, "Agent 派发或平台执行失败，请查看执行记录", details={"transport_error": exc.code})
+            message = "课程模型已停止或更换，请检查模型管理后重新提交研究" if exc.code == "COURSE_MODEL_UNAVAILABLE" else "Agent 派发或平台执行失败，请查看执行记录"
+            fail_owned(self.sessions, task_id, self.owner, exc.code, message, details={"transport_error": exc.code})
         except (ValueError, OSError, EOFError, BadZipFile, RecursionError):
             fail_owned(self.sessions, task_id, self.owner, "AGENT_DELIVERY_INVALID", "Agent 输入或结果文件不合法，未覆盖已有数据")
         except Exception:
@@ -132,20 +141,37 @@ class AgentWorker:
             except Exception:
                 logger.warning("Agent terminal reconciliation deferred: task_id=%s", task_id)
 
+    def consume_queue(self) -> None:
+        while not self.stopped.is_set():
+            try:
+                if self.run_once():
+                    continue
+            except Exception:
+                logger.warning("Agent task claim deferred; database may not be ready")
+            self.stopped.wait(1)
+
     def run(self) -> None:
         monitor = TaskMonitor(self.sessions)
         maintenance = AgentMaintenance(self.sessions, self.settings)
+        if self.settings.agent_transport == "tcloud":
+            from app.agent_bridge.course_service import monitor as monitor_service
+            threading.Thread(target=monitor_service, args=(self.sessions, self.transport, self.stopped),
+                name="course-service", daemon=True).start()
+        threads = []
         monitor.start()
         maintenance.start()
         try:
-            while not self.stopped.is_set():
-                try:
-                    if self.run_once():
-                        continue
-                except Exception:
-                    logger.warning("Agent task claim deferred; database may not be ready")
-                self.stopped.wait(1)
+            # The calling thread consumes one slot. The database admits work up to the live limit.
+            for slot in range(2, 5):
+                worker = AgentWorker(self.sessions, self.settings, stopped=self.stopped)
+                thread = threading.Thread(target=worker.consume_queue, name=f"agent-worker-{slot}")
+                thread.start()
+                threads.append(thread)
+            self.consume_queue()
         finally:
+            self.stopped.set()
+            for thread in threads:
+                thread.join()
             monitor.close()
             maintenance.close()
 

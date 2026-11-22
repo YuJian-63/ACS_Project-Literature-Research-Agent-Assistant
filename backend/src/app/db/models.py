@@ -431,3 +431,37 @@ class SourceRequestGate(Base):
             name="source_request_gates_owner",
         ),
     )
+
+
+class CourseService(Base):
+    __tablename__ = "course_service"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=False)
+    state: Mapped[str] = mapped_column(Text)
+    generation: Mapped[UUID | None]
+    owner_id: Mapped[UUID | None]
+    job_id: Mapped[str | None] = mapped_column(Text)
+    base_url: Mapped[str | None] = mapped_column(Text)
+    detail: Mapped[str | None] = mapped_column(Text)
+    stop_requested: Mapped[bool] = mapped_column(server_default=text("false"))
+    checked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    requested_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class SharedModelEndpoint(Base):
+    __tablename__ = "shared_model_endpoints"
+
+    user_id: Mapped[UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), primary_key=True)
+    base_url: Mapped[str] = mapped_column(Text)
+
+
+class AgentQueueSettings(Base):
+    __tablename__ = "agent_queue_settings"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=False)
+    concurrency: Mapped[int] = mapped_column(Integer, server_default=text("2"))
+
+    __table_args__ = (
+        CheckConstraint("id = 1"),
+        CheckConstraint("concurrency BETWEEN 1 AND 4"),
+    )

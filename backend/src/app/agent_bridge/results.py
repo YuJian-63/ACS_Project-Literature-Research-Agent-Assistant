@@ -80,6 +80,8 @@ def validate_delivery(manifest: DispatchManifest, envelope: ResultEnvelope) -> d
     if result.task_id != manifest.task.task_id or result.question != manifest.task.question:
         raise ValueError("Result task identity does not match dispatch")
     research = manifest.runtime.research
+    if research and result.configuration.get("model_provider", "bailian") != research.model_provider:
+        raise ValueError("Delivered chat provider differs from requested provider")
     if research and result.configuration.get("workflow", "baseline") != research.workflow:
         raise ValueError("Delivered workflow differs from requested workflow")
     if research and research.workflow == "extension" and any(

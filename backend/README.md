@@ -62,7 +62,9 @@ uv run --locked python -B -m unittest discover -s tests -v
 
 ## 7. 运行边界与恢复
 
-Worker 首次领取时开始计时，重启后沿用原任务期限和派发记录。通过 `GET /api/v1/tasks/{task_id}` 查看 `agent.dispatch_id`、`remote_job_id` 与执行限额。提交回执不明时保留交换目录供 Worker 核对。部分完成的结果会保留可读正文和仍待解决的问题。[派发、恢复与结果契约](../docs/agent-backend-integration.md)
+共用同一 PostgreSQL 数据库的研究 Worker 默认合计并行两项，其余任务按提交顺序等待。任一登录账号可在「研究记录」选择 1–4，设置在下一次领取任务时生效。设置持久保存在数据库中，调低时已派发的任务继续完成。每个账号默认可保留五项排队中或执行中的任务，已有部署可在 `backend/.env` 设置 `USER_ACTIVE_TASKS=5`。
+
+Worker 首次领取时开始计时，重启后沿用原任务期限和派发记录，优先接回已启动的任务。通过 `GET /api/v1/tasks/{task_id}` 查看 `agent.dispatch_id`、`remote_job_id` 与执行限额。提交回执不明时保留交换目录供 Worker 核对。部分完成的结果会保留可读正文和仍待解决的问题。[派发、恢复与结果契约](../docs/agent-backend-integration.md)
 
 ## 8. 独立 Agent 配置
 

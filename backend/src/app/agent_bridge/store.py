@@ -173,8 +173,10 @@ def complete_delivery(sessions: sessionmaker[Session], task_id: UUID, owner: UUI
         if isinstance(model, str) and model.strip() and len(model) <= 256:
             task.model_id = model
         if result.stop_reason not in {"completed", "partial"}:
-            mark_failed(session, task, now, "AGENT_" + result.stop_reason.upper(),
-                "Agent 未完成研究任务，停止原因：" + result.stop_reason)
+            message = "Agent 未完成研究任务，停止原因：" + result.stop_reason
+            if manifest.runtime.research and manifest.runtime.research.model_provider in {"custom", "tacc"} and result.stop_reason == "model_error":
+                message = "课程模型调用失败，请在模型管理中检查 GPU 作业状态后重试"
+            mark_failed(session, task, now, "AGENT_" + result.stop_reason.upper(), message)
             task.error_details = {"stop_reason": result.stop_reason, "unresolved": result.unresolved}
             return True
         artifact = Artifact(task_id=task_id,

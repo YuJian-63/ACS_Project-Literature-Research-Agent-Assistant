@@ -725,6 +725,7 @@ class OwnershipPostgresTests(unittest.TestCase):
         self.assertEqual(self.clients[0].get(f"/api/v1/papers/{paper}/file").content, b"%PDF-fixture")
 
     def test_same_key_is_scoped_replay_does_not_consume_quota(self):
+        self.settings.user_active_tasks = 2
         first = self.upload()
         second = self.upload(1)
         accepted = self.task(first)
@@ -764,6 +765,7 @@ class OwnershipPostgresTests(unittest.TestCase):
         self.assertEqual(replay["id"], winners[0]["id"])
 
     def test_concurrent_tasks_share_one_user_quota_lock(self):
+        self.settings.user_active_tasks = 2
         paper = self.upload()
         body = TaskCreate(task_type="summary", question="Summarize", paper_ids=[paper])
         def submit(index):

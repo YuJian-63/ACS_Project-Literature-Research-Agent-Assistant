@@ -1,6 +1,8 @@
 import type { Page, TaskStatus } from './types';
 import { request } from './client';
 export interface ResearchOptions {
+  model_provider?: 'bailian' | 'tacc' | 'custom';
+  endpoint_url?: string;
   workflow: 'baseline' | 'extension';
   context_policy: 'full' | 'compact';
   planner: boolean;
@@ -29,6 +31,12 @@ export interface AgentResearchSummary {
   created_at: string;
 }
 export const agentResearch = {
+  getConcurrency(signal: AbortSignal) {
+    return request<{ concurrency: number }>({ url: '/api/v1/agent-research/queue/concurrency', signal });
+  },
+  setConcurrency(concurrency: number) {
+    return request<{ concurrency: number }>({ url: '/api/v1/agent-research/queue/concurrency', method: 'PUT', data: { concurrency } });
+  },
   async list(params: { status?: TaskStatus; limit: number; offset: number }, signal?: AbortSignal): Promise<Page<AgentResearchSummary>> {
     return request<Page<AgentResearchSummary>>({ url: '/api/v1/agent-research', params, signal });
   },

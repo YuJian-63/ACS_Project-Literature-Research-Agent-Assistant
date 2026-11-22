@@ -8,7 +8,7 @@ from app.agent_bridge.transport import create_transport, transport_name
 from app.api.schemas import TaskCreate
 from app.api.views import accepted_view
 from app.config import Settings
-from app.db.models import AgentRun, Paper, Task, TaskEvent, TaskPaper
+from app.db.models import CourseService, SharedModelEndpoint, AgentRun, Paper, Task, TaskEvent, TaskPaper
 from app.errors import APIError
 
 
@@ -37,6 +37,24 @@ def create_research_task(session, settings, request, papers, *, user_id, key, di
         [{"paper_id": str(paper.id), "title": paper.title, "sha256": paper.sha256,
             "size_bytes": paper.size_bytes, "page_count": paper.page_count} for paper in papers],
         settings, allow_search=request.allow_search, research=request.research)
+    if request.research and request.research.model_provider in {"tacc", "custom"}:
+        if settings.agent_transport != "tcloud":
+            raise APIError(409, "TCLOUD_DISABLED", "课程 TCloud Worker 尚未启用")
+        if request.research.model_provider == "custom":
+            url = request.research.endpoint_url
+            if not url:
+                shared = session.get(SharedModelEndpoint, user_id)
+                if not shared:
+                    raise APIError(409, "MODEL_UNAVAILABLE", "请输入服务地址")
+                url = shared.base_url
+            manifest.runtime.research = request.research.model_copy(update={"endpoint_url": url})
+        else:
+            service = session.get(CourseService, 1)
+            if not service or service.state != "ready" or service.stop_requested:
+                raise APIError(409, "MODEL_UNAVAILABLE", "课程模型尚未就绪，请在模型管理中查看状态")
+            manifest.runtime.service_generation = service.generation
+        manifest.runtime.context_window = min(manifest.runtime.context_window, 36864)
+        manifest.task.max_output_tokens = min(manifest.task.max_output_tokens, 4096)
     return _save_agent_task(session, settings, manifest, papers, user_id=user_id, key=key, digest=digest,
         task_type="review" if len(papers) > 1 else "qa", question=request.question,
         workflow_type="extended" if request.research and request.research.workflow == "extension" else "baseline", interface=interface)

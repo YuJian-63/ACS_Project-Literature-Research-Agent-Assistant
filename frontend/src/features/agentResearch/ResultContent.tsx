@@ -39,7 +39,7 @@ export default function ResultContent({ result, onReadEvidence, onReadSource }: 
     return [[e.kind, e.name ?? e.purpose ?? e.action, e.outcome].filter(value => typeof value === 'string').join(' · ')];
   });
   entries.push({ key: 'execution', label: t('运行记录'), icon: <FileTextOutlined aria-hidden />, children: <section>
-    <p>{config.workflow === 'extension' ? 'Extension' : 'Baseline'} · {String(config.model ?? '')} · {result.usage.elapsed_seconds} s</p>
+    <p>{config.workflow === 'extension' ? 'Extension' : 'Baseline'} · {config.model_provider === 'custom' ? t('指定服务地址') : config.model_provider === 'tacc' ? t('课程 Qwen') : config.model_provider === 'bailian' ? t('百炼') : ''} {String(config.model ?? '')} · {result.usage.elapsed_seconds} s</p>
     <p>{t('模型调用 {0} 次，工具调用 {1} 次', [result.usage.model_calls, result.usage.tool_calls])}</p>
     {typeof config.persistence === 'string' && <p>{config.persistence === 'saved' ? t('Agent 数据库已保存') : t('Agent 数据库写入失败')}</p>}
     {result.errors.map((error, index) => <p key={index}>{error.stage} · {error.type}</p>)}

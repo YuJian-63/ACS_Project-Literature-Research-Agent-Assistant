@@ -14,14 +14,19 @@ import { useAuth } from '../auth/AuthProvider';
 import { clearResearchDraft, readResearchDraft, researchSubmission, saveResearchDraft, type ResearchSubmission } from '../../shared/lib/researchDraft';
 import './research.css';
 
+import { changeService, courseAvailable, loadModels, pollModels } from '../../api/models';
+import { useResource } from '../../shared/hooks/useResource';
+
 export default function NewResearchPage() {
   useLocale();
+  const models = useResource(loadModels, 10000, pollModels);
   const { user } = useAuth();
   const userId = user!.id;
   const [params] = useSearchParams();
   const key = params.toString();
   const [question, setQuestion] = useState('');
   const [research, setResearch] = useState<ResearchOptions>(defaultResearch);
+  const [startingModel, setStartingModel] = useState(false);
   const extensionFlags = useRef({ planner: true, reflection: true });
   const [allowSearch, setAllowSearch] = useState(true);
   const [papers, setPapers] = useState<Paper[]>([]);
@@ -79,7 +84,11 @@ export default function NewResearchPage() {
       notification.warning({ title: t('请选择参考论文或开启搜索') }); return;
     }
     if (reason) { notification.warning({ title: t('研究未能开始'), description: reason, duration: 3 }); return; }
-    const input: AgentResearchRequest = { question: question.trim(), paper_ids: papers.map(paper => paper.id), allow_search: allowSearch, research };
+    const customUrl = research.endpoint_url ?? models.data?.shared_url ?? '';
+    if (research.model_provider === 'custom' && !/^http:\/\/10\.0\.\d{1,3}\.\d{1,3}:8000\/v1\/?$/.test(customUrl.trim())) {
+      notification.warning({title: t('请输入有效的 TACC 地址，例如 http://10.0.3.10:8000/v1')}); return;
+    }
+    const input: AgentResearchRequest = { question: question.trim(), paper_ids: papers.map(paper => paper.id), allow_search: allowSearch, research: research.model_provider === 'custom' ? {...research, endpoint_url: customUrl.trim()} : research };
     attempt.current = researchSubmission(input, attempt.current);
     saveResearchDraft(userId, { question, research, allowSearch, paperIds: input.paper_ids!, sourceKey: key, submission: attempt.current });
     const pending = new AbortController();
@@ -104,6 +113,22 @@ export default function NewResearchPage() {
   <Spin spinning={loading}><Form layout="vertical" onFinish={submit}><div className="research-creation-layout"><div>
   <section className="content-panel research-question-panel"><h2>{t("你想了解什么？")}</h2><p>{t("直接描述你想解决的问题，或希望从论文中了解的内容。")}</p><Form.Item required label={t("研究问题")}><Input.TextArea value={question} onChange={event => setQuestion(event.target.value)} rows={5} maxLength={8000} showCount disabled={loading || submitting || Boolean(error)} placeholder={t("例如：这些论文的方法有什么不同？它们在什么条件下适用？")} /></Form.Item></section>
   <section className="content-panel research-paper-panel"><h2>{t('研究设置')}</h2>
+    <Form.Item label={t('模型来源')} extra={<Link to="/models">{t('模型管理')}</Link>}>
+      <Select aria-label={t('模型来源')} value={research.model_provider ?? 'bailian'} disabled={loading || submitting}
+        options={[{value: 'bailian', label: t('百炼 API')}, {value: 'tacc', label: t('课程模型服务')}, {value: 'custom', label: t('指定服务地址')}]}
+        onChange={model_provider => setResearch({...research, model_provider, endpoint_url: undefined})} /></Form.Item>
+    {research.model_provider === 'custom' && <Form.Item label={t('服务地址')} required>
+      <Input aria-label={t('服务地址')} placeholder="http://10.0.3.10:8000/v1" disabled={submitting}
+        value={research.endpoint_url ?? models.data?.shared_url ?? ''} onChange={event => setResearch({...research, endpoint_url: event.target.value})} /></Form.Item>}
+    {research.model_provider === 'tacc' && !courseAvailable(models.data) && <Space wrap>
+      <span>{t('课程服务就绪后即可提交研究。')}</span>
+      {models.data?.enabled && ['stopped', 'failed'].includes(models.data.state) && <Button loading={startingModel} onClick={async () => {
+        setStartingModel(true);
+        try { await changeService('start'); models.reload(); }
+        catch (failure) { notification.error({title: asApiError(failure).message}); }
+        finally { setStartingModel(false); }
+      }}>{t('启动 TACC 服务')}</Button>}
+    </Space>}
     <Form.Item label={t('研究模式')}><Radio.Group aria-label={t('研究模式')} optionType="button" buttonStyle="solid" disabled={loading || submitting}
       value={research.workflow} options={[{ value: 'baseline', label: 'Baseline' }, { value: 'extension', label: 'Extension' }]}
       onChange={e => {
@@ -122,6 +147,6 @@ export default function NewResearchPage() {
     <Checkbox disabled={loading || submitting} checked={research.reflection} onChange={e => setResearch({ ...research, reflection: e.target.checked })}>Reflection</Checkbox></>}</Space>
   </section>
   <section className="content-panel research-paper-panel"><div className="panel-heading"><div><h2>{t('参考论文（可选）')}</h2><p>{t('可以不选，也可以指定最多 20 篇参考论文。研究将先检索已有资料，信息不足时再搜索补充论文。')}</p></div><Link to="/papers">{t("前往论文库")}</Link></div><PaperPicker value={papers} onChange={setPapers} disabled={loading || submitting || Boolean(error)} /></section>
-  </div><aside className="research-submit-panel"><span className="research-section-label">{t("本次研究")}</span><h2>{t("从问题到理解")}</h2><p>{question.trim() || t("你的研究问题会显示在这里。")}</p>{papers.length > 0 ? <div className="research-submit-count"><BookOutlined /><strong>{papers.length}</strong><span>{t('篇参考论文')}</span></div> : <p className="research-auto-sources">{t('未指定参考论文，将根据研究问题查找相关资料。')}</p>}{papers.length > 0 && <ul>{papers.map(paper => <li key={paper.id}>{paper.title}</li>)}</ul>}<Button type="primary" htmlType="submit" size="large" block loading={submitting} disabled={loading || submitting || Boolean(error)}>{t('开始研究')}</Button><small>{t('研究开始后，可在研究记录中查看进展与结果。')}</small></aside>
+  </div><aside className="research-submit-panel"><span className="research-section-label">{t("本次研究")}</span><h2>{t("从问题到理解")}</h2><p>{question.trim() || t("你的研究问题会显示在这里。")}</p>{papers.length > 0 ? <div className="research-submit-count"><BookOutlined /><strong>{papers.length}</strong><span>{t('篇参考论文')}</span></div> : <p className="research-auto-sources">{t('未指定参考论文，将根据研究问题查找相关资料。')}</p>}{papers.length > 0 && <ul>{papers.map(paper => <li key={paper.id}>{paper.title}</li>)}</ul>}<Button type="primary" htmlType="submit" size="large" block loading={submitting} disabled={(research.model_provider === 'tacc' && !courseAvailable(models.data)) || loading || submitting || Boolean(error)}>{t('开始研究')}</Button><small>{t('研究开始后，可在研究记录中查看进展与结果。')}</small></aside>
   </div></Form></Spin></>;
 }

@@ -12,6 +12,8 @@ export function researchSubmission(input: AgentResearchRequest, previous?: Resea
   if (options && (options.workflow !== 'baseline' || options.context_policy !== 'full' || options.planner || options.reflection)) {
     values.push(options.workflow, options.context_policy, options.planner, options.reflection);
   }
+  if (options?.model_provider === 'tacc') values.push('tacc');
+  if (options?.model_provider === 'custom') values.push('custom', options.endpoint_url ?? '');
   const fingerprint = JSON.stringify(values);
   return previous?.fingerprint === fingerprint ? previous : { fingerprint, key: createUuid() };
 }

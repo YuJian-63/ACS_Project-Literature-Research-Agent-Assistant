@@ -16,6 +16,10 @@ from pathlib import Path
 from uuid import UUID
 
 
+class EndpointDiscoveryError(ValueError):
+    """An explicit service URL did not advertise a usable chat model."""
+
+
 class DeadlineExpired(BaseException):
     """Interrupt a blocking library/model call without being caught inside the graph."""
 
@@ -110,14 +114,48 @@ def run_research(identity, deadline, papers):
 
     manifest = read_manifest(identity)
     settings = dotenv_values(os.environ["ACS_MODEL_CONFIG"], interpolate=False)
+    research = manifest["runtime"].get("research") or {}
+    source = research.get("model_provider", "bailian")
+    provider = "tacc" if source == "custom" else source
+    url = settings.get("MODEL_BASE_URL") or ""
+    if settings.get("MODEL_PROVIDER", "bailian") != provider:
+        raise ValueError("Chat provider differs from task selection")
+    if provider == "tacc":
+        match = re.fullmatch(r"http://([a-zA-Z0-9.-]+):8000/v1", url)
+        if not match:
+            raise ValueError("Invalid course service URL")
+        os.environ["MODEL_API_KEY"] = "EMPTY"
+        for key in ("no_proxy", "NO_PROXY"):
+            os.environ[key] = ",".join(filter(None, [os.environ.get(key), match[1]]))
+        if research.get("workflow") == "extension" and not settings.get("BAILIAN_API_KEY"):
+            shared = dotenv_values(Path(os.environ["TACC_USERDIR"]) / "acs-research/model.env", interpolate=False)
+            for key in ("BAILIAN_API_KEY", "EMBEDDING_BASE_URL", "EMBEDDING_MODEL", "EMBEDDING_DIMENSIONS"):
+                settings[key] = shared.get(key)
+            settings["EMBEDDING_BASE_URL"] = settings["EMBEDDING_BASE_URL"] or shared.get("MODEL_BASE_URL")
+            if not settings.get("BAILIAN_API_KEY"):
+                raise ValueError("Missing embedding credential")
+    elif provider != "bailian" or not url.startswith("https://") or not settings.get("BAILIAN_API_KEY"):
+        raise ValueError("Missing Bailian endpoint or credential")
+    if source == "custom":
+        # The endpoint belongs to a teammate. Only an unauthenticated cluster request goes there.
+        import httpx
+        try:
+            with httpx.Client(timeout=10, trust_env=False, follow_redirects=False) as client:
+                response = client.get(url + "/models")
+                response.raise_for_status()
+                models = [item["id"] for item in response.json()["data"]]
+        except (httpx.HTTPError, ValueError, KeyError, TypeError):
+            raise EndpointDiscoveryError("Model list unavailable") from None
+        if len(models) == 1 and isinstance(models[0], str) and models[0]:
+            settings["MODEL_NAME"] = models[0]
+        elif "qwen3.8-27b" in models:
+            settings["MODEL_NAME"] = "qwen3.8-27b"
+        else:
+            raise EndpointDiscoveryError("No unique model at this endpoint")
+    os.environ["MODEL_PROVIDER"] = provider
     for name in ("MODEL_BASE_URL", "MODEL_NAME", "BAILIAN_API_KEY", "EMBEDDING_BASE_URL", "EMBEDDING_MODEL", "EMBEDDING_DIMENSIONS"):
         if settings.get(name):
             os.environ[name] = settings[name]
-    if not settings.get("MODEL_BASE_URL", "").startswith(
-        "https://"
-    ) or not settings.get("BAILIAN_API_KEY"):
-        raise ValueError("Missing Bailian endpoint or credential")
-    os.environ["MODEL_PROVIDER"] = "bailian"
     task = Task.model_validate(manifest["task"])
     library = None
     access_path = Path("library-access.json")
@@ -154,6 +192,7 @@ def run_research(identity, deadline, papers):
         **options,
     ).model_dump(mode="json")
     result["configuration"]["workflow"] = workflow
+    result["configuration"]["model_provider"] = source
     return result
 
 
@@ -245,7 +284,8 @@ def main():
                 directory,
                 identity,
                 "failed",
-                error={"code": "AGENT_WRAPPER_FAILED", "type": type(error).__name__},
+                error={"code": "MODEL_ENDPOINT_UNAVAILABLE" if isinstance(error, EndpointDiscoveryError) else "AGENT_WRAPPER_FAILED",
+                       "type": type(error).__name__},
             )
         finally:
             signal.setitimer(signal.ITIMER_REAL, 0)

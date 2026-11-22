@@ -5,15 +5,16 @@ from fastapi import APIRouter, Depends, Header, Request, Response
 from sqlalchemy import func, select
 
 from app.api.agent_research_schemas import (
-    AgentResearchAccepted, AgentResearchCreate, AgentResearchRecord, AgentResearchSummary,
+    AgentResearchAccepted, AgentResearchCreate, AgentResearchRecord, AgentResearchSummary, QueueConcurrency,
 )
 from app.api.pagination import Limit, Offset
 from app.api.schemas import Page, TaskStatus
 from app.api.views import resource_error
 from app.auth.dependencies import require_user
-from app.db.models import AgentRun, Task, User
+from app.db.models import AgentQueueSettings, AgentRun, Task, User
 from app.errors import APIError
 from app.tasks.service import ensure_task_deletable
+from app.tasks.lifecycle import lock_agent_queue
 from app.tasks.unified import get_research, history_papers, research_filters, research_references, submit_research
 
 router = APIRouter(prefix="/api/v1/agent-research")
@@ -47,6 +48,20 @@ def list_records(request: Request, user: CurrentUser, limit: Limit = 20, offset:
         return {"items": [{"id": task.id, "question": task.question, "status": task.status,
             "paper_ids": [paper["id"] for paper in references[task.id]], "papers": papers[task.id],
             "created_at": task.created_at} for task in rows], "total": total, "limit": limit, "offset": offset}
+
+
+@router.get("/queue/concurrency", response_model=QueueConcurrency)
+def read_concurrency(request: Request, user: CurrentUser):
+    with request.app.state.sessions() as session:
+        queue = session.get(AgentQueueSettings, 1)
+        return {"concurrency": queue.concurrency if queue else 2}
+
+
+@router.put("/queue/concurrency", response_model=QueueConcurrency)
+def update_concurrency(body: QueueConcurrency, request: Request, user: CurrentUser):
+    with request.app.state.sessions.begin() as session:
+        lock_agent_queue(session).concurrency = body.concurrency
+    return body
 
 
 @router.get("/{task_id}", response_model=AgentResearchRecord)

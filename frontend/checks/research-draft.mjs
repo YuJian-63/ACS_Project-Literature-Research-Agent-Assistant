@@ -23,6 +23,7 @@ try {
   assert.notEqual(researchSubmission({ ...input, allow_search: false }, first).key, first.key);
   const research = { workflow: 'extension', planner: true, reflection: true, context_policy: 'compact' };
   assert.notEqual(researchSubmission({ ...input, research }, first).key, first.key);
+  assert.notEqual(researchSubmission({ ...input, research: { ...research, model_provider: 'tacc' } }).fingerprint, researchSubmission({...input, research}).fingerprint);
   saveResearchDraft('alice', { question: input.question, paperIds: input.paper_ids, research, allowSearch: false });
   assert.deepEqual(readResearchDraft('alice').research, research);
   assert.equal(readResearchDraft('alice').allowSearch, false);

@@ -17,6 +17,7 @@ from app.agent_bridge.results import validate_delivery
 from app.agent_bridge.status import read_status
 from app.agent_bridge.transport import ManualTransport, TransportError
 from app.config import Settings
+from app.db.models import CourseService
 
 ROOT = Path(__file__).resolve().parents[4]
 TEMPLATE = ("tuxiv.conf", "job.sh", "run_job.py", "runtime.sh", "requirements.txt")
@@ -53,7 +54,7 @@ def pre_submit_failure(output: str):
     return None
 
 
-def stage_model_env(path: Path, target: Path, deadline: float) -> None:
+def stage_model_env(path: Path, target: Path, deadline: float, *, course_url: str | None = None) -> None:
     with controlled(path).open("r", encoding="utf-8") as source:
         info = os.fstat(source.fileno())
         if (not stat.S_ISREG(info.st_mode) or info.st_size > 65536
@@ -105,7 +106,12 @@ def stage_model_env(path: Path, target: Path, deadline: float) -> None:
         elif not re.fullmatch(r"[A-Za-z0-9._/-]{1,128}" if name == "EMBEDDING_MODEL" else r"[1-9][0-9]{0,4}", value):
             raise ValueError("Invalid embedding configuration")
         embedding += f"{name}={value}\n"
-    atomic_write(target, f"MODEL_PROVIDER=bailian\nMODEL_NAME={model}\nMODEL_BASE_URL={base_url}\nBAILIAN_API_KEY={token}\n{embedding}".encode())
+    provider = "bailian"
+    if course_url:
+        if not config.get("EMBEDDING_BASE_URL"):
+            embedding += f"EMBEDDING_BASE_URL={base_url}\n"
+        provider, model, base_url = "tacc", "qwen3.8-27b", course_url
+    atomic_write(target, f"MODEL_PROVIDER={provider}\nMODEL_NAME={model}\nMODEL_BASE_URL={base_url}\nBAILIAN_API_KEY={token}\n{embedding}".encode())
 
 
 class TcloudTransport(ManualTransport):
@@ -152,7 +158,24 @@ class TcloudTransport(ManualTransport):
             shutil.copyfile(ROOT / "agent" / name, stage / "agent" / name)
         shutil.copyfile(controlled(outbox / "input.zip"), stage / "input.zip")
         atomic_copy(outbox / "library-access.json", stage / "library-access.json", 65536)
-        if self.settings.agent_tcloud_model_env_file:
+        research = manifest.runtime.research
+        if research and research.model_provider in {"tacc", "custom"}:
+            if research.model_provider == "custom":
+                url = research.endpoint_url
+                if not url:
+                    raise TransportError("COURSE_MODEL_UNAVAILABLE")
+            else:
+                with self.sessions() as session:
+                    service = session.get(CourseService, 1)
+                    if (not service or service.state != "ready" or service.stop_requested
+                        or service.generation != manifest.runtime.service_generation or not service.base_url):
+                        raise TransportError("COURSE_MODEL_UNAVAILABLE")
+                    url = service.base_url
+            if research.workflow == "extension" and self.settings.agent_tcloud_model_env_file:
+                stage_model_env(self.settings.agent_tcloud_model_env_file, stage / "model.env", deadline, course_url=url)
+            else:
+                atomic_write(stage / "model.env", f"MODEL_PROVIDER=tacc\nMODEL_BASE_URL={url}\nMODEL_NAME=qwen3.8-27b\n".encode())
+        elif self.settings.agent_tcloud_model_env_file:
             stage_model_env(self.settings.agent_tcloud_model_env_file, stage / "model.env", deadline)
         atomic_write(stage / "dispatch.json", canonical_json({
             "dispatch_id": str(manifest.dispatch_id), "input_sha256": manifest_digest(manifest), "deadline": deadline,

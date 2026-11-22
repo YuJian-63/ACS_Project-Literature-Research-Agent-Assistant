@@ -10,13 +10,13 @@ HKUST CSIT6000V Advanced AI Computing and Systems 课程项目。用户在网页
 | [backend/](backend/README.md) | API 管理账号、论文库和任务。研究 Worker 向 TACC 提交作业，取回结果并写入 PostgreSQL。PDF 原件保存在后端文件目录。 |
 | [agent/](agent/README.md) | 研究逻辑。Baseline 和 Retrieval Extension 在这里实现论文检索、PDF 阅读、模型调用和带引用的回答。 |
 | [tacc/](tacc/README.md) | 课程集群上的作业入口、环境配置和探测脚本。CPU 节点通过 [research/run_job.py](tacc/research/run_job.py) 读取任务清单并调用 Agent。 |
-| [qwen-public-serve-agent/](qwen-public-serve-agent/README-AGENT.txt) | 单独提交到 TACC GPU 节点的课程 Qwen 模型服务。当前已验收的研究流程使用百炼 API。 |
+| [model-server/](model-server/README.md) | 单独提交到 TACC GPU 节点的课程 Qwen 模型服务。当前已验收的研究流程使用百炼 API。 |
 | [scripts/](scripts/research) | 本机和 ECS 的统一启动入口。本机联调另提供日志和 TACC 作业查询。 |
 | [docs/](docs/) | 跨组件的 API 契约、数据库设计和派发协议。 |
 
 ## 运行
 
-在仓库根目录运行 `./scripts/research up`。
+在仓库根目录运行 `./scripts/research up`。在网页「研究记录」中选择「全站研究并发数」（1–4）即可在线调整，所有登录账号共用此设置。
 
 - **本地开发**使用 Vite。首次运行前用 `./scripts/local-research configure` 配置环境，安装依赖并完成数据库迁移。留空 `backend/.env` 的 `AGENT_LIBRARY_PUBLIC_URL` 会自动启动 Cloudflare 隧道；已有固定入口时填入其 HTTPS 地址。[本机一键启动](tacc/TACC.md#本机一键启动)
 - **已部署的 ECS** 通过已安装的 `acs-api.service` 识别。先在服务器的 `backend/.env` 填好 TACC 能访问的论文库地址，如 `AGENT_LIBRARY_PUBLIC_URL=https://library.example.com`。用有权启动这些 systemd 服务的账号运行同一条命令，API 和 Worker 由 systemd 管理，Nginx 提供已发布的前端。新版本继续由推送到 `main` 触发自动部署。

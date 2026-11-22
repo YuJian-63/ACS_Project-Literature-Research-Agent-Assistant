@@ -25,7 +25,7 @@ class MigrationGraphTests(unittest.TestCase):
         script = ScriptDirectory.from_config(config)
         revisions = list(script.walk_revisions())
         self.assertEqual(len(revisions), len({revision.revision for revision in revisions}))
-        self.assertEqual(script.get_heads(), ["20261121_0009"])
+        self.assertEqual(script.get_heads(), ["20261122_0013"])
         self.assertEqual(script.get_revision("20261118_0006").path,
             str(BACKEND / "alembic/versions/20261118_0006_import_metadata.py"))
 
@@ -50,7 +50,7 @@ class MergeMigrationPostgresTests(unittest.TestCase):
         self.admin.dispose()
 
     def check_head(self, connection):
-        self.assertEqual(connection.scalar(text("SELECT version_num FROM alembic_version")), "20261121_0009")
+        self.assertEqual(connection.scalar(text("SELECT version_num FROM alembic_version")), "20261122_0013")
         self.assertIn("source_metadata", {column["name"] for column in inspect(connection).get_columns("paper_imports")})
         self.assertTrue(inspect(connection).has_table("agent_runs"))
         command.check(self.config)
