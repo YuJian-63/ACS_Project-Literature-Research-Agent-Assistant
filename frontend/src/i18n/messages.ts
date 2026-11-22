@@ -1,4 +1,7 @@
 export const english: Record<string, string> = {
+  "设置": "Settings",
+  "并发管理": "Concurrency management",
+  "配置研究任务并发上限": "Configure the concurrent research job limit",
   "研究评估": "Evaluation",
   "论文比较界面示例": "Comparison interface preview",
   "演示记录仅用于查看表格样式，不会提交研究或写入数据库。": "This sample record shows the comparison table without running research or writing to the database.",
@@ -26,7 +29,7 @@ export const english: Record<string, string> = {
   '共 {0} 步': '{0} steps',
   '暂无执行步骤记录': 'No execution steps recorded',
   '错误': 'Error',
-  "全站研究并发数": "Concurrent research jobs (all users)",
+  "研究并发数": "Concurrent research jobs",
   "全站并发已设为 {0}": "Research concurrency set to {0} for all users",
   "课程模型已停止或更换，请检查模型管理后重新提交研究": "The course service stopped or changed. Check Model management and resubmit.",
   "无法确认服务状态": "Service status unavailable",

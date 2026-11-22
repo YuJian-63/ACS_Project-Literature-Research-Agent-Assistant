@@ -57,13 +57,6 @@ export default function ModelsPage() {
     <div className="page-heading"><div><h1>{t('模型管理')}</h1><p>{t('配置研究模型与全站任务容量')}</p></div><Button onClick={reload}>{t('刷新')}</Button></div>
     {error && <ErrorNotice error={error} retry={reload} />}
     <div className="models-dashboard">
-      <section className="content-panel models-concurrency">
-        <div><h2 id="research-concurrency-label">{t('全站研究并发数')}</h2><p>{t('同时运行的研究任务上限，所有账号共享')}</p></div>
-        <Radio.Group aria-labelledby="research-concurrency-label" optionType="button"
-          options={[1, 2, 3, 4]} value={queue.data?.concurrency} disabled={!queue.data || savingLimit}
-          onChange={event => void changeLimit(event.target.value)} />
-        {queue.error && <ErrorNotice error={queue.error} retry={queue.reload} />}
-      </section>
       {data && <>
         <section className="content-panel models-service">
           <div className="models-panel-heading"><div><h2>{t('课程模型服务')}</h2><p>{t('在 TACC GPU 节点运行的模型')}</p></div><Tag color={data.state === 'ready' ? 'green' : undefined}>{t(labels[data.state])}</Tag></div>
@@ -91,13 +84,23 @@ export default function ModelsPage() {
             <div><h2>{t('指定服务地址')}</h2><p>{t('连接已在 TACC 上运行的模型服务')}</p></div>
             <label htmlFor="course-url">{t('默认服务地址')}</label>
             <Space.Compact className="models-url-field">
-              <Input id="course-url" placeholder="http://10.0.3.10:8000/v1" allowClear
-                value={draft ?? data.shared_url ?? ''} onChange={event => setDraft(event.target.value)} />
+              <Input id="course-url" autoComplete="off" placeholder="http://10.0.3.10:8000/v1" allowClear
+                value={draft ?? ''} onChange={event => setDraft(event.target.value)} />
               <Button disabled={draft === undefined} loading={busy} onClick={saveUrl}>{t('保存')}</Button>
             </Space.Compact>
           </section>
         </div>
       </>}
+    </div>
+    <div className="page-heading concurrency-heading"><div><h1>{t('并发管理')}</h1><p>{t('配置研究任务并发上限')}</p></div></div>
+    <div className="models-dashboard">
+      <section className="content-panel models-concurrency">
+        <div><h2 id="research-concurrency-label">{t('研究并发数')}</h2><p>{t('同时运行的研究任务上限，所有账号共享')}</p></div>
+        <Radio.Group aria-labelledby="research-concurrency-label" optionType="button"
+          options={[1, 2, 3, 4]} value={queue.data?.concurrency} disabled={!queue.data || savingLimit}
+          onChange={event => void changeLimit(event.target.value)} />
+        {queue.error && <ErrorNotice error={queue.error} retry={queue.reload} />}
+      </section>
     </div>
   </div>;
 }

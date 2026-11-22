@@ -114,7 +114,7 @@ export default function NewResearchPage() {
   <Spin spinning={loading}><Form layout="vertical" onFinish={submit}><div className="research-creation-layout"><div>
   <section className="content-panel research-question-panel"><h2>{t("你想了解什么？")}</h2><p>{t("直接描述你想解决的问题，或希望从论文中了解的内容。")}</p><Form.Item required label={t("研究问题")}><Input.TextArea value={question} onChange={event => setQuestion(event.target.value)} rows={5} maxLength={8000} showCount disabled={loading || submitting || Boolean(error)} placeholder={t("例如：这些论文的方法有什么不同？它们在什么条件下适用？")} /></Form.Item></section>
   <section className="content-panel research-paper-panel"><h2>{t('研究设置')}</h2>
-    <Form.Item label={t('模型来源')} extra={<Link to="/models">{t('模型管理')}</Link>}>
+    <Form.Item label={t('模型来源')} extra={<Link to="/models">{t('设置')}</Link>}>
       <Select aria-label={t('模型来源')} value={research.model_provider ?? 'bailian'} disabled={loading || submitting}
         options={[{value: 'bailian', label: t('百炼 API')}, {value: 'tacc', label: t('课程模型服务')}, {value: 'custom', label: t('指定服务地址')}]}
         onChange={model_provider => setResearch({...research, model_provider, endpoint_url: undefined})} /></Form.Item>
