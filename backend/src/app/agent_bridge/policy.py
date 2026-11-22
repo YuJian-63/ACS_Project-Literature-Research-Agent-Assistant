@@ -31,8 +31,7 @@ def build_research_manifest(task_id: UUID, dispatch_id: UUID, question: str,
         sources=[source.source_id for source in sources], allow_search=allow_search, max_papers=capacity,
         max_steps=min(settings.agent_max_steps, 32 + 8 * capacity),
         timeout_seconds=min(settings.agent_timeout_seconds, 300 + 60 * capacity),
-        max_output_tokens=min(settings.agent_output_tokens, settings.agent_context_tokens - 2048,
-            4096 + max(0, capacity - 1) * 768)),
+        max_output_tokens=min(settings.agent_output_tokens, settings.agent_context_tokens - 2048)),
         sources=sources, runtime=RuntimeOptions(context_window=settings.agent_context_tokens, research=research,
             persist=settings.agent_transport == "tcloud" and settings.agent_persist))
 
@@ -52,7 +51,7 @@ def build_manifest(task_id: UUID, dispatch_id: UUID, task_type: str, question: s
     count = len(sources)
     steps = min(settings.agent_max_steps, 32 + 8 * count)
     timeout = min(settings.agent_timeout_seconds, 300 + 60 * count)
-    output = min(settings.agent_output_tokens, settings.agent_context_tokens - 2048, 4096 + (count - 1) * 768)
+    output = min(settings.agent_output_tokens, settings.agent_context_tokens - 2048)
     return DispatchManifest(dispatch_id=dispatch_id, task=AgentTask(task_id=str(task_id),
         question=instruction, sources=[source.source_id for source in sources], allow_search=False,
         max_papers=count, max_steps=steps, timeout_seconds=timeout, max_output_tokens=output),

@@ -67,11 +67,11 @@ class AgentBridgeTests(unittest.TestCase):
         self.assertEqual(task.sources, self.manifest.task.sources)
         self.assertEqual(result.citations[0].page, 2)
 
-    def test_larger_review_gets_server_limits_and_never_exceeds_caps(self):
+    def test_larger_review_gets_more_steps_without_reducing_output_budget(self):
         papers = [self.source | {"paper_id": str(uuid4())} for _ in range(20)]
         review = build_manifest(uuid4(), uuid4(), "review", "比较论文", papers, self.settings)
         self.assertGreater(review.task.max_steps, self.manifest.task.max_steps)
-        self.assertGreater(review.task.max_output_tokens, self.manifest.task.max_output_tokens)
+        self.assertEqual(review.task.max_output_tokens, self.manifest.task.max_output_tokens)
         self.assertEqual(self.manifest.task.max_steps, 40)
         self.assertEqual(review.task.max_steps, 192)
         self.assertLessEqual(review.task.timeout_seconds, 1800)

@@ -54,7 +54,8 @@ def create_research_task(session, settings, request, papers, *, user_id, key, di
                 raise APIError(409, "MODEL_UNAVAILABLE", "课程模型尚未就绪，请在模型管理中查看状态")
             manifest.runtime.service_generation = service.generation
         manifest.runtime.context_window = min(manifest.runtime.context_window, 36864)
-        manifest.task.max_output_tokens = min(manifest.task.max_output_tokens, 4096)
+        manifest.task.max_output_tokens = min(manifest.task.max_output_tokens, 16384,
+            manifest.runtime.context_window - 2048)
     return _save_agent_task(session, settings, manifest, papers, user_id=user_id, key=key, digest=digest,
         task_type="review" if len(papers) > 1 else "qa", question=request.question,
         workflow_type="extended" if request.research and request.research.workflow == "extension" else "baseline", interface=interface)

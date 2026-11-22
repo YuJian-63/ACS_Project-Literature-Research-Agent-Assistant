@@ -44,7 +44,7 @@ class Settings(BaseSettings):
     agent_max_steps: int = Field(default=200, ge=1, le=200)
     agent_search_max_papers: int = Field(default=5, ge=1, le=20)
     agent_timeout_seconds: int = Field(default=1800, ge=60, le=1800)
-    agent_output_tokens: int = Field(default=8192, ge=1024, le=32768)
+    agent_output_tokens: int = Field(default=16384, ge=1024, le=32768)
     agent_context_tokens: int = Field(default=32000, ge=4096, le=1000000)
     agent_result_max_bytes: int = Field(default=16 * 1024 * 1024, ge=1024, le=64 * 1024 * 1024)
     agent_poll_seconds: float = Field(default=2, ge=0.1, le=30, allow_inf_nan=False)
