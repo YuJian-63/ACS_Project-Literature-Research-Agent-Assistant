@@ -1,7 +1,8 @@
+import type { TaskMetrics } from '../../api/taskMetrics';
 import { t, useLocale } from '../../i18n';
 import { useState, type ReactNode } from 'react';
 import { Button, Drawer, Empty, Tabs } from 'antd';
-import { ArrowRightOutlined, BookOutlined, FileTextOutlined, LinkOutlined, QuestionCircleOutlined, TableOutlined } from '@ant-design/icons';
+import { ArrowRightOutlined, BookOutlined, ExperimentOutlined, FileTextOutlined, LinkOutlined, QuestionCircleOutlined, TableOutlined } from '@ant-design/icons';
 import { useSearchParams } from 'react-router-dom';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
@@ -9,12 +10,13 @@ import remarkMath from 'remark-math';
 import rehypeKatex from 'rehype-katex';
 import type { AgentEvidence, AgentResult, AgentSource } from '../../api/agentResearch';
 import { readableEvidence } from './lib/evidenceText';
+import EvaluationPanel from './EvaluationPanel';
 import RunTimeline from './RunTimeline';
 import MathText from '../../shared/components/MathText';
 import { normalizeMathMarkdown } from '../../shared/lib/mathMarkdown';
 import './research.css';
 
-export default function ResultContent({ result, onReadEvidence, onReadSource }: { result: AgentResult; onReadEvidence?: (evidence: AgentEvidence) => void; onReadSource?: (source: AgentSource) => void }) {
+export default function ResultContent({ result, metrics, onReadEvidence, onReadSource }: { result: AgentResult; metrics?: TaskMetrics; onReadEvidence?: (evidence: AgentEvidence) => void; onReadSource?: (source: AgentSource) => void }) {
   useLocale();
   const [parameters] = useSearchParams();
   const [selectedKey, setSelectedKey] = useState<string | undefined>(() => parameters.get('citation') || undefined);
@@ -41,6 +43,7 @@ export default function ResultContent({ result, onReadEvidence, onReadSource }: 
   </section> });
   if (result.citations.length || result.sources.length) entries.push({ key: 'sources', label: t('引用与来源'), icon: <LinkOutlined aria-hidden />, children: <div className="research-sources-view">{result.citations.length > 0 && <><h2>{t('原文证据')}</h2>{result.citations.map((citation, index) => <button type="button" className="research-citation-card" key={citation.chunk_id} onClick={() => setSelectedKey(citation.chunk_id)}><span className="citation-chip">[C{index + 1}]</span><div><strong><MathText inline>{citation.title}</MathText></strong><MathText className="research-citation-excerpt">{readableEvidence(citation.source_text).text || citation.source_text || t('请打开 PDF 查看完整上下文。')}</MathText><small>{t('PDF 第 {0} 页 · 查看证据', [citation.page])} <ArrowRightOutlined aria-hidden /></small></div></button>)}</>}{result.sources.length > 0 && <><h2>{t('研究来源')}</h2><ul className="research-source-list">{result.sources.map(source => <li key={source.source_id}><BookOutlined aria-hidden /><span><button type="button" className="research-source-link" disabled={!onReadSource} onClick={() => onReadSource?.(source)}><MathText inline>{source.title}</MathText></button>{source.version && <small>{source.version}</small>}</span></li>)}</ul></>}</div> });
   entries.push({ key: 'execution', label: t('运行记录'), icon: <FileTextOutlined aria-hidden />, children: <RunTimeline result={result} /> });
+  entries.push({ key: 'evaluation', label: t('研究评估'), icon: <ExperimentOutlined aria-hidden />, children: <EvaluationPanel metrics={metrics} /> });
   return <>
     {entries.length ? <Tabs destroyOnHidden className="result-tabs research-result-tabs" activeKey={entries.some(entry => entry.key === activeTab) ? activeTab : entries[0].key} onChange={setActiveTab} items={entries} /> : <Empty description={t('本次尚未返回可展示的内容')} />}
     <Drawer open={Boolean(selected)} onClose={() => setSelectedKey(undefined)} title={t('证据与来源')} size="default" styles={{ wrapper: { width: 'min(560px, calc(100vw - 24px))' } }}>

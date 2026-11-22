@@ -1,0 +1,13 @@
+import assert from 'node:assert/strict';
+const { shouldPollResearch, formatMetric } = await import('../src/shared/lib/taskMetrics.ts').catch(() => ({}));
+assert.equal(typeof shouldPollResearch, 'function', 'asynchronous evaluation needs a shared polling policy');
+for (const status of ['pending', 'running']) assert.equal(shouldPollResearch({status:'succeeded',metrics:{evaluation:{status}}}), true);
+for (const status of ['not_requested', 'succeeded', 'failed', 'skipped']) assert.equal(shouldPollResearch({status:'succeeded',metrics:{evaluation:{status}}}), false);
+assert.equal(shouldPollResearch({status:'running'}), true);
+assert.equal(shouldPollResearch({status:'succeeded'}), false);
+assert.equal(formatMetric(null), '—');
+assert.equal(formatMetric(undefined), '—');
+assert.equal(formatMetric(0), '0');
+assert.equal(formatMetric(0, '%', 100), '0%');
+assert.equal(formatMetric(0.74, '%', 100), '74%');
+console.log('PASS: independent evaluation polling, legacy responses, missing values and zero/cache units');

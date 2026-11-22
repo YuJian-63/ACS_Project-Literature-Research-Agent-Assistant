@@ -1,3 +1,4 @@
+import { shouldPollResearch } from '../../shared/lib/taskMetrics';
 import { t, useLocale } from '../../i18n';
 import { useEffect, useState } from 'react';
 import { Alert, Button, Empty, Skeleton } from 'antd';
@@ -46,7 +47,7 @@ export default function ResultPage() {
         const next = await agentResearch.record(taskId, pending.signal);
         if (pending.signal.aborted) return;
         setRecord(next); setError(undefined); setCheckedAt(Date.now());
-        poll = next.status === 'queued' || next.status === 'running';
+        poll = shouldPollResearch(next);
       } catch (failure) { if (!pending.signal.aborted && !isCanceled(failure)) setError(asApiError(failure)); }
       finally { if (!pending.signal.aborted) { setLoading(false); if (poll) timer = setTimeout(() => void load(), 30_000); } }
     }
@@ -59,7 +60,7 @@ export default function ResultPage() {
     {record?.question && <div className="result-question"><span>{t('研究问题')}</span><MathText>{record.question}</MathText></div>}
     {(record?.status === 'queued' || record?.status === 'running') && <ResearchProgress queued={record.status === 'queued'} disconnected={Boolean(error)} checkedAt={checkedAt} />}
     {record?.status === 'failed' && <Alert type="error" showIcon title={t('研究未能完成')} description={record.error ? t(record.error.message) : t('请稍后重新创建研究。')} />}
-    {record?.result && <ResultContent result={record.result}
+    {record?.result && <ResultContent key={taskId} result={record.result} metrics={record.metrics}
       onReadEvidence={evidence => readSource({ source: evidence, page: evidence.page, citationKey: evidence.chunk_id })}
       onReadSource={source => readSource({ source })} />}
     {readingTarget && <SourceImportDialog key={taskId + ':' + readingTarget.source.source_id + ':' + (readingTarget.citationKey || '')}

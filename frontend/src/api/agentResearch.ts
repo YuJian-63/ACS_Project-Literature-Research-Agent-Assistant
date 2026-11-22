@@ -1,3 +1,4 @@
+import type { TaskMetrics } from './taskMetrics';
 import type { Page, TaskStatus } from './types';
 import { request } from './client';
 export interface ResearchOptions {
@@ -15,6 +16,7 @@ export interface AgentEvidence extends AgentSource { chunk_id: string; page: num
 export interface AgentResult { task_id: string; question: string; answer: string; comparison_table: string; citations: AgentEvidence[]; unresolved: string[]; stop_reason: string; usage: { agent_steps: number; model_calls: number; tool_calls: number; input_tokens: number | null; output_tokens: number | null; total_tokens: number | null; token_usage_complete: boolean; elapsed_seconds: number }; trace: unknown[]; errors: { stage: string; type: string }[]; configuration: Record<string, unknown>; sources: AgentSource[] }
 
 export interface AgentResearchRecord {
+  metrics?: TaskMetrics;
   task_id: string;
   status: 'queued' | 'running' | 'succeeded' | 'failed';
   question: string;

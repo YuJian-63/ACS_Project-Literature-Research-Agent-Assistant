@@ -1,4 +1,5 @@
 export const english: Record<string, string> = {
+  "研究评估": "Evaluation",
   "论文比较界面示例": "Comparison interface preview",
   "演示记录仅用于查看表格样式，不会提交研究或写入数据库。": "This sample record shows the comparison table without running research or writing to the database.",
   "查看示例": "View preview",
