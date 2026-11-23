@@ -69,7 +69,7 @@ Extension 的 `retrieve(source, query, top_k=3)` 接受单个论文标识或非�
 
 结果写入 `runs/extension/`。启用 `--persist` 时，Neon 存储键为 `extension/<task_id>`，结果 JSON 保留原任务 ID。Trace 中 `retrieval_index` 记录建索引或复用，`embedding` 按 `document` 和 `query` 分别记录调用耗时与实际输入 token；`usage` 延续 Baseline 的聊天模型统计。
 
-从仓库根目录运行以下命令，可串行对比 `agent/examples/*.json` 下的全部示例。脚本接收一次网页账号和密码，运行 discovery 的 Baseline 和 Extension 时分别自动登录论文库。
+从仓库根目录运行以下命令，可串行对比 `agent/examples/*.json` 下的全部示例。脚本接收一次网页账号和密码，运行 discovery 和 library-qa 时自动登录论文库。运行 library-qa 前，先将 SkillOpt 原文上传至该账号的论文库。
 
 ```bash
 ./agent/run.sh '你的用户名' '你的密码'

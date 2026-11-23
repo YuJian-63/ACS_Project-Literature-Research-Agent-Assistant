@@ -19,8 +19,10 @@ for example in examples/*.json; do
     task=${example##*/}
     task=${task%.json}
     set -- --task "$example"
-    if [ "$task" = discovery ] && [ -n "${AGENT_LIBRARY_USERNAME:-}" ]; then
-        set -- "$@" --library-login
+    if [ -n "${AGENT_LIBRARY_USERNAME:-}" ]; then
+        case "$task" in
+            discovery|library-qa) set -- "$@" --library-login ;;
+        esac
     fi
     for workflow in baseline extension; do
         printf '\nRunning %s/%s\n' "$workflow" "$task"
