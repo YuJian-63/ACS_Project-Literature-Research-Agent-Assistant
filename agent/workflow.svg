@@ -1,114 +1,204 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="1152" height="758" viewBox="0 0 1152 758" role="img" aria-labelledby="title description">
-  <title id="title">Literature research agent workflow</title>
-  <desc id="description">Baseline and Extension share a ReAct loop. Paper tools return observations for the next turn. Extension adds passage retrieval and optional planning and reflection. Context pressure leads to one tool-free answer attempt. Any valid draft can proceed to reflection. A step or time limit ends the run. All paths converge on citation checks and result assembly.</desc>
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="1536" height="1024" viewBox="0 0 1536 1024" role="img" aria-labelledby="title description">
+  <title id="title">Literature research agent workflow — Baseline and Extensions</title>
+  <desc id="description">In both workflows the agent and tools nodes form a ReAct loop. The five shared tools are search_papers, search_library, open_paper, read_paper and summarize_paper. Extension adds retrieve, backed by a per-paper local vector index. An optional planner runs before the loop. An optional reflection node outside the loop receives any valid draft, including a context-pressure draft. It may call read_paper or retrieve once before a tool-free revision. All exits produce a TaskResult.</desc>
   <defs>
-    <marker id="arrow" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto">
-      <path d="M0 0 8 4 0 8Z" fill="#53657b"/>
+    <linearGradient id="frame-fill" x2="1" y2="1" gradientUnits="objectBoundingBox">
+      <stop stop-color="#fbfcfd"/><stop offset="1" stop-color="#f1f5f8"/>
+    </linearGradient>
+    <linearGradient id="card-fill" x2="1" y2="1" gradientUnits="objectBoundingBox">
+      <stop stop-color="#fafbfc"/><stop offset="1" stop-color="#e9edf1"/>
+    </linearGradient>
+    <linearGradient id="blue-fill" x2="1" y2="1" gradientUnits="objectBoundingBox">
+      <stop stop-color="#f3faff"/><stop offset="1" stop-color="#dbedff"/>
+    </linearGradient>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6.8" markerHeight="6.8" orient="auto">
+      <path d="M0 0 10 5 0 10Z" fill="#192a3b"/>
     </marker>
-    <marker id="extension-arrow" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto">
-      <path d="M0 0 8 4 0 8Z" fill="#08756d"/>
+    <marker id="arrow-blue" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6.8" markerHeight="6.8" orient="auto">
+      <path d="M0 0 10 5 0 10Z" fill="#0965d2"/>
+    </marker>
+    <marker id="arrow-muted" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+      <path d="M0 0 10 5 0 10Z" fill="#53687c"/>
     </marker>
     <style>
-      text { font-family: "Helvetica Neue", Helvetica, Arial, sans-serif; fill: #1d3046 }
-      .heading { font-size: 32px; font-weight: 700 }
-      .node { font-size: 23px; font-weight: 700 }
-      .body { font-size: 18px }
-      .edge-label { font-size: 16px; fill: #45596f }
-      .key { font-size: 16px; font-weight: 600 }
-      .shared { fill: #f6f8fb; stroke: #6d8094; stroke-width: 1.5 }
-      .extension { fill: #ecf6f3; stroke: #08756d; stroke-width: 1.6; stroke-dasharray: 7 4 }
-      .ext-title { fill: #075e59 }
-      .flow, .ext-flow { fill: none; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round }
-      .flow { stroke: #53657b; marker-end: url(#arrow) }
-      .ext-flow { stroke: #08756d; stroke-dasharray: 7 4; marker-end: url(#extension-arrow) }
+      text { font-family: "Helvetica Neue", Helvetica, Arial, sans-serif; fill: #10172c }
+      .section { font-size: 47px; font-weight: 700; letter-spacing: -1px }
+      .heading { font-size: 30px; font-weight: 700; letter-spacing: -.5px }
+      .node { font-size: 29px; font-weight: 700 }
+      .subhead { font-size: 21px; font-weight: 600 }
+      .toolname { font-size: 22px; font-weight: 600 }
+      .detail { font-size: 18px; fill: #283c51 }
+      .annotation { font-size: 16px; fill: #42576a }
+      .blue { fill: #084eac }
+      .frame { fill: url(#frame-fill); stroke: #16283d; stroke-width: 2.5 }
+      .toolbox { fill: #e9eef1; stroke: #7d8f9d; stroke-width: 1.6 }
+      .card { fill: url(#card-fill); stroke: #19283b; stroke-width: 1.8 }
+      .extra { fill: url(#blue-fill); stroke: #1470df; stroke-width: 1.9 }
+      .flow, .access, .bypass { fill: none; stroke-linecap: round; stroke-linejoin: round }
+      .flow { stroke: #192a3b; stroke-width: 2.5; marker-end: url(#arrow) }
+      .access { stroke: #0965d2; stroke-width: 2.3; marker-end: url(#arrow-blue) }
+      .bypass { stroke: #53687c; stroke-width: 1.8; stroke-dasharray: 7 5; marker-end: url(#arrow-muted) }
     </style>
+
+    <!-- Line icons echo the document, processor and index symbols in the proposal. -->
+    <g id="sheet" stroke="#192a48" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M7 2h23l9 9v34H7z" fill="white"/>
+      <path d="M30 2v9h9" fill="#dfedff"/>
+      <path d="M13 18h16m-16 7h20m-20 7h15" fill="none" stroke="#1872df"/>
+    </g>
+    <g id="sheets" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M4 12H1v36h27v-3M9 7H5v37h27v-3" stroke="#678db6" stroke-width="1.9" fill="#e9f4ff"/>
+      <use xlink:href="#sheet" x="4"/>
+    </g>
+    <g id="processor" fill="none" stroke="#1a3049" stroke-width="2.35" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M15 8V2m9 6V2m9 6V2M15 40v6m9-6v6m9-6v6M8 15H2m6 9H2m6 9H2m38-18h6m-6 9h6m-6 9h6"/>
+      <rect x="8" y="8" width="32" height="32" rx="6" fill="#f5faff"/>
+      <rect x="16" y="16" width="16" height="16" rx="2" fill="#e0eeff"/>
+    </g>
+    <g id="search-icon" stroke-linecap="round" fill="none">
+      <path d="M26 8h12v25h-6" fill="#e9f4ff" stroke="#8eb5e2" stroke-width="1.5"/>
+      <path d="M29 14h6m-5 5h5" stroke="#72a9e2" stroke-width="1.6"/>
+      <circle cx="15" cy="17" r="11" fill="#fff" stroke="#243c56" stroke-width="2.8"/>
+      <path d="m23 25 12 12" stroke="#243c56" stroke-width="4"/>
+    </g>
+    <g id="pdf-icon" stroke-linejoin="round">
+      <path d="M7 2h17l9 9v27H7z" stroke="#223c52" stroke-width="2" fill="#fff"/>
+      <path d="M24 2v9h9" stroke="#223c52" stroke-width="1.8" fill="#e5eef7"/>
+      <rect x="13" y="22" width="27" height="13" rx="2" fill="#ce493c"/>
+      <text x="26.5" y="31.5" text-anchor="middle" style="font: bold 10px Helvetica, Arial, sans-serif; fill:white">PDF</text>
+    </g>
+    <g id="checklist" fill="none" stroke="#175ead" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+      <rect x="5" y="3" width="31" height="39" rx="3" fill="#f8fcff"/>
+      <path d="m11 13 2 2 4-5m-6 13 2 2 4-5m-6 13 2 2 4-5m4-17h8m-8 10h8m-8 10h8"/>
+    </g>
+    <g id="review-icon" fill="none" stroke="#1155a8" stroke-linecap="round" stroke-linejoin="round">
+      <circle cx="18" cy="18" r="14" stroke-width="2.7" fill="#f9fcff"/>
+      <path d="m29 29 11 12" stroke-width="4"/>
+      <path d="m12 18 4 4 8-9" stroke-width="2.5"/>
+    </g>
+    <g id="passages" fill="#fff" stroke="#2c78ce" stroke-width="2.1" stroke-linejoin="round">
+      <rect x="3" y="2" width="29" height="22" rx="3"/><rect x="8" y="9" width="29" height="22" rx="3"/>
+      <rect x="13" y="16" width="29" height="22" rx="3" fill="#f7fbff"/>
+      <path d="M18 23h19m-19 7h14" fill="none" stroke-linecap="round"/>
+    </g>
+    <g id="index-icon" fill="#e6f3ff" stroke="#1657a0" stroke-width="2.1">
+      <path d="M4 10v26c0 9 36 9 36 0V10"/>
+      <ellipse cx="22" cy="10" rx="18" ry="7" fill="#c7e2ff"/>
+      <path d="M4 19c0 9 36 9 36 0M4 28c0 9 36 9 36 0" fill="none"/>
+    </g>
+
+    <!-- Both tool nodes expose the same five shared tools. No tool-to-tool edges. -->
+    <g id="shared-tools">
+      <rect class="card" width="254" height="127" rx="7"/>
+      <use xlink:href="#search-icon" x="12" y="9"/>
+      <text class="subhead" x="62" y="37">Find sources</text>
+      <text class="toolname" x="18" y="78">search_papers</text>
+      <text class="toolname" x="18" y="106">search_library</text>
+      <rect class="card" x="268" width="287" height="127" rx="7"/>
+      <use xlink:href="#pdf-icon" x="278" y="7"/>
+      <text class="subhead" x="332" y="37">Read PDF evidence</text>
+      <text class="toolname" x="286" y="67">open_paper</text>
+      <text class="toolname" x="286" y="92">read_paper</text>
+      <text class="toolname" x="286" y="117">summarize_paper</text>
+    </g>
   </defs>
-  <rect width="1152" height="758" fill="#fff"/>
-  <text class="heading" x="32" y="45">Literature research agent workflow</text>
-  <g class="key">
-    <rect class="shared" x="732" y="28" width="23" height="15" rx="3"/>
-    <text x="765" y="42">Baseline + Extension</text>
-    <rect class="extension" x="945" y="28" width="23" height="15" rx="3"/>
-    <text x="978" y="42">Extension only</text>
-  </g>
-  <path d="M32 64H1120" stroke="#d6dee5"/>
 
-  <!-- Shared control flow. The tools return to context preparation on every turn. -->
-  <path class="flow" d="M650 170V220"/>
-  <path class="flow" d="M650 320V386"/>
-  <text class="edge-label" x="665" y="360">Within budget</text>
-  <path class="flow" d="M500 428H413"/>
-  <text class="edge-label" x="435" y="417">Calls</text>
-  <path class="flow" d="M410 279H497"/>
-  <text class="edge-label" x="426" y="267">Results</text>
-  <path class="flow" d="M800 269H851"/>
-  <path class="flow" d="M986 469V647"/>
-  <path class="flow" d="M650 467V647"/>
-  <path class="flow" d="M854 369H829V500H653"/>
-  <text class="edge-label" x="674" y="490">Pressure draft</text>
-  <text class="edge-label" x="665" y="554">Valid draft</text>
+  <rect width="1536" height="1024" fill="#fff"/>
+  <path d="M32 453h1472" stroke="#8baee1" stroke-width="1.5"/>
+  <g id="baseline">
+    <text class="section" x="32" y="61">Baseline</text>
+    <rect class="frame" x="465" y="34" width="620" height="395" rx="10"/>
+    <text class="heading" x="775" y="76" text-anchor="middle">ReAct Agent</text>
+    <rect class="toolbox" x="483" y="218" width="584" height="191" rx="8"/>
+    <text class="heading" x="501" y="251">tools</text>
+    <use xlink:href="#shared-tools" x="498" y="265"/>
 
-  <!-- The two optional nodes each have a direct shared path alongside them. -->
-  <path class="ext-flow" d="M500 110H413"/>
-  <path class="ext-flow" d="M410 151H453Q462 151 462 160V228Q462 237 471 237H497"/>
-  <path class="ext-flow" d="M650 534H413"/>
-  <path class="ext-flow" d="M221 611V647"/>
+    <path class="flow" d="M359 136H607"/>
+    <path class="flow" d="M940 136h269"/>
+    <path class="flow" d="M751 176v39"/><path class="flow" d="M790 217v-39"/>
+    <text class="annotation" x="736" y="203" text-anchor="end">tool calls</text>
+    <text class="annotation" x="807" y="203">observations</text>
 
-  <g id="task">
-    <rect class="shared" x="500" y="87" width="300" height="83" rx="8"/>
-    <text class="node" x="519" y="120">Research task</text>
-    <text class="body" x="519" y="148">Question, sources and limits.</text>
+    <rect class="card" x="32" y="89" width="326" height="96" rx="8"/>
+    <use xlink:href="#sheets" x="54" y="113"/>
+    <text class="node" x="118" y="131">Task</text>
+    <text class="detail" x="118" y="158">Question, sources &amp; limits</text>
+
+    <rect class="card" x="610" y="97" width="330" height="79" rx="8"/>
+    <use xlink:href="#processor" x="644" y="111"/>
+    <text class="node" x="712" y="133">agent</text>
+    <text class="detail" x="712" y="158">Choose tools or answer</text>
+
+    <rect class="card" x="1212" y="89" width="292" height="96" rx="8"/>
+    <use xlink:href="#sheet" x="1231" y="111"/>
+    <text class="node" x="1288" y="131">TaskResult</text>
+    <text class="detail" x="1288" y="158">Answer, citations &amp; trace</text>
   </g>
-  <g id="planner">
-    <rect class="extension" x="32" y="87" width="378" height="83" rx="8"/>
-    <text class="node ext-title" x="51" y="120">Planner</text>
-    <text class="body" x="51" y="148">If enabled, add 0–3 planning notes.</text>
-  </g>
-  <g id="context">
-    <rect class="shared" x="500" y="223" width="300" height="97" rx="8"/>
-    <text class="node" x="519" y="255">Prepare next turn</text>
-    <text class="body" x="519" y="282">Check step and time limits.</text>
-    <text class="body" x="519" y="304">Prepare the model context.</text>
-  </g>
-  <g id="budget-exits">
-    <rect class="shared" x="854" y="223" width="266" height="246" rx="8"/>
-    <text class="node" x="873" y="255">Budget exits</text>
-    <text class="body" x="873" y="288" font-weight="700">Context pressure</text>
-    <text class="body" x="873" y="312">If input + output allowance</text>
-    <text class="body" x="873" y="334">reaches the threshold (90%</text>
-    <text class="body" x="873" y="356">of the window by default),</text>
-    <text class="body" x="873" y="378">try one answer without tools.</text>
-    <path d="M873 395H1101" stroke="#c7d2dd"/>
-    <text class="body" x="873" y="421" font-weight="700">Step or time limit</text>
-    <text class="body" x="873" y="446">Stop and record the reason.</text>
-  </g>
-  <g id="agent">
-    <rect x="500" y="389" width="300" height="78" rx="8" fill="#243a51"/>
-    <text class="node" x="519" y="419" style="fill:#fff">ReAct agent</text>
-    <text class="body" x="519" y="447" style="fill:#fff">Request tools or submit a draft.</text>
-  </g>
-  <g id="tools">
-    <rect class="shared" x="32" y="203" width="378" height="264" rx="8"/>
-    <text class="node" x="51" y="235">Paper tools</text>
-    <text class="body" x="51" y="263">Run calls in the order requested.</text>
-    <path d="M51 279H391" stroke="#c7d2dd"/>
-    <text class="body" x="51" y="305">Find candidates when search is enabled.</text>
-    <text class="body" x="51" y="330">Open a PDF, read pages or summarize.</text>
-    <rect class="extension" x="46" y="350" width="350" height="103" rx="6"/>
-    <text class="node ext-title" x="62" y="380">retrieve</text>
-    <text class="body" x="62" y="407">Build or reuse local passage vectors.</text>
-    <text class="body" x="62" y="431">Rank chunks across selected papers.</text>
-  </g>
-  <g id="reflection">
-    <rect class="extension" x="32" y="495" width="378" height="116" rx="8"/>
-    <text class="node ext-title" x="51" y="526">Reflection</text>
-    <text class="body" x="51" y="553">If enabled, accept or revise the draft.</text>
-    <text class="body" x="51" y="576">The reviewer can read or retrieve once,</text>
-    <text class="body" x="51" y="599">then revise without tools.</text>
-  </g>
-  <g id="result">
-    <rect class="shared" x="32" y="650" width="1088" height="82" rx="8"/>
-    <text class="node" x="51" y="682">Validate citations and assemble the result</text>
-    <text class="body" x="51" y="710">Resolve chunk IDs to PDF evidence. Return the answer, comparison table, citations, open issues, stop reason, usage and trace.</text>
+
+  <g id="extensions">
+    <text class="section" x="32" y="514">Extensions</text>
+    <rect class="frame" x="435" y="492" width="620" height="495" rx="10"/>
+    <text class="heading" x="745" y="530" text-anchor="middle">ReAct Agent</text>
+    <rect class="toolbox" x="453" y="695" width="584" height="273" rx="8"/>
+    <text class="heading" x="471" y="730">tools</text>
+    <use xlink:href="#shared-tools" x="468" y="743"/>
+
+    <!-- Planning and review are graph nodes outside the main agent/tools loop. -->
+    <path class="flow" d="M207 604h37"/>
+    <path class="flow" d="M410 604h182"/>
+    <path class="bypass" d="M226 603v-53h411v8"/>
+    <text class="annotation" x="347" y="541" text-anchor="middle">planner off</text>
+    <path class="flow" d="M885 604h202"/>
+    <text class="annotation" x="976" y="593" text-anchor="middle">valid draft</text>
+    <text class="annotation" x="972" y="628" text-anchor="middle">incl. pressure drafts</text>
+    <path class="flow" d="M1299 604h40"/>
+    <path class="bypass" d="M918 604v-55h501v9"/>
+    <text class="annotation" x="1161" y="540" text-anchor="middle">reflection off or no draft</text>
+    <path class="flow" d="M722 647v45"/><path class="flow" d="M761 694v-44"/>
+    <text class="annotation" x="707" y="677" text-anchor="end">tool calls</text>
+    <text class="annotation" x="778" y="677">observations</text>
+
+    <rect class="card" x="27" y="561" width="180" height="86" rx="8"/>
+    <use xlink:href="#sheets" transform="translate(40 571) scale(.78)"/>
+    <text class="node" x="87" y="600">Task</text>
+    <text class="detail" x="42" y="629">Question &amp; sources</text>
+
+    <rect class="extra" x="247" y="561" width="163" height="86" rx="8"/>
+    <use xlink:href="#checklist" transform="translate(256 571) scale(.82)"/>
+    <text class="node blue" x="297" y="601">planner</text>
+    <text class="detail blue" x="264" y="629">Suggest a plan</text>
+
+    <rect class="card" x="595" y="561" width="290" height="86" rx="8"/>
+    <use xlink:href="#processor" x="612" y="581"/>
+    <text class="node" x="674" y="600">agent</text>
+    <text class="detail" x="674" y="626">Choose tools or answer</text>
+
+    <rect class="extra" x="1090" y="561" width="209" height="86" rx="8"/>
+    <use xlink:href="#review-icon" transform="translate(1102 572) scale(.87)"/>
+    <text class="node blue" x="1148" y="600">reflection</text>
+    <text class="detail blue" x="1110" y="628">Accept or revise draft</text>
+
+    <rect class="card" x="1342" y="561" width="167" height="86" rx="8"/>
+    <use xlink:href="#sheet" transform="translate(1350 574) scale(.65)"/>
+    <text class="subhead" x="1383" y="598">TaskResult</text>
+    <text class="detail" x="1355" y="629">Cited answer</text>
+
+    <!-- Review binds only these two handlers and can make one evidence call. -->
+    <path class="access" d="M1183 648v88"/><path class="access" d="M1204 737v-86"/>
+    <text class="annotation blue" x="1219" y="696">at most one call</text>
+    <rect class="extra" x="1090" y="739" width="382" height="76" rx="8"/>
+    <use xlink:href="#sheet" transform="translate(1107 754) scale(.9)"/>
+    <text class="toolname blue" x="1160" y="770">read_paper or retrieve</text>
+    <text class="detail blue" x="1160" y="796">Then revise without tools</text>
+
+    <rect class="extra" x="468" y="887" width="555" height="65" rx="7"/>
+    <use xlink:href="#passages" x="483" y="899"/>
+    <text class="node blue" x="537" y="927">retrieve</text>
+    <text class="detail blue" x="662" y="926">Rank chunks across selected papers</text>
+    <path class="access" d="M1024 912h96"/><path class="access" d="M1122 929h-96"/>
+    <rect class="extra" x="1123" y="875" width="349" height="87" rx="8"/>
+    <use xlink:href="#index-icon" x="1141" y="894"/>
+    <text class="subhead blue" x="1203" y="913">Local vector index</text>
+    <text class="detail blue" x="1203" y="939">Build or reuse per-paper vectors</text>
   </g>
 </svg>
