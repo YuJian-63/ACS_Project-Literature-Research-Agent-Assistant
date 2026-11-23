@@ -1,8 +1,32 @@
 # Agent
 
-- Agent workflow
-- Ablation test
-- How to run
+- [Standalone quick start](#standalone-quick-start)
+- [Agent workflow](#agent-workflow)
+- [Ablation test](#ablation-test)
+
+## Standalone quick start
+
+Install uv and Python 3.12. From the repository root, enter the Agent directory and set it up once.
+
+```sh
+cd agent
+uv sync --frozen
+cp -n .env.example .env
+```
+
+Set `BAILIAN_API_KEY` in `.env` and check `MODEL_BASE_URL` and `MODEL_NAME` for your account. Choose one command below. Both use the preselected *Attention Is All You Need* paper and run without a backend or database.
+
+```sh
+# Baseline
+uv run python baseline.py --task examples/qa.json
+
+# Retrieval Extension, with optional planning and reflection enabled
+uv run python extension.py --task examples/qa.json --planner --reflection
+```
+
+Use `examples/summary.json` for a summary of the same paper. For an arXiv search, set `TAVILY_API_KEY` and use `examples/review.json` or `examples/discovery.json`. The Extension uses the same Bailian key for embeddings (default model `text-embedding-v4`).
+
+Results are saved under `agent/runs/baseline/` or `agent/runs/extension/`. To also save an individual run to Neon, set `DATABASE_URL` and pass `--persist`.
 
 ## Agent workflow
 
@@ -51,20 +75,6 @@ The five test cases in `agent/examples/` each run under all five configurations,
 | `full` | On | On | On |
 
 ## How to run the tests
-
-**Set up the standalone agent.** Install uv and Python 3.12. For a first-time setup, copy `agent/.env.example` to `agent/.env`. If you already have an `agent/.env` file, use it.
-
-| Service | Settings in `agent/.env` | Purpose |
-| --- | --- | --- |
-| Bailian | Set `BAILIAN_API_KEY` and check that `MODEL_BASE_URL` and `MODEL_NAME` match your account. | Runs the research model. RAG uses the same key for embeddings and defaults to `text-embedding-v4`. |
-| Tavily | `TAVILY_API_KEY` | Searches arXiv for papers. |
-| Neon | `DATABASE_URL` | Stores papers and results when you add `--persist` to an individual run. |
-
-**Run the agent on one paper.** The QA example uses a preselected paper and requires only the Bailian settings. Run it from the repository root.
-
-```sh
-uv run --directory agent --frozen python baseline.py --task examples/qa.json
-```
 
 **Run the full ablation test.** Some of the 25 runs use your paper library. Follow the root README to start the backend, then sign in with a verified account. Import or upload the SkillOpt paper and check that a library search for `SkillOpt` finds it. From the repository root, pass your library username and password as the two arguments.
 
