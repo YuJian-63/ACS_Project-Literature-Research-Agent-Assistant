@@ -8,7 +8,7 @@ HKUST CSIT6000V Advanced AI Computing and Systems 课程项目。用户在网页
 | --- | --- |
 | [frontend/](frontend/README.md) | 浏览器里的研究工作台。上传或导入论文、提交问题、查看结果和引用原文。 |
 | [backend/](backend/README.md) | API 管理账号、论文库和任务。研究 Worker 向 TACC 提交作业，取回结果并写入 PostgreSQL。PDF 原件保存在后端文件目录。 |
-| [agent/](agent/README.md) | 研究逻辑。Baseline 和 Retrieval Extension 在这里实现论文检索、PDF 阅读、模型调用和带引用的回答。 |
+| [agent/](agent/README.md) | [研究工作流与流程图](agent/README.md#agent-workflow)、[任务与结果接口](agent/README.md#任务与结果接口)、[消融实验复现](agent/README.md#消融实验复现)。 |
 | [tacc/](tacc/README.md) | 课程集群上的作业入口、环境配置和探测脚本。CPU 节点通过 [research/run_job.py](tacc/research/run_job.py) 读取任务清单并调用 Agent。 |
 | [model-server/](model-server/README.md) | 单独提交到 TACC GPU 节点的课程 Qwen 模型服务。当前已验收的研究流程使用百炼 API。 |
 | [scripts/](docs/service_launch.md#按系统使用脚本) | Windows、Linux、macOS 初始化与启动脚本；另保留 TACC 联调和 ECS 服务入口。 |

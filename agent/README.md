@@ -1,110 +1,162 @@
-# Agent Baseline 与 Retrieval Extension
+# 论文研究 Agent
 
-本地 Python 3.12 + uv，模型使用百炼 `qwen3.8-27b`，与课程 TACC 包的模型标识对齐。
+Agent 根据研究问题选择论文、读取 PDF，并把答案中的论断关联到可回看的原文片段。Baseline 实现 LangGraph 的 ReAct 循环。Retrieval Extension 复用同一循环，增加段落检索工具，并可独立开启 Planner 和 Reflection。两者接受相同的任务，输出相同的结果结构。
+
+[工作流](#agent-workflow) · [本地运行](#本地运行) · [任务与结果接口](#任务与结果接口) · [消融实验复现](#消融实验复现) · [报告指标](#从输出填写报告)
+
+## Agent workflow
+
+![Baseline 研究循环与 Extension 的规划、段落检索和草稿核对路径](workflow.png)
+
+实线是两版共用的执行路径，虚线标出 Extension 的介入位置。报告排版可直接使用矢量图。[可编辑的 SVG 原图](workflow.svg)
+
+### Baseline 如何从问题走到引用
+
+1. **确定来源。** Agent 从预选论文出发。若任务允许搜索，它也可从 arXiv 或已授权的用户论文库发现候选。搜索返回的 `source` 可交给任何阅读工具。
+2. **收集证据。** 主模型根据问题和已有工具结果决定下一步。它可以先浏览目录选页，也可以直接精读或请求分块摘要。工具节点按请求顺序执行，用 PyMuPDF 从 PDF 提取带页码的原文块，将观察结果交回主模型。只要还有预算，模型可据此继续阅读。
+3. **提交答案。** 模型交付正文、可选比较表和未解决项。程序从本次任务登记的原文中匹配正文与表格引用的 `chunk_id`，返回对应片段、论文版本和 PDF 页码。论断是否得到该片段支持，还需对照原文判断。[研究循环与引用校验](baseline.py) · [PDF 分页与分块](apis/papers.py)
+
+### Extension 在何时介入
+
+| 模块 | 介入时机与行为 | 在 trace 中核实 |
+|---|---|---|
+| Planner | 开启 `--planner` 后，研究开始前做一次无工具调用。有效的 1–3 行建议附在原任务后。空计划、无效输出或规划请求失败时，主循环仍可处理原题。整任务超时则停止。 | `kind=planner` 的 `outcome` 与 `plan` 区分实际采用的建议和空计划。 |
+| RAG | 主模型可按子问题调用 `retrieve`。首次检索时逐篇建立或复用本地索引，每次为查询生成一个向量，按余弦相似度从所选论文中合并取前 `top_k` 块。同一次跨篇检索可以全部命中同一篇论文。 | `kind=tool, name=retrieve` 给出查询、论文和命中片段。`retrieval_index` 区分 `build` / `reuse`，`embedding` 区分文档和查询开销。 |
+| Reflection | 开启 `--reflection` 后，仅在主模型自然提交可解析草稿时，对照原问题、草稿和所引原文进行核查。可接受、直接修订，或用一次 `read_paper` / `retrieve` 补证后无工具修订。核查失败时保留草稿进入公共校验，整任务超时记为 `time_limit`。 | `kind=reflection` 的 `outcome` 给出处理结果。补证后的模型调用标为 `purpose=reflection_revision`。 |
+
+Planner 和 Reflection 默认均关闭。是否启用见结果的 `configuration`，实际执行路径见 trace。[Extension 实现](extension.py) · [索引与排序](retrieval.py)
+
+**以预选论文 QA 为例。** 在首批消融（`20261123T004926Z-t2jtjsvv`）中，Baseline 先打开《Attention Is All You Need》的目录，再分别读第 4、5 页。RAG 直接按问题检索，第一个命中就是第 4 页解释缩放因子的原文。随后它又请求第 4 页，工具返回 `already_read`。两份答案最终都引用了 `arxiv:1706.03762v7:p4:c1`。在同批次的 `qa/baseline/` 和 `qa/rag/` 下可核对工具顺序与最终引用。[该题输入](examples/qa.json)
+
+### 上下文压力与停止
+
+主模型每轮先估算输入（含工具定义），加上本次预留的输出额度，与默认 32,000 token 的窗口比较。`full` 保留完整历史。`compact` 达到阈值时先精简重复工具回包，保留原始 trace。准备后的请求仍达到阈值（默认 90%）时，两版均转入一次无工具作答，再直接校验引用。若请求已超窗，程序按无工具请求重估，必要时优先装入最近可容纳的完整原文块和摘要。最小请求仍超窗则返回 `context_limit`。[上下文策略](context.py)
+
+trace 中的 `kind=context, action=finalize` 表示触发收尾，`purpose=finalize` 表示实际发起模型调用。引用校验决定最终状态，压力收尾也可能得到 `completed` 或 `partial`。轮数用尽或任务超时则直接记录 `step_limit` / `time_limit`，保留已有 trace。
+
+## 本地运行
+
+准备 uv 和 Python 3.12，从仓库根目录执行以下命令。uv 按锁文件安装依赖，首次配置时复制环境变量模板。[依赖锁文件](uv.lock)
 
 ```bash
 cd agent
 uv sync --frozen
-cp .env.example .env  # 首次配置；已有 .env 时直接使用
+test -f .env || cp .env.example .env
 ```
 
-在 `.env` 填入百炼、Tavily key 和 Neon `DATABASE_URL`；`MODEL_BASE_URL` 使用百炼工作空间的 OpenAI 兼容地址。`uv.lock` 固定环境，`requirements.txt` 由 `uv export --no-dev --no-hashes --no-emit-project` 导出。
-
-独立验证 API（也可直接导入这些模块）：
+在 `.env` 填入 `BAILIAN_API_KEY`，确认 `MODEL_BASE_URL` 是该工作空间的 OpenAI 兼容端点，`MODEL_NAME` 默认 `qwen3.8-27b`。下面的 Baseline 示例预选了《Attention Is All You Need》v7。首次运行需能从 arXiv 下载 PDF，之后复用 `data/papers/1706.03762v7.pdf`。[环境变量示例](.env.example)
 
 ```bash
-uv run python -m apis.model
-uv run python -m apis.database
-uv run python -m apis.search_web 'Attention Is All You Need arxiv' --domains arxiv.org
-uv run python -m apis.papers '1706.03762' --page-start 1 --page-end 2
+uv run --frozen python baseline.py --task examples/qa.json
 ```
 
-arXiv PDF 缓存在 `data/papers/`。库内 PDF 在本次任务首次打开、阅读或检索原文时下载，校验 SHA-256 后按相同规则分页、分块。设计见 [workflow](workflow.md)，任务与结果结构见 [schemas.py](schemas.py)。
+终端输出 `stop_reason`、`answer`、`usage` 和结果文件路径 `output`。打开 `runs/baseline/<task_id>.json` 可查看完整 `trace` 和 `citations`。这道题跑通时，应能在答案中找到缩放因子与 softmax 梯度的关系，并用引用的 `page`、`source_text` 回到 PDF 核对。固定输出路径可加 `--output runs/qa.json`，再次写入该路径会覆盖文件。
 
-运行 LangGraph baseline：
+同一份任务可交给 Extension，结果写入 `runs/extension/<task_id>.json`。以下命令仍在 `agent/` 执行。
 
 ```bash
-uv run python baseline.py --task examples/qa.json --persist
-uv run python baseline.py --task examples/summary.json
-uv run python baseline.py --task examples/review.json
-uv run python baseline.py --task examples/discovery.json
-uv run python baseline.py --task examples/qa.json --context-window 32000 --context-finalize-ratio 0.9
-uv run pytest -q
+uv run --frozen python extension.py --task examples/qa.json --planner --reflection
+uv run --frozen python baseline.py --task examples/library-qa.json --library-login
+uv run --frozen pytest -q
 ```
 
-后端启动后，加 `--library-login` 并按提示输入网页账号和密码，CLI 会为本次运行签发短期论文库令牌。Baseline 和 Extension 都支持。
+- 带 arXiv 搜索的本地任务使用 `TAVILY_API_KEY`。库内任务需要运行论文库 API，`--library-login` 使用网页账号签发短期令牌。也可在环境中设置 `AGENT_LIBRARY_TOKEN` 后直接运行。自定义部署通过 `AGENT_LIBRARY_BASE_URL` 与 `AGENT_LIBRARY_ORIGIN` 指定 API 和网页地址。[本地服务启动](../docs/service_launch.md#按系统使用脚本)
+- Extension 调用 `retrieve` 时需要百炼嵌入服务，默认 `text-embedding-v4`、1024 维。索引缓存在 `data/retrieval/`，可用 `--index-dir` 改位置。课程聊天模型用 `MODEL_PROVIDER=tacc` 和 `MODEL_BASE_URL` 指向可达的课程端点，用 `EMBEDDING_BASE_URL` 单独指定百炼嵌入端点。[课程模型服务](../model-server/README.md)
+- 需要同时写入 PostgreSQL（如 Neon）时，设置 `DATABASE_URL` 并加 `--persist`。各适配器也可单独运行，例如 `uv run --frozen python -m apis.model` 检查模型，`uv run --frozen python -m apis.papers 1706.03762v7 --page-start 4 --page-end 4` 核对 QA 引用的原文。[适配器](apis/)
+
+## 任务与结果接口
+
+Baseline 与 Extension 接受同一个 `Task` 对象或字典，返回 `TaskResult`。下面的 Python 示例可在 `agent/` 的 uv 环境运行。使用论文库时向 `run_task` 传 `library=LibraryClient(base_url, token)`，客户端来自 `apis.library`。[字段定义](schemas.py) · [论文库鉴权](../docs/api-contract.md#41-agent-论文库)
+
+```python
+from baseline import run_task
+
+result = run_task({"question": "为什么缩放点积注意力要除以 √dₖ？", "sources": ["1706.03762v7"]})
+payload = result.model_dump(mode="json")
+```
+
+| 任务字段 | 默认值 | 约定 |
+|---|---|---|
+| `question`、`task_id` | 问题必填，ID 自动生成 | 问答、总结、比较等要求直接写入 `question`。自定义 ID 长 1–101，以字母或数字开头，其余可含 `.`、`_`、`-` |
+| `sources`、`allow_search` | `[]`、`false` | 来源支持 arXiv ID/URL 或 `local:<UUID>@<SHA-256>`。关闭搜索时至少给一个来源 |
+| `max_papers` | `3` | 取 1–20，按实际获取的不同论文计数。搜索返回候选时不占额度 |
+| `max_steps` | `40` | 主 Agent 模型轮数上限，含最终作答轮。最后一轮仍请求工具时立即返回 `step_limit` |
+| `timeout_seconds` | `600` | 整任务时限，`null` 取消本地整任务时限。调用前后检查，单次请求按剩余时间收紧 |
+| `max_output_tokens` | `4096` | 单次聊天输出上限。分块摘要每次至多 1200，Planner 至多 256，两者仍受任务设定约束 |
+
+输入拒绝未声明的字段。旧输入中的 `task_type` 应改写到 `question`，`budget` 应改为上述顶层参数。运行参数 `context_window`、`context_policy`、`context_finalize_ratio` 对应 CLI 的 `--context-window`、`--context-policy`、`--context-finalize-ratio`。Python 传 `context_window=None` 可关闭本地容量检查与压力收尾，仅关闭压力收尾可用 `context_finalize_ratio=None`。Extension 额外接受 `planner`、`reflection`、`index_dir`。
+
+### 工具与引用
+
+模型可以把预选来源、搜索候选的 `source` 或已打开论文的 `source_id` 交给阅读工具。页码从 1 起，页段包含首尾两页。[基础工具](baseline.py) · [检索工具](extension.py)
+
+| 工具 | 输入 | 返回给模型的内容 |
+|---|---|---|
+| `search_papers` | `query` | 获准搜索时通过 Tavily 查 arXiv，最多 5 条候选，含 `source/title/url/snippet` |
+| `search_library` | 可选 `query`、`match`（`all` 或 `any`）、`offset` | 获准搜索且配置论文库时可用，按标题或文件名匹配，每页至多 5 条，含 `source/title/original_filename` 和分页信息 |
+| `open_paper` | `source` | `source_id`、标题、版本、页数和 PDF 书签目录，供选择阅读范围 |
+| `read_paper` | `source, page_start, page_end`，1–3 页 | 新读原文块和已读块 ID，全段已读时返回 `already_read` |
+| `summarize_paper` | 同上，1–6 页 | 按批返回带片段引用的摘要及对应 `chunk_ids`。摘要单独去重，之后仍可读取原文 |
+| `retrieve`（Extension） | `source`（一个标识或非空列表）、`query`、`top_k`（默认 3，范围 1–5） | 在指定论文间统一排名，合计至多 `top_k` 个命中。与 `read_paper` 共用已读记录，重复命中返回 ID、页码和 `already_read` |
+
+搜索结果仅供发现，目录仅供导航。阅读、摘要、检索登记可引用的原文块。正文与比较表使用工具提供的 `[chunk_id]`，例如 `[arxiv:1706.03762v7:p4:c1]`。`citations` 按正文、表格中的首次出现顺序返回实际引用的有效块，每条保留 `chunk_id, source_id, paper_id, version, page, source_text, url, title`。
+
+### 结果、状态与 trace
+
+`TaskResult` 包含 `task_id, question, answer, comparison_table, citations, unresolved, stop_reason, usage, sources, trace, errors, configuration`。`sources` 列出本次实际获取的论文。`configuration` 保留补齐默认值的任务、模型、温度和上下文参数。Extension 还记录 `workflow, embedding_model, planner, reflection`。
+
+| `stop_reason` | 解释 |
+|---|---|
+| `completed` / `partial` | 回答结构和引用检查通过。`unresolved` 为空时为 `completed`，有未解决项时为 `partial`。科学结论和比较方向仍需对照原文核实 |
+| `step_limit` / `time_limit` / `context_limit` | 达到主循环轮数、整任务时间或单次请求容量限制 |
+| `invalid_citations` / `insufficient_evidence` | 正文或表格引用了未登记的块，或整份答案没有有效原文引用 |
+| `model_error` / `invalid_tool_call` / `output_truncated` / `invalid_output` | 模型设置或调用失败、工具调用无法解析（或收尾仍要求工具）、主回答截断、最终 JSON 不合约定 |
+
+`usage.agent_steps` 计主循环及压力收尾轮数，`model_calls` 还计入摘要、规划和反思的聊天调用。`tool_calls` 计已尝试执行的工具。聊天 API 缺少完整用量时，`input_tokens/output_tokens/total_tokens` 为 `null`，`token_usage_complete=false`。`usage.elapsed_seconds` 是研究任务总耗时。摘要工具耗时包含内部模型调用，同一任务的 trace 耗时有重叠。
+
+`trace` 按执行顺序保存事件。查 `kind="model"` 的 `purpose/messages/response` 可重建一次模型决策，失败时查 `error`。查 `kind="tool"` 的 `name/arguments/observation` 可追溯实际读到的证据。`context` 事件记录压缩、压力收尾或容量拦截。Extension 另有 `planner/reflection/retrieval_index/embedding` 事件，嵌入用量在 `embedding` 事件中单记。`errors` 保存阶段和错误类型，也可能包含已恢复的工具错误。
+
+### 本地与平台交付
+
+- **单次 CLI** 写入完整 `TaskResult`，可选数据库键为 Baseline 的 `task_id` 或 Extension 的 `extension/<task_id>`。`completed` 或 `partial` 且无持久化错误时退出码为 0。输入校验失败可能发生在生成结果文件之前。
+- **网页 / TACC** 由后端冻结任务和运行配置。`tcloud` 的 `input.zip` 内含 `manifest.json`、`task.json`、`sources.json`，作业使用另发的只读令牌从后端取预选 PDF，并核对原件摘要。兼容传输 `manual/local/tacc` 的包另附 `papers/<UUID>.pdf`。作业写 `status.json` 和 `result.json`，后者是 `agent-result-v1` 信封，含 `dispatch_id, input_sha256, remote_job_id, result`。Worker 校验派发身份与证据后入库。网页作业的 `succeeded` 同时涵盖研究结果 `completed` 和 `partial`。[派发协议](../docs/api-contract.md#7-agent-派发协议) · [作业入口](../tacc/research/run_job.py) · [模型服务](../model-server/README.md)
+
+## 消融实验复现
+
+用实验账号登录网页，将首批使用的 SkillOpt 原始 PDF 上传至论文库，确认输入 `SkillOpt` 可搜到。各配置共用同一模型端点、账号与论文库。配置好聊天、搜索和嵌入服务，在 `agent/.env` 填入 `AGENT_LIBRARY_USERNAME` 与 `AGENT_LIBRARY_PASSWORD`，再从**仓库根目录**执行以下命令。[SkillOpt 原文 v2（PDF）](https://arxiv.org/pdf/2605.23904v2)
 
 ```bash
-uv run python extension.py --library-login --task examples/discovery.json
+./agent/run.sh
 ```
 
-如需重复运行，可在本地 `agent/.env` 填写 `AGENT_LIBRARY_USERNAME` 和 `AGENT_LIBRARY_PASSWORD`。默认 API 为 `http://127.0.0.1:8000`，网页来源为 `http://127.0.0.1:5173`，自定义部署可分别设置 `AGENT_LIBRARY_BASE_URL` 和 `AGENT_LIBRARY_ORIGIN`。已有令牌也可以通过 `AGENT_LIBRARY_TOKEN` 传给不带登录参数的 CLI。[论文库 API 契约](../docs/api-contract.md#41-agent-论文库)
+也可向脚本传入用户名和密码两个参数，或使用已有的 `AGENT_LIBRARY_TOKEN`。使用账号时可为后续库内问答和 discovery 重新签发短期授权。脚本先检查 SkillOpt 搜索结果，再按表中顺序逐题跑完五种配置。同题共用任务 JSON 和预算（默认 40 轮、600 秒、每次输出 4096 token）。聊天调用为非流式，温度为 0。上下文策略为 `full`，窗口 32,000，收尾阈值为 90%。[批跑脚本](ablation.py) · [聊天模型配置](apis/model.py)
 
-Python 调用按任务传入 `run_task(task, library=LibraryClient(base_url, token))`，其中 `LibraryClient` 来自 `apis.library`。`allow_search=true` 时，`search_papers` 搜 arXiv，配置了令牌的 `search_library` 按标题或文件名搜论文库。两者的候选都带有可直接交给 `open_paper(source)` 的 `source`。库内标识为 `local:<UUID>@<SHA-256>`，也可预先填入任务的 `sources`。
+| 案例 | 数据与范围 | 报告中核对的问题 |
+|---|---|---|
+| [`library-qa`](examples/library-qa.json) | 空预选，仅要求访问自己的库，最多 1 篇 | 是否经 `search_library` 找到 SkillOpt 原文。优化对象、保留更新的判据是否各有页码证据 |
+| [`qa`](examples/qa.json) | 预选 `1706.03762v7`，关闭搜索 | 是否用原文解释点积规模、softmax 梯度与缩放因子的关系 |
+| [`summary`](examples/summary.json) | 同一预选论文，关闭搜索 | 研究问题、方法、翻译结果、适用条件与未覆盖内容是否交代清楚 |
+| [`review`](examples/review.json) | 空预选，搜索 LoRA、QLoRA 原论文，最多 2 篇 | 比较表中的方法、显存机制、数字与实验条件是否有逐项支持。若引用 WikiSQL，核对数值和比较方向 |
+| [`discovery`](examples/discovery.json) | 空预选，可搜 arXiv 与本库，最多 5 篇 | 代表工作是否有原文证据，是否解释如何用经验更新技能 |
 
-Baseline 结果与 trace 写入 `runs/baseline/`；`--persist` 同时保存到 Neon。支持搜索、打开论文、分页阅读与分块摘要，输出引用保留原文和页码。`open_paper` 返回标题、版本、总页数和 PDF 书签目录，供 agent 选择阅读范围；打开、阅读与摘要共用论文缓存。
+| 配置目录 | 入口 | RAG 工具 | Planner | Reflection |
+|---|---|---|---|---|
+| `baseline` | `baseline.py` | 关 | 关 | 关 |
+| `rag` | `extension.py` | 开 | 关 | 关 |
+| `rag-planner` | `extension.py` | 开 | 开 | 关 |
+| `rag-reflection` | `extension.py` | 开 | 关 | 开 |
+| `full` | `extension.py` | 开 | 开 | 开 |
 
-运行 Retrieval Extension 使用同一份任务 JSON：
+每次新建 `agent/runs/ablation/<批次>/<案例>/<配置>/`。终端显示批次目录、当前组号和停止原因。每组将结果写入 `result.json`，事件序列单独写入 `trace.json`。单组出错后继续执行，其余组仍可比较。跑完 25 组时，`completed` 和 `partial` 计为已交稿，其他停止原因计入失败数且批次退出码为 1。若运行器在产生结果前抛出异常，该组保留 `runner_error` 和错误类型，trace 为空。
 
-```bash
-uv run python extension.py --task examples/qa.json
-uv run python extension.py --task examples/summary.json --context-policy compact
-uv run python extension.py --task examples/review.json --planner --context-policy full --context-finalize-ratio 0.9
-uv run python extension.py --task examples/qa.json --reflection
-```
+### 从输出填写报告
 
-Extension 默认关闭 Planner。传 `--planner` 或 Python 参数 `planner=True`，会在研究开始前做一次无工具模型调用，输出额度为 `min(256, max_output_tokens)`。主 agent 的首条任务消息先给原任务 JSON，再附上 1–3 行标为参考的建议。空计划、格式无效或规划请求失败时，主 agent 直接处理原任务。规划共用任务时限。
+以「批次、案例、配置」定位一行，同题横向比较。Baseline 与 `rag` 使用各自的研究提示词。`rag-planner`、`rag-reflection` 与 `rag` 的对照分别观察两个开关的增量。一次批次中每个组合只有一次运行，复跑时保留批次标识。
 
-结果的 `configuration.planner` 记录开关。`purpose="planner"` 的模型记录可查请求、响应和用量，`kind="planner"` 的记录可查采纳的计划及处理结果。规划调用计入 `usage.model_calls` 和 API token 用量，主 agent 的 `max_steps` 单独计数。
-
-Reflection 独立于 Planner，默认关闭。传 `--reflection` 或 Python 参数 `reflection=True` 后，主 agent 自然交稿时，模型会对照原任务、正文、比较表及其引用的原文，核实结论、比较对象和实验条件。它可以接受草稿、直接修订，或调用一次 `read_paper` / `retrieve` 补证再修订。补证后的修订调用不带工具。三条路径均经过原有引用与未解决项校验。压力收尾直接进入该校验。
-
-结果的 `configuration.reflection` 记录开关，`kind="reflection"` 记录处理结果。核对和补证后的修订分别记为 `purpose="reflection"` 和 `purpose="reflection_revision"`。额外的 1–2 次模型调用计入聊天用量和整任务耗时，补证计入工具调用数，主 agent 轮数单独计量。若核对请求失败、超出窗口或返回无效输出，保留草稿并执行原有校验。整任务超时仍返回 `time_limit`。实测增量见[开关对照](../RESULTS.md)。
-
-Extension 的 `retrieve(source, query, top_k=3)` 接受单个论文标识或非空标识列表。所选论文的原文块一起排名，合计返回最多 `top_k` 个（可设为 1–5），每块保留论文标识、页码和引用 ID。例如传入两篇论文及 `top_k=3` 时，两篇合计最多返回三个块，结果可以全部来自同一篇。每次调用只为查询文本生成一个向量。
-
-同一任务中，`retrieve` 和 `read_paper` 共用已展示原文的记录。检索按原排名返回命中片段，首次命中附原文，已展示的片段只返回标识、页码和 `already_read`。全部命中都已展示时，工具结果也带有 `status: already_read`。
-
-首次检索优先复用已打开的解析结果，或加载指定论文。索引按单篇论文的内容、分块与 embedding 配置缓存在 `data/retrieval/`，可跨论文组合复用；`--index-dir` 可改位置。默认使用百炼 `text-embedding-v4`、1024 维，配置见 [.env.example](.env.example)。
-
-结果写入 `runs/extension/`。启用 `--persist` 时，Neon 存储键为 `extension/<task_id>`，结果 JSON 保留原任务 ID。Trace 中 `retrieval_index` 记录建索引或复用，`embedding` 按 `document` 和 `query` 分别记录调用耗时与实际输入 token；`usage` 延续 Baseline 的聊天模型统计。
-
-从仓库根目录运行以下命令，即可开始 25 组消融实验。先启动论文库 API，并确认该账号已上传 SkillOpt 原文。
-
-```bash
-./agent/run.sh '你的用户名' '你的密码'
-```
-
-脚本先验证账号能找到 SkillOpt，再依次运行 `library-qa`、`qa`、`summary`、`review` 和 `discovery`。每题都跑 Baseline、RAG、RAG + Planner、RAG + Reflection 和全开五种配置。库内问答和 discovery 使用论文库授权。也可通过 `AGENT_LIBRARY_USERNAME` 与 `AGENT_LIBRARY_PASSWORD` 或已有的 `AGENT_LIBRARY_TOKEN` 提供凭据。
-
-终端显示批次目录和当前组号。每组结束后，答案、引用、用量和停止原因写入 `agent/runs/ablation/<批次>/<案例>/<配置>/result.json`，按时间排序的事件写入同目录的 `trace.json`。单组失败后继续执行，全部结束后有失败则返回非零状态。再次执行会新建批次。
-
-重复写入同一路径会覆盖已有结果。对照实验可用 `--output` 为每次运行指定不同的文件名。
-
-任务要求写在 `question` 中，可包含问答、总结、比较或混合要求。任务 JSON 还可设置以下执行参数：
-
-| 字段 | 默认值 | 含义 |
-|---|---:|---|
-| `max_steps` | 40 | 主 agent 最多调用轮数，包含最终答案轮；摘要调用不占此轮数 |
-| `timeout_seconds` | 600 | 整任务时间上限；`null` 表示不设此上限 |
-| `max_output_tokens` | 4096 | 单次模型输出额度；摘要另限制为最多 1200 |
-
-例如在 `examples/qa.json` 的任务中加入 `"max_steps": 8, "timeout_seconds": 120`。旧版 `budget` 字段已移除，传入会报校验错误。
-
-模型请求工具时继续循环，返回最终 JSON 时结束。到达轮数或时间上限直接记录 `step_limit` / `time_limit`，保留证据与 trace，不追加收尾调用。时间在调用前后检查，并收紧单次请求超时；它不是到点强杀。Token 用量只按 API usage 记录，不设累计额度。
-
-每次调用前，检查实际待发请求的估算输入加预留输出是否超过 `context_window`。容量检查失败会记录 `context_limit`。窗口默认 `32000`，CLI 通过 `--context-window` 配置，Python 可传 `run_task(..., context_window=None)` 关闭本地上限。这是运行参数，不放入任务 JSON。服务端报告上下文超限时也记录 `context_limit`。
-
-两版均可用 `--context-policy full|compact` 或 Python 的 `context_policy` 选择主 agent 的输入视图。默认 `full` 保留完整历史。`compact` 在估算输入加输出额度达到窗口的 90% 时，以程序精简重复的原文块、已有选文的搜索回包及空读记录。每个唯一原文块保留一份完整文本，工具调用与返回保持配对。原始历史和工具 trace 保留，精简不调用模型。分块摘要始终使用完整输入。[策略实现](context.py)
-
-用 `--context-finalize-ratio` 调整同一个压力阈值。准备后的输入加输出额度达到或超过阈值即进入一次无工具收尾，包括单轮越过硬窗口的情况。Python 传 `context_finalize_ratio=None` 关闭压力收尾，此时 `compact` 仅在达到硬窗口时尝试精简。传 `context_window=None` 则关闭本地容量触发。
-
-首次计数按字符、消息包装和工具定义估算。历史前缀和工具定义匹配时，用 API `input_tokens` 校准并估算新增内容。改写历史可能使估算回退到字符法。主 agent 与摘要分别维护计数锚点，实际 TACC 容量与 tokenizer 待对齐。
-
-收尾先沿用准备后的估算并计入作答指令（`finalize_conservative_estimate`）。若超窗，按无工具请求重新估算（`heuristic`）。若仍超窗，保留系统指令、用户任务与输出额度，优先从最近的工具结果选入放得下的完整原文块和摘要。最小请求仍超窗时返回 `context_limit`。
-
-`usage.agent_steps` 记录主 agent 轮数，`usage.model_calls` 包含摘要调用；收尾计入两项及 API 用量，本地容量拦截不增加这两项。触发 trace 为 `kind="context", action="finalize", reason="context_pressure"`，实际收尾调用为 `purpose="finalize"`；最终 `stop_reason` 仍由回答解析、引用校验或执行错误决定。缺失的 API token 统计保留为空，不用估算补齐。原文和摘要分别按 chunk 去重，摘要后仍可读取原文核实。摘要工具的现有行为保留，后续单独评估。
-
-代码入口是 [baseline.py](baseline.py)，按工具、模型、state、nodes、构图和运行组织。`@tool` 对象统一提供工具名称、参数和描述；当前工具节点按模型返回顺序串行执行。底层适配器在 [apis/](apis/)，任务与结果字段在 [schemas.py](schemas.py)。
-
-切换课程服务时，在 `.env` 设置 `MODEL_PROVIDER=tacc`、`MODEL_BASE_URL=http://NODE:8000/v1`，并在平台 worker 中运行；原生工具调用需服务端支持。
+| 报告列 | 从哪里取，如何判读 |
+|---|---|
+| 完成状态与缺口 | 从 `result.json` 取 `stop_reason`、`unresolved`、`errors`，分别列出完整交稿、部分交稿和失败。 |
+| 答案正确性 | 按上表逐项核对 `answer`、`comparison_table` 与原论文，记录答对、遗漏和答错的要点。 |
+| 引用支持 | 用 `citations[].source_text`、`source_id` 和 `page` 逐条核对正文论断、表格单元格中的 `[chunk_id]`。报告“有直接原文支持的项数 / 应提供证据的项数”，分母包括缺少引用的项。 |
+| 时间与用量 | 整项耗时取 `usage.elapsed_seconds`，聊天用量取 `usage.input_tokens`、`output_tokens`、`total_tokens`，并列 `agent_steps`、`model_calls`、`tool_calls`。`token_usage_complete=false` 或缺失的指标标作缺失。嵌入用量从 trace 的 `kind=embedding` 按 `purpose=document/query` 分列 `input_tokens`。 |
+| 组件是否介入 | 在 `trace.json` 查 `kind=tool, name=retrieve` 的参数、命中和来源，`kind=retrieval_index` 的 `action=build/reuse` 可解释冷、热缓存差异。`kind=planner` 的 `outcome=used` 表示采用计划，`empty` 表示没有建议。`kind=reflection` 的 `outcome` 记录核对结果。若反思开关已开但缺少事件，查看是否出现 `kind=context, action=finalize` 或是否提前失败。 |

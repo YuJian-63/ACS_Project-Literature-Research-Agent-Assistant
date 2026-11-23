@@ -1,0 +1,112 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1152" height="758" viewBox="0 0 1152 758" role="img" aria-labelledby="title description">
+  <title id="title">Literature research agent workflow</title>
+  <desc id="description">Baseline and Extension share a ReAct loop. Paper tools return observations for the next turn. Extension adds passage retrieval and optional planning and reflection. Context pressure leads to one tool-free answer attempt. A step or time limit ends the run. All paths converge on citation checks and result assembly.</desc>
+  <defs>
+    <marker id="arrow" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto">
+      <path d="M0 0 8 4 0 8Z" fill="#53657b"/>
+    </marker>
+    <marker id="extension-arrow" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto">
+      <path d="M0 0 8 4 0 8Z" fill="#08756d"/>
+    </marker>
+    <style>
+      text { font-family: "Helvetica Neue", Helvetica, Arial, sans-serif; fill: #1d3046 }
+      .heading { font-size: 32px; font-weight: 700 }
+      .node { font-size: 23px; font-weight: 700 }
+      .body { font-size: 18px }
+      .edge-label { font-size: 16px; fill: #45596f }
+      .key { font-size: 16px; font-weight: 600 }
+      .shared { fill: #f6f8fb; stroke: #6d8094; stroke-width: 1.5 }
+      .extension { fill: #ecf6f3; stroke: #08756d; stroke-width: 1.6; stroke-dasharray: 7 4 }
+      .ext-title { fill: #075e59 }
+      .flow, .ext-flow { fill: none; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round }
+      .flow { stroke: #53657b; marker-end: url(#arrow) }
+      .ext-flow { stroke: #08756d; stroke-dasharray: 7 4; marker-end: url(#extension-arrow) }
+    </style>
+  </defs>
+  <rect width="1152" height="758" fill="#fff"/>
+  <text class="heading" x="32" y="45">Literature research agent workflow</text>
+  <g class="key">
+    <rect class="shared" x="732" y="28" width="23" height="15" rx="3"/>
+    <text x="765" y="42">Baseline + Extension</text>
+    <rect class="extension" x="945" y="28" width="23" height="15" rx="3"/>
+    <text x="978" y="42">Extension only</text>
+  </g>
+  <path d="M32 64H1120" stroke="#d6dee5"/>
+
+  <!-- Shared control flow. The tools return to context preparation on every turn. -->
+  <path class="flow" d="M650 170V220"/>
+  <path class="flow" d="M650 320V386"/>
+  <text class="edge-label" x="665" y="360">Within budget</text>
+  <path class="flow" d="M500 428H413"/>
+  <text class="edge-label" x="435" y="417">Calls</text>
+  <path class="flow" d="M410 279H497"/>
+  <text class="edge-label" x="426" y="267">Results</text>
+  <path class="flow" d="M800 269H851"/>
+  <path class="flow" d="M986 469V647"/>
+  <path class="flow" d="M650 467V647"/>
+  <text class="edge-label" x="665" y="513">Natural draft</text>
+
+  <!-- The two optional nodes each have a direct shared path alongside them. -->
+  <path class="ext-flow" d="M500 110H413"/>
+  <path class="ext-flow" d="M410 151H453Q462 151 462 160V228Q462 237 471 237H497"/>
+  <path class="ext-flow" d="M650 534H413"/>
+  <path class="ext-flow" d="M221 611V647"/>
+
+  <g id="task">
+    <rect class="shared" x="500" y="87" width="300" height="83" rx="8"/>
+    <text class="node" x="519" y="120">Research task</text>
+    <text class="body" x="519" y="148">Question, sources and limits.</text>
+  </g>
+  <g id="planner">
+    <rect class="extension" x="32" y="87" width="378" height="83" rx="8"/>
+    <text class="node ext-title" x="51" y="120">Planner</text>
+    <text class="body" x="51" y="148">If enabled, add 0–3 planning notes.</text>
+  </g>
+  <g id="context">
+    <rect class="shared" x="500" y="223" width="300" height="97" rx="8"/>
+    <text class="node" x="519" y="255">Prepare next turn</text>
+    <text class="body" x="519" y="282">Check step and time limits.</text>
+    <text class="body" x="519" y="304">Prepare the model context.</text>
+  </g>
+  <g id="budget-exits">
+    <rect class="shared" x="854" y="223" width="266" height="246" rx="8"/>
+    <text class="node" x="873" y="255">Budget exits</text>
+    <text class="body" x="873" y="288" font-weight="700">Context pressure</text>
+    <text class="body" x="873" y="312">If input + output allowance</text>
+    <text class="body" x="873" y="334">reaches the threshold (90%</text>
+    <text class="body" x="873" y="356">of the window by default),</text>
+    <text class="body" x="873" y="378">try one answer without tools.</text>
+    <path d="M873 395H1101" stroke="#c7d2dd"/>
+    <text class="body" x="873" y="421" font-weight="700">Step or time limit</text>
+    <text class="body" x="873" y="446">Stop and record the reason.</text>
+  </g>
+  <g id="agent">
+    <rect x="500" y="389" width="300" height="78" rx="8" fill="#243a51"/>
+    <text class="node" x="519" y="419" style="fill:#fff">ReAct agent</text>
+    <text class="body" x="519" y="447" style="fill:#fff">Request tools or submit a draft.</text>
+  </g>
+  <g id="tools">
+    <rect class="shared" x="32" y="203" width="378" height="264" rx="8"/>
+    <text class="node" x="51" y="235">Paper tools</text>
+    <text class="body" x="51" y="263">Run calls in the order requested.</text>
+    <path d="M51 279H391" stroke="#c7d2dd"/>
+    <text class="body" x="51" y="305">Find candidates when search is enabled.</text>
+    <text class="body" x="51" y="330">Open a PDF, read pages or summarize.</text>
+    <rect class="extension" x="46" y="350" width="350" height="103" rx="6"/>
+    <text class="node ext-title" x="62" y="380">retrieve</text>
+    <text class="body" x="62" y="407">Build or reuse local passage vectors.</text>
+    <text class="body" x="62" y="431">Rank chunks across selected papers.</text>
+  </g>
+  <g id="reflection">
+    <rect class="extension" x="32" y="495" width="378" height="116" rx="8"/>
+    <text class="node ext-title" x="51" y="526">Reflection</text>
+    <text class="body" x="51" y="553">If enabled, accept or revise the draft.</text>
+    <text class="body" x="51" y="576">The reviewer can read or retrieve once,</text>
+    <text class="body" x="51" y="599">then revise without tools.</text>
+  </g>
+  <g id="result">
+    <rect class="shared" x="32" y="650" width="1088" height="82" rx="8"/>
+    <text class="node" x="51" y="682">Validate citations and assemble the result</text>
+    <text class="body" x="51" y="710">Resolve chunk IDs to PDF evidence. Return the answer, comparison table, citations, open issues, stop reason, usage and trace.</text>
+  </g>
+</svg>

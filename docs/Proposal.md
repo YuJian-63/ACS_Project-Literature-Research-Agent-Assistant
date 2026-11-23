@@ -18,6 +18,8 @@ The system consists of four components: **frontend, application backend, agent f
 
 <img src="workflow.png" alt="Agent_Workflow" style="zoom:33%;" />
 
+The implemented research loop and its evidence, planning, and review steps are documented in the [Agent workflow](../agent/README.md#agent-workflow).
+
 #### 2.2 Frontend
 
 The frontend will use **React** and **TypeScript**, supported by Vite, Axios, Ant Design, React Router, React Markdown, and ECharts . It will allow users to submit research questions, search for papers, upload PDFs, and request literature reviews or paper-specific answers . Results, comparison tables, and supporting evidence will be displayed through the interface.
