@@ -207,11 +207,24 @@ def test_reflection_model_failure_keeps_the_draft_and_marks_usage_unknown():
     assert [citation.chunk_id for citation in result.citations] == [CHUNK]
 
 
-def test_pressure_finalization_skips_reflection():
+def test_pressure_finalization_reviews_valid_draft_before_citation_validation():
     initial = read()
     initial.usage_metadata.update(input_tokens=9000, total_tokens=9020)
-    result, _ = execute([initial, final()], context_window=10000, reflection=True)
+    result, model = execute([initial, final(MISSING), final()], context_window=10000, reflection=True)
     assert result.stop_reason == "completed"
+    assert purposes(result) == ["agent", "finalize", "reflection"]
+    assert json.loads(model.inputs[-1][-1].content)["missing_citation_ids"] == [MISSING]
+    assert [c.chunk_id for c in result.citations] == [CHUNK]
+    assert result.trace[-1]["outcome"] == "revised"
+    assert result.usage.agent_steps == 2
+    assert result.usage.model_calls == 3
+
+
+def test_pressure_finalization_without_valid_draft_skips_reflection():
+    initial = read()
+    initial.usage_metadata.update(input_tokens=9000, total_tokens=9020)
+    result, _ = execute([initial, message('{"answer":[]}')], context_window=10000, reflection=True)
+    assert result.stop_reason == "invalid_output"
     assert purposes(result) == ["agent", "finalize"]
     assert not any(entry["kind"] == "reflection" for entry in result.trace)
     assert result.usage.agent_steps == result.usage.model_calls == 2

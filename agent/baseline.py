@@ -558,7 +558,6 @@ class GraphState(TypedDict):
     messages: list[BaseMessage]
     stop_reason: str
     final: dict[str, Any]
-    natural_draft: NotRequired[bool]
     plan: NotRequired[str]
 
 
@@ -652,7 +651,6 @@ def agent_node(state: GraphState, *, model, context: PaperContext) -> dict:
     return {
         "messages": updated,
         "final": final,
-        "natural_draft": not finalizing,
         "stop_reason": "completed",
     }
 
@@ -710,7 +708,7 @@ def tools_node(state: GraphState, *, tools: dict[str, BaseTool], context: PaperC
     return {"messages": state["messages"] + observations, "stop_reason": reason}
 
 
-# The ReAct loop can start with a plan and finish with a review of a natural draft.
+# The ReAct loop can start with a plan and finish with a review of the draft.
 def build_graph(
     model,
     tools: list[BaseTool],
@@ -737,7 +735,7 @@ def build_graph(
         graph.add_edge("reflection", END)
 
     def after_agent(state: GraphState) -> str:
-        if reflection is not None and state.get("natural_draft"):
+        if reflection is not None and state["final"]:
             return "reflection"
         return END if state["stop_reason"] else "tools"
 

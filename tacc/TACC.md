@@ -87,7 +87,7 @@
 | --- | --- | --- |
 | 已有真实作业 | Baseline 库内搜索、预选、分页阅读、分块摘要 | 作业 30395、30387 和 30628，见下方记录。 |
 | 已接入，待真实作业 | Baseline，开启搜索，参考论文留空，搜索一篇库里还没有的论文 | 「运行记录」有 `search_papers`，再看打开原文和阅读工具。在正文点击引用，导入同一 arXiv 版本，打开引用页。 |
-| 已接入，待真实作业 | Extension，勾选两篇 PDF，开启 Planner、Reflection 和 compact，要求分别检索单篇及两篇并比较 | 核对 `planner`、`retrieve`、`embedding`、`retrieval_index` 和自然交稿后的 `reflection`；两篇分别有可点击的证据。进入上下文压力收尾时可跳过 Reflection。 |
+| 已接入，待真实作业 | Extension，勾选两篇 PDF，开启 Planner、Reflection 和 compact，要求分别检索单篇及两篇并比较 | 核对 `planner`、`retrieve`、`embedding`、`retrieval_index` 和交稿后的 `reflection`；两篇分别有可点击的证据。上下文压力收尾产生有效草稿时也应触发 Reflection。 |
 | 两种模式的 Neon 写入与读回已实测，待真实作业 | 开启 `AGENT_PERSIST=true` 后运行两种模式 | 「运行记录」显示 Agent 数据库保存状态。网页仍从本机后端取结果，Worker 另外把解析文档和完整 TaskResult 写入配置的 Agent 数据库。 |
 
 **Baseline 可复制问题**（先确认自己的库里还没有 LoRA）

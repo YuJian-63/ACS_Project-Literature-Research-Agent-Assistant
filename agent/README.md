@@ -22,7 +22,7 @@ Agent 根据研究问题选择论文、读取 PDF，并把答案中的论断关�
 |---|---|---|
 | Planner | 开启 `--planner` 后，研究开始前做一次无工具调用。有效的 1–3 行建议附在原任务后。空计划、无效输出或规划请求失败时，主循环仍可处理原题。整任务超时则停止。 | `kind=planner` 的 `outcome` 与 `plan` 区分实际采用的建议和空计划。 |
 | RAG | 主模型可按子问题调用 `retrieve`。首次检索时逐篇建立或复用本地索引，每次为查询生成一个向量，按余弦相似度从所选论文中合并取前 `top_k` 块。同一次跨篇检索可以全部命中同一篇论文。 | `kind=tool, name=retrieve` 给出查询、论文和命中片段。`retrieval_index` 区分 `build` / `reuse`，`embedding` 区分文档和查询开销。 |
-| Reflection | 开启 `--reflection` 后，仅在主模型自然提交可解析草稿时，对照原问题、草稿和所引原文进行核查。可接受、直接修订，或用一次 `read_paper` / `retrieve` 补证后无工具修订。核查失败时保留草稿进入公共校验，整任务超时记为 `time_limit`。 | `kind=reflection` 的 `outcome` 给出处理结果。补证后的模型调用标为 `purpose=reflection_revision`。 |
+| Reflection | 开启 `--reflection` 后，主模型每次提交字段有效的草稿（包括上下文压力下的提前交稿），都会触发一次独立核查，输入包含原问题、草稿和所引原文。可接受、直接修订，或用一次 `read_paper` / `retrieve` 补证后无工具修订。核查失败时保留草稿进入公共校验，整任务超时记为 `time_limit`。 | `kind=reflection` 的 `outcome` 给出处理结果。补证后的模型调用标为 `purpose=reflection_revision`。 |
 
 Planner 和 Reflection 默认均关闭。是否启用见结果的 `configuration`，实际执行路径见 trace。[Extension 实现](extension.py) · [索引与排序](retrieval.py)
 
@@ -30,7 +30,7 @@ Planner 和 Reflection 默认均关闭。是否启用见结果的 `configuration
 
 ### 上下文压力与停止
 
-主模型每轮先估算输入（含工具定义），加上本次预留的输出额度，与默认 32,000 token 的窗口比较。`full` 保留完整历史。`compact` 达到阈值时先精简重复工具回包，保留原始 trace。准备后的请求仍达到阈值（默认 90%）时，两版均转入一次无工具作答，再直接校验引用。若请求已超窗，程序按无工具请求重估，必要时优先装入最近可容纳的完整原文块和摘要。最小请求仍超窗则返回 `context_limit`。[上下文策略](context.py)
+主模型每轮先估算输入（含工具定义），加上本次预留的输出额度，与默认 32,000 token 的窗口比较。`full` 保留完整历史。`compact` 达到阈值时先精简重复工具回包，保留原始 trace。准备后的请求仍达到阈值（默认 90%）时，两版均转入一次无工具作答。开启 Reflection 时，有效草稿先进入核查，再校验最终引用。若请求已超窗，程序按无工具请求重估，必要时优先装入最近可容纳的完整原文块和摘要。最小请求仍超窗则返回 `context_limit`。[上下文策略](context.py)
 
 trace 中的 `kind=context, action=finalize` 表示触发收尾，`purpose=finalize` 表示实际发起模型调用。引用校验决定最终状态，压力收尾也可能得到 `completed` 或 `partial`。轮数用尽或任务超时则直接记录 `step_limit` / `time_limit`，保留已有 trace。
 
@@ -159,4 +159,4 @@ payload = result.model_dump(mode="json")
 | 答案正确性 | 按上表逐项核对 `answer`、`comparison_table` 与原论文，记录答对、遗漏和答错的要点。 |
 | 引用支持 | 用 `citations[].source_text`、`source_id` 和 `page` 逐条核对正文论断、表格单元格中的 `[chunk_id]`。报告“有直接原文支持的项数 / 应提供证据的项数”，分母包括缺少引用的项。 |
 | 时间与用量 | 整项耗时取 `usage.elapsed_seconds`，聊天用量取 `usage.input_tokens`、`output_tokens`、`total_tokens`，并列 `agent_steps`、`model_calls`、`tool_calls`。`token_usage_complete=false` 或缺失的指标标作缺失。嵌入用量从 trace 的 `kind=embedding` 按 `purpose=document/query` 分列 `input_tokens`。 |
-| 组件是否介入 | 在 `trace.json` 查 `kind=tool, name=retrieve` 的参数、命中和来源，`kind=retrieval_index` 的 `action=build/reuse` 可解释冷、热缓存差异。`kind=planner` 的 `outcome=used` 表示采用计划，`empty` 表示没有建议。`kind=reflection` 的 `outcome` 记录核对结果。若反思开关已开但缺少事件，查看是否出现 `kind=context, action=finalize` 或是否提前失败。 |
+| 组件是否介入 | 在 `trace.json` 查 `kind=tool, name=retrieve` 的参数、命中和来源，`kind=retrieval_index` 的 `action=build/reuse` 可解释冷、热缓存差异。`kind=planner` 的 `outcome=used` 表示采用计划，`empty` 表示没有建议。`kind=reflection` 的 `outcome` 记录核对结果。开启反思后，正常交稿和压力收尾产生的有效草稿都应出现反思事件。缺少事件时，先检查主模型是否交出了有效草稿。 |

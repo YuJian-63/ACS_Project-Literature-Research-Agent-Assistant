@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="1152" height="758" viewBox="0 0 1152 758" role="img" aria-labelledby="title description">
   <title id="title">Literature research agent workflow</title>
-  <desc id="description">Baseline and Extension share a ReAct loop. Paper tools return observations for the next turn. Extension adds passage retrieval and optional planning and reflection. Context pressure leads to one tool-free answer attempt. A step or time limit ends the run. All paths converge on citation checks and result assembly.</desc>
+  <desc id="description">Baseline and Extension share a ReAct loop. Paper tools return observations for the next turn. Extension adds passage retrieval and optional planning and reflection. Context pressure leads to one tool-free answer attempt. Any valid draft can proceed to reflection. A step or time limit ends the run. All paths converge on citation checks and result assembly.</desc>
   <defs>
     <marker id="arrow" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto">
       <path d="M0 0 8 4 0 8Z" fill="#53657b"/>
@@ -44,7 +44,9 @@
   <path class="flow" d="M800 269H851"/>
   <path class="flow" d="M986 469V647"/>
   <path class="flow" d="M650 467V647"/>
-  <text class="edge-label" x="665" y="513">Natural draft</text>
+  <path class="flow" d="M854 369H829V500H653"/>
+  <text class="edge-label" x="674" y="490">Pressure draft</text>
+  <text class="edge-label" x="665" y="554">Valid draft</text>
 
   <!-- The two optional nodes each have a direct shared path alongside them. -->
   <path class="ext-flow" d="M500 110H413"/>
