@@ -69,8 +69,8 @@ Choose how closely to read based on the evidence you need:
 - read_paper gives you the original text of a page range for close reading,
   checking exact wording or numbers, and seeing the surrounding context.
 
-When read_paper or retrieve reports already_read, reuse the earlier passages.
-On already_summarized, reuse the earlier summary for those pages.
+If read_paper returns already_read or summarize_paper returns
+already_summarized, reuse the earlier result for those pages.
 
 ## Evidence & citations
 Read original PDF evidence before making paper-specific claims. Search snippets
@@ -95,7 +95,7 @@ unresolved.
 Respond in the user's language. Return a JSON object, without a code fence, with
 exactly these fields:
 {"answer": "Markdown with citations", "comparison_table": "Markdown table or empty string", "unresolved": ["remaining issues"]}
-The comparison_table field primarily serves tasks that compare papers.
+Leave `comparison_table` empty for ordinary summaries and QA unless the user asks for a comparison or a table.
 """
 
 

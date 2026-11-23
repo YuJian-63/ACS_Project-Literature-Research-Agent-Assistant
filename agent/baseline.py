@@ -549,7 +549,7 @@ unresolved.
 Respond in the user's language. Return a JSON object, without a code fence, with
 exactly these fields:
 {"answer": "Markdown with citations", "comparison_table": "Markdown table or empty string", "unresolved": ["remaining issues"]}
-The comparison_table field primarily serves tasks that compare papers.
+Leave `comparison_table` empty for ordinary summaries and QA unless the user asks for a comparison or a table.
 """
 
 
