@@ -56,7 +56,7 @@
 | `PUT /agent-research/queue/concurrency` | `{"concurrency":2}`，范围 1–4，所有用户共用；降低上限不终止已派发任务。 |
 | `GET /agent-research` | 本账号统一研究记录，可按 `status` 过滤；项含 `id, question, status, paper_ids, papers, created_at`。 |
 | `GET /agent-research/{task_id}` | `task_id, question, status, paper_ids, result, error, metrics`；研究 `queued/running` 或评分 `pending/running` 时继续轮询。 |
-| `DELETE /agent-research/{task_id}` | 204，保留 PDF。运行中或已启动后重排为 `409 TASK_RUNNING`；失败但未确认远端停止为 `409 AGENT_STOP_PENDING`。 |
+| `DELETE /agent-research/{task_id}` | 204，保留 PDF。运行中或已启动后重排为 `409 TASK_RUNNING`；超时失败（`TASK_TIMEOUT`、`AGENT_PROCESS_TIMEOUT`、`AGENT_PLATFORM_TIMEOUT`）可直接删除，其他失败且未确认远端停止为 `409 AGENT_STOP_PENDING`。 |
 
 状态为 `queued/running/succeeded/failed`。`result` 交付前为 null，交付后含 `answer, comparison_table, sources, citations, trace, usage, errors, configuration, stop_reason, unresolved`。`completed/partial` 均映射为 `succeeded`，部分完成须展示 `unresolved`；失败查看 `error`，已有原生结果仍可读取。
 

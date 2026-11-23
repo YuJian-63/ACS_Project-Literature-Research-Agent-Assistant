@@ -79,6 +79,7 @@ def ensure_task_deletable(session: Session, task: Task) -> None:
     ):
         raise APIError(409, "TASK_RUNNING", "研究正在执行，请等待完成后再删除")
     if (task.runner_type == "agent" and task.status == "failed"
+        and task.error_code not in {"TASK_TIMEOUT", "AGENT_PROCESS_TIMEOUT", "AGENT_PLATFORM_TIMEOUT"}
         and task.run_config.get("transport") in {"local-process-v1", "tacc-ssh-slurm-v1", "tcloud-v1"}
         and not task.run_config.get("agent_cancel_confirmed")):
         run = session.get(AgentRun, task.id)

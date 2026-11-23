@@ -7,7 +7,7 @@ import unittest
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from unittest.mock import Mock
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 from alembic import command
 from alembic.config import Config
@@ -438,16 +438,59 @@ class AgentPostgresTests(unittest.TestCase):
             self.assertIsNone(session.scalar(select(Artifact).where(Artifact.task_id == task_id)))
             self.assertIsNotNone(session.get(Paper, self.paper_id))
 
-    def test_failed_remote_job_cannot_be_deleted_before_stop_confirmation(self):
+    def test_timed_out_agent_records_can_be_deleted_without_stop_confirmation(self):
+        from app.db.models import TaskEvent, TaskPaper
+        from app.tasks.lifecycle import database_time, mark_failed
+
+        client = self.research_client()
+        foreign = self.research_client(self.other_user)
+        for transport in ("local-process-v1", "tacc-ssh-slurm-v1", "tcloud-v1"):
+            for code in ("TASK_TIMEOUT", "AGENT_PROCESS_TIMEOUT", "AGENT_PLATFORM_TIMEOUT"):
+                for prefix in ("/api/v1/tasks", "/api/v1/agent-research"):
+                    with self.subTest(transport=transport, code=code, prefix=prefix):
+                        created = client.post("/api/v1/agent-research", json={
+                            "question": "Timeout deletion fixture", "paper_ids": [str(self.paper_id)]})
+                        self.assertEqual(created.status_code, 202, created.text)
+                        task_id = UUID(created.json()["task_id"])
+                        self.assertEqual(claim_task(self.sessions, self.owner), task_id)
+                        with self.sessions.begin() as session:
+                            task = session.get(Task, task_id)
+                            task.run_config = {**task.run_config, "transport": transport}
+                            session.get(AgentRun, task_id).remote_job_id = "8123"
+                            now = database_time(session)
+                            if code == "TASK_TIMEOUT":
+                                task.started_at = now - timedelta(seconds=task.timeout_seconds + 1)
+                                task.created_at = task.started_at - timedelta(seconds=1)
+                            else:
+                                mark_failed(session, task, now, code, "Timeout fixture")
+                        if code == "TASK_TIMEOUT":
+                            self.assertEqual(reap_expired(self.sessions), 1)
+                        detail = client.get(f"/api/v1/agent-research/{task_id}")
+                        self.assertEqual(detail.status_code, 200, detail.text)
+                        self.assertEqual((detail.json()["status"], detail.json()["error"]["code"]), ("failed", code))
+                        url = f"{prefix}/{task_id}"
+                        self.assertEqual(foreign.delete(url).status_code, 404)
+                        deleted = client.delete(url)
+                        self.assertEqual(deleted.status_code, 204, deleted.text)
+                        self.assertEqual(client.get(f"/api/v1/agent-research/{task_id}").status_code, 404)
+                        with self.sessions() as session:
+                            for model in (Task, AgentRun):
+                                self.assertIsNone(session.get(model, task_id))
+                            for model in (TaskPaper, TaskEvent):
+                                self.assertIsNone(session.scalar(select(model).where(model.task_id == task_id)))
+                            self.assertIsNotNone(session.get(Paper, self.paper_id))
+                        self.assertTrue((self.settings.storage_root / "uploads" / f"{self.paper_id}.pdf").is_file())
+
+    def test_non_timeout_failed_remote_job_cannot_be_deleted_before_stop_confirmation(self):
         from app.tasks.lifecycle import database_time, mark_failed
 
         task_id, manifest, _digest = self.create_and_claim()
-        for transport in ("local-process-v1", "tacc-ssh-slurm-v1"):
+        for transport in ("local-process-v1", "tacc-ssh-slurm-v1", "tcloud-v1"):
             with self.subTest(transport=transport):
                 with self.sessions.begin() as session:
                     task = session.get(Task, task_id)
                     task.run_config = {**task.run_config, "transport": transport}
-                    mark_failed(session, task, database_time(session), "TASK_TIMEOUT", "Timeout fixture")
+                    mark_failed(session, task, database_time(session), "AGENT_LAUNCH_FAILED", "Launch failure fixture")
                 with self.assertRaises(APIError) as caught:
                     self.delete_record(task_id)
                 self.assertEqual(caught.exception.status_code, 409)
