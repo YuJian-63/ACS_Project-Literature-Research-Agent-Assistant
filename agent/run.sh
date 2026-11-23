@@ -14,20 +14,4 @@ if [ "$#" -eq 2 ] || [ -n "${AGENT_LIBRARY_USERNAME:-}${AGENT_LIBRARY_PASSWORD:-
     fi
 fi
 
-status=0
-for example in examples/*.json; do
-    task=${example##*/}
-    task=${task%.json}
-    set -- --task "$example"
-    if [ "$task" = discovery ] && [ -n "${AGENT_LIBRARY_USERNAME:-}" ]; then
-        set -- "$@" --library-login
-    fi
-    for workflow in baseline extension; do
-        printf '\nRunning %s/%s\n' "$workflow" "$task"
-        if ! uv run --frozen python "$workflow.py" "$@"; then
-            printf 'Failed %s/%s\n' "$workflow" "$task" >&2
-            status=1
-        fi
-    done
-done
-exit "$status"
+exec uv run --frozen python -u ablation.py

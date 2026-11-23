@@ -462,7 +462,7 @@ def main() -> int:
         "--planner", action="store_true", help="Request a short optional plan before research"
     )
     parser.add_argument(
-        "--reflection", action="store_true", help="Check a natural draft against its cited passages"
+        "--reflection", action="store_true", help="Check the draft against its cited passages"
     )
     args = parser.parse_args()
     task = Task.model_validate_json(args.task.read_text())
