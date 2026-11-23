@@ -148,11 +148,11 @@ GET 只读已存数据；性能仅对来源口径一致的调用样本取算术�
 | 方法与路径 | 说明 |
 | --- | --- |
 | `GET /tasks/{task_id}/evaluation` | 最新版本及完整报告，无记录为 `not_requested`；加 `?evaluation_id=<UUID>` 固定读取历史版本。 |
-| `POST /tasks/{task_id}/evaluation` | 无请求体，需会话、Origin、CSRF；202，申请、复用或在尝试上限内重试。须启用评分并运行评分 Worker。 |
+| `POST /tasks/{task_id}/evaluation` | 需会话、Origin、CSRF；202。无请求体时申请、复用或在尝试上限内重试；可传 `{"refresh_evidence":true}` 显式刷新证据并创建新修订，进行中版本直接复用。须启用评分并运行评分 Worker。 |
 
-报告版本字段为 `id`，详情摘要为 `evaluation_id`；状态为 `not_requested/pending/running/succeeded/failed/skipped`。成功还须按 `report.assessment=scored|insufficient_evidence` 区分是否可评分。相同输入与配置复用版本；每用户每 UTC 日新版本额度由 `EVALUATION_DAILY_LIMIT` 控制，复用/重试已预留版本不重复计数。
+报告版本字段为 `id`，详情摘要为 `evaluation_id`，`revision` 为同输入、配置下从 0 开始的修订号；状态为 `not_requested/pending/running/succeeded/failed/skipped`。成功还须按 `report.assessment=scored|insufficient_evidence` 区分是否可评分，证据不足的分数为 `null`。默认相同输入与配置复用最新修订；显式重评保留旧报告，消耗新版本额度并重新计算尝试预算。每用户每 UTC 日新版本额度由 `EVALUATION_DAILY_LIMIT` 控制，复用/重试已预留版本不重复计数。
 
-常见错误：404 任务/版本不存在，409 结果未终结或尝试耗尽，429 新版本额度已满，503 未配置。评分包含返回摘录和可读取的库内被引页；原文处理、模型请求分别有超时，不限制被引页数。[评分与限制](../backend/README.md#deepseek-evaluation) · [接口实现](../backend/src/app/api/evaluations.py)
+常见错误：404 任务/版本不存在，409 结果未终结或同版本尝试耗尽，429 新版本额度已满，503 未配置。评分包含返回摘录、可读取的库内被引页，以及 arXiv 已配置时按带版本来源标识获取的官方原文；外部原文不可用时保留摘录并注明限制。原文处理、模型请求分别有超时，不限制被引页数。[评分与限制](../backend/README.md#deepseek-evaluation) · [接口实现](../backend/src/app/api/evaluations.py)
 
 ## 9. 模型服务
 

@@ -25,7 +25,8 @@ class MigrationGraphTests(unittest.TestCase):
         script = ScriptDirectory.from_config(config)
         revisions = list(script.walk_revisions())
         self.assertEqual(len(revisions), len({revision.revision for revision in revisions}))
-        self.assertEqual(script.get_heads(), ["20261122_0015"])
+        self.assertEqual(script.get_heads(), ["20261123_0016"])
+        self.assertEqual(script.get_revision("20261123_0016").down_revision, "20261122_0015")
         self.assertEqual(script.get_revision("20261122_0015").down_revision, "20261122_0014")
         self.assertEqual(script.get_revision("20261122_0014").down_revision, "20261122_0013")
         self.assertEqual(script.get_revision("20261118_0006").path,

@@ -1,6 +1,6 @@
 # 后端数据库设计
 
-后端使用 PostgreSQL 17、SQLAlchemy 和 Alembic，当前迁移 head 为 `20261122_0015`。以下概述全部 21 张业务表；完整字段、外键和索引见 [业务模型](../backend/src/app/db/models.py)、[账号模型](../backend/src/app/db/accounts.py)及 [DDL](../backend/sql/schema.sql)。
+后端使用 PostgreSQL 17、SQLAlchemy 和 Alembic，当前迁移 head 为 `20261123_0016`。以下概述全部 21 张业务表；完整字段、外键和索引见 [业务模型](../backend/src/app/db/models.py)、[账号模型](../backend/src/app/db/accounts.py)及 [DDL](../backend/sql/schema.sql)。
 
 实体 ID 主要使用 UUID，时间使用带时区时间戳，配置、原生结果和评分快照使用 JSONB。原始 PDF 位于 `STORAGE_ROOT/uploads/<paper_id>.pdf`；备份与还原须同时保留数据库和存储目录。
 
@@ -50,7 +50,7 @@ Parser 将论文从 `uploaded → processing → ready / failed`，提取页数�
 
 | 表 | 用途 |
 | --- | --- |
-| `task_evaluations` | 评分版本、输入/配置/证据快照、报告、用量、错误及租约；`(task_id, input_sha256, config_sha256)` 唯一。 |
+| `task_evaluations` | 评分版本、输入/配置/证据快照、报告、用量、错误及租约；`(task_id, input_sha256, config_sha256, revision)` 唯一，修订号从 0 开始。显式重评新增修订，保留旧报告及尝试记录。 |
 | `evaluation_daily_quotas` | 以 `(user_id, day)` 为主键，按 UTC 日原子预留新评分版本额度。复用、重试已预留额度的同版本不重复计数，删除任务不退还。 |
 
 启用评分后，结果入库自动排队；历史结果可主动申请。评分状态为 `pending/running/succeeded/failed/skipped`，独立于研究状态。研究每日额度直接统计当日现存任务，删除可能降低计数；评分额度有独立记录。Agent 和模型服务指标从原生结果整理，不另建表。[指标与评分接口](api-contract.md#8-任务指标与评分)
@@ -67,7 +67,7 @@ Parser 将论文从 `uploaded → processing → ready / failed`，提取页数�
 
 在 `backend/` 运行 `uv run --locked alembic upgrade head`，再检查 `alembic current` 与 `alembic heads` 一致、`alembic check` 无结构差异。[迁移文件](../backend/alembic/versions) · [备份与维护](../backend/README.md#4-迁移维护)
 
-关键边界：`0007` 引入 Agent 执行记录；`0008` 将 PDF 上限改为 50 MB；`0009` 允许发现论文的顺序为空，存在此类关联时不能直接退回 `0008`；`0014` 增加评分与配额；`0015` 将任务步数约束提高到 200，存在超过 100 步的任务时不能直接降级至 `0014`。
+关键边界：`0007` 引入 Agent 执行记录；`0008` 将 PDF 上限改为 50 MB；`0009` 允许发现论文的顺序为空，存在此类关联时不能直接退回 `0008`；`0014` 增加评分与配额；`0015` 将任务步数约束提高到 200，存在超过 100 步的任务时不能直接降级至 `0014`；`0016` 增加评分修订号，存在同任务、输入及配置的多个修订时拒绝降级，避免丢失历史报告。
 
 <a id="114-0004-升级重置与回退边界"></a>
 

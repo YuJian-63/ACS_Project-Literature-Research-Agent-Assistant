@@ -24,7 +24,8 @@ export const evaluations = {
   get(taskId: string, evaluationId: string, signal: AbortSignal) {
     return request<EvaluationVersion>({ url: `/api/v1/tasks/${encodeURIComponent(taskId)}/evaluation`, params: { evaluation_id: evaluationId }, signal });
   },
-  request(taskId: string, signal: AbortSignal) {
-    return request<EvaluationVersion>({ url: `/api/v1/tasks/${encodeURIComponent(taskId)}/evaluation`, method: 'POST', signal });
+  request(taskId: string, signal: AbortSignal, refreshEvidence = false) {
+    return request<EvaluationVersion>({ url: `/api/v1/tasks/${encodeURIComponent(taskId)}/evaluation`, method: 'POST',
+      data: refreshEvidence ? { refresh_evidence: true } : undefined, signal });
   },
 };

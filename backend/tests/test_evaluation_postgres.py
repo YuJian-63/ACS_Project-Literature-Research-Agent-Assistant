@@ -56,6 +56,30 @@ class EvaluationPostgresTests(unittest.TestCase):
             self.assertEqual(evaluation.input_payload["question"], self.request.question)
             self.assertEqual(session.get(Task, task_id).status, "succeeded")
 
+    def test_imported_arxiv_alias_uses_the_owned_original_without_a_download(self):
+        import hashlib
+        from pathlib import Path
+        from app.db.models import Paper, PaperSource
+        from app.evaluations.evidence import prepare_evidence
+        from app.evaluations.service import result_input
+
+        pdf = (Path(__file__).resolve().parents[2] / "frontend/checks/fixtures/Orchid Calibration Report.pdf").read_bytes()
+        (self.settings.storage_root / "uploads" / f"{self.paper_id}.pdf").write_bytes(pdf)
+        with self.sessions.begin() as session:
+            paper = session.get(Paper, self.paper_id)
+            paper.sha256, paper.size_bytes = hashlib.sha256(pdf).hexdigest(), len(pdf)
+            session.add(PaperSource(user_id=self.user_id, paper_id=self.paper_id, provider="arxiv",
+                external_id="2601.00001v1", source_metadata={}))
+        task_id = self.ready()
+        with self.sessions() as session:
+            run = session.get(AgentRun, task_id)
+            run.result = run.result | {"citations": [{"chunk_id": "native", "source_id": "arxiv:2601.00001v1",
+                "page": 2, "source_text": "LUMEN-472"}]}
+            payload = result_input(session, session.get(Task, task_id), run)
+        evidence = prepare_evidence(payload, self.settings)
+        self.assertEqual(evidence["scope"], "original_pages")
+        self.assertEqual(evidence["checks"][0]["status"], "matched")
+
     def test_modified_snapshot_is_rejected_before_provider_call(self):
         from app.evaluations.worker import EvaluationWorker
         for index, field in enumerate(("config", "input_payload", "evidence")):
@@ -156,6 +180,40 @@ class EvaluationPostgresTests(unittest.TestCase):
         self.assertEqual(other.get(url).status_code, 404)
         self.assertEqual(other.post(url).status_code, 404)
         self.assertEqual(client.get(url + f"?evaluation_id={uuid4()}").status_code, 404)
+
+    def test_refresh_evidence_creates_a_quota_limited_version_and_preserves_the_old_report(self):
+        task_id = self.ready(auto=True)
+        self.settings.evaluation_daily_limit = 2
+        claim = claim_evaluation(self.sessions, self.settings)
+        old_report = {"assessment": "insufficient_evidence", "overall_score": None, "summary": "Originals unavailable"}
+        finish_evaluation(self.sessions, claim, report=old_report)
+        client = self.research_client()
+        url = f"/api/v1/tasks/{task_id}/evaluation"
+        refreshed = client.post(url, json={"refresh_evidence": True})
+        self.assertEqual(refreshed.status_code, 202, refreshed.text)
+        new_id = refreshed.json()["id"]
+        self.assertNotEqual(new_id, str(claim.id))
+        self.assertEqual(refreshed.json()["revision"], 1)
+        self.assertEqual(client.post(url, json={"refresh_evidence": True}).json()["id"], new_id)
+        self.assertEqual(client.get(url + f"?evaluation_id={claim.id}").json()["report"], old_report)
+        next_claim = claim_evaluation(self.sessions, self.settings)
+        self.assertIsNone(next_claim.evidence)
+        finish_evaluation(self.sessions, next_claim, error=EvaluationFailure("EVALUATION_INVALID_RESPONSE"))
+        self.assertEqual(client.post(url, json={"refresh_evidence": True}).status_code, 429)
+
+    def test_exhausted_failure_can_request_a_fresh_evaluation_without_resetting_history(self):
+        task_id = self.ready(auto=True)
+        with self.sessions.begin() as session:
+            old = session.scalar(select(TaskEvaluation).where(TaskEvaluation.task_id == task_id))
+            old_id = old.id
+            old.status, old.error_code, old.attempts = "failed", "EVALUATION_INTERNAL_ERROR", 3
+        response = self.research_client().post(f"/api/v1/tasks/{task_id}/evaluation", json={"refresh_evidence": True})
+        self.assertEqual(response.status_code, 202, response.text)
+        self.assertNotEqual(response.json()["id"], str(old_id))
+        self.assertEqual(response.json()["attempts"], 0)
+        with self.sessions() as session:
+            old = session.get(TaskEvaluation, old_id)
+            self.assertEqual((old.status, old.attempts, old.error_code), ("failed", 3, "EVALUATION_INTERNAL_ERROR"))
 
     def test_failed_agent_is_skipped_instead_of_scored(self):
         task_id = self.ready(auto=True, reason="model_error")

@@ -4,7 +4,7 @@ from typing import Annotated, Literal
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 RUBRIC_VERSION = "research-v1"
-PROMPT_VERSION = "deepseek-judge-v1"
+PROMPT_VERSION = "deepseek-judge-v2"
 WEIGHTS = {"grounded_correctness": 30, "citation_support": 30, "task_completion": 20,
     "analysis_quality": 15, "clarity": 5}
 ShortText = Annotated[str, Field(min_length=1, max_length=2000)]

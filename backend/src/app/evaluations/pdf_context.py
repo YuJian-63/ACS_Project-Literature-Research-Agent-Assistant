@@ -29,6 +29,9 @@ def extract(specification: list[dict]) -> dict:
                     limitations.add("original_page_too_large")
                     continue
                 text = page.extract_text() or ""
+                if "\x00" in text:
+                    text = text.replace("\x00", "")
+                    limitations.add("original_text_sanitized")
                 if not text.strip():
                     limitations.add("original_page_has_no_text")
                 elif len(text.encode("utf-8")) > 16000:

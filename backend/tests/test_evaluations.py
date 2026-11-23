@@ -114,6 +114,31 @@ class EvaluationProviderTests(unittest.TestCase):
             self.call(handler, self.payload | {"answer": "x" * 65000})
         self.assertEqual(raised.exception.code, "EVALUATION_INPUT_TOO_LARGE")
 
+    def test_invalid_report_logs_field_paths_without_model_values(self):
+        from unittest.mock import patch
+        report = judge_report()
+        report["dimensions"]["clarity"]["score"] = "private-model-content"
+        report["private-field-name"] = "private-model-content"
+        with patch("app.evaluations.judge.logger.disabled", False), self.assertLogs("app.evaluations.judge", level="WARNING") as messages:
+            with self.assertRaises(EvaluationFailure) as raised:
+                self.call(lambda request: self.response(report))
+        self.assertEqual(raised.exception.code, "EVALUATION_INVALID_RESPONSE")
+        logged = " ".join(messages.output)
+        self.assertIn("report_validation", logged)
+        self.assertIn("dimensions.clarity.score", logged)
+        self.assertNotIn("private-model-content", logged)
+        self.assertNotIn("private-field-name", logged)
+        self.assertNotIn("private-test-key", logged)
+
+    def test_fabricated_answer_excerpt_has_a_distinct_diagnostic(self):
+        from unittest.mock import patch
+        report = judge_report()
+        report["issues"][0]["answer_excerpt"] = "Text not in the answer"
+        with patch("app.evaluations.judge.logger.disabled", False), self.assertLogs("app.evaluations.judge", level="WARNING") as messages:
+            with self.assertRaises(EvaluationFailure):
+                self.call(lambda request: self.response(report))
+        self.assertIn("answer_excerpt", " ".join(messages.output))
+
     def test_rate_limits_retry_but_auth_errors_do_not_and_never_leak(self):
         for status, retryable in ((429, True), (503, True), (401, False), (400, False)):
             with self.subTest(status=status):
@@ -201,6 +226,90 @@ class EvaluationProviderTests(unittest.TestCase):
 
 
 class EvaluationEvidenceTests(unittest.TestCase):
+    def test_versioned_arxiv_originals_are_fetched_and_cited_pages_verified(self):
+        import hashlib
+        from app.sources.arxiv import ArxivClient, DownloadReceipt, ProviderReply
+
+        pdf = (Path(__file__).resolve().parents[2] / "frontend/checks/fixtures/Orchid Calibration Report.pdf").read_bytes()
+        urls = []
+
+        class Transport:
+            def request(self, url, *, destination, deadline):
+                urls.append(url)
+                destination.write_bytes(pdf)
+                return ProviderReply(200, {}, b"", DownloadReceipt(len(pdf), hashlib.sha256(pdf).hexdigest()))
+
+        settings = Settings(_env_file=None, database_url="postgresql://unused@127.0.0.1/unused")
+        payload = {"citations": [{"key": "E1", "source_id": "arxiv:2601.00001v1", "page": 2,
+            "source_text": "LUMEN-472", "url": "http://127.0.0.1/private"}], "original_sources": []}
+        evidence = prepare_evidence(payload, settings, arxiv_client=ArxivClient(Transport()))
+        self.assertEqual(evidence["scope"], "original_pages")
+        self.assertIn("LUMEN-472", evidence["pages"][0]["text"])
+        self.assertEqual(evidence["checks"], [{"citation_key": "E1", "status": "matched"}])
+        self.assertEqual(urls, ["https://arxiv.org/pdf/2601.00001v1"])
+        self.assertEqual(evidence["source_provenance"][0]["sha256"], hashlib.sha256(pdf).hexdigest())
+        self.assertNotIn("originals_unavailable", evidence["limitations"])
+
+    def test_external_download_failures_keep_excerpts_and_fetch_each_source_only_once(self):
+        from app.sources.arxiv import ArxivClient, ArxivError
+
+        settings = Settings(_env_file=None, database_url="postgresql://unused@127.0.0.1/unused")
+        citation = {"key": "E1", "source_id": "arxiv:2601.00001v1", "page": 2, "source_text": "Returned excerpt"}
+        payload = {"citations": [citation, citation | {"key": "E2"}], "original_sources": []}
+        for code in ("ARXIV_TIMEOUT", "ARXIV_UNAVAILABLE"):
+            with self.subTest(code=code):
+                requests = []
+
+                class Transport:
+                    def request(self, url, *, destination, deadline):
+                        requests.append(url)
+                        raise ArxivError(code, "Upstream original unavailable")
+
+                evidence = prepare_evidence(payload, settings, arxiv_client=ArxivClient(Transport()))
+                self.assertEqual(len(requests), 1)
+                self.assertEqual(evidence["scope"], "evidence_only")
+                self.assertEqual(evidence["excerpt_citation_keys"], ["E1", "E2"])
+                self.assertEqual(evidence["checks"], [{"citation_key": key, "status": "unavailable"} for key in ("E1", "E2")])
+                self.assertIn("originals_unavailable", evidence["limitations"])
+
+    def test_unsafe_external_identifiers_are_not_downloaded_and_excerpts_remain_available(self):
+        from unittest.mock import Mock
+
+        settings = Settings(_env_file=None, database_url="postgresql://unused@127.0.0.1/unused")
+        payload = {"citations": [{"key": "E1", "source_id": "arxiv:http://127.0.0.1/private", "page": 1,
+            "source_text": "Returned excerpt"}], "original_sources": []}
+        client = Mock()
+        evidence = prepare_evidence(payload, settings, arxiv_client=client)
+        self.assertEqual(evidence["scope"], "evidence_only")
+        self.assertEqual(evidence["excerpt_citation_keys"], ["E1"])
+        self.assertEqual(evidence["checks"], [{"citation_key": "E1", "status": "unavailable"}])
+        client.download_pdf.assert_not_called()
+
+    def test_pdf_null_characters_are_removed_before_jsonb_evidence_is_saved(self):
+        import hashlib
+        from pypdf import PdfWriter
+        from pypdf.generic import DecodedStreamObject, DictionaryObject, NameObject
+        from app.evaluations.pdf_context import extract
+
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "evidence.pdf"
+            writer = PdfWriter()
+            page = writer.add_blank_page(300, 300)
+            font = DictionaryObject({NameObject("/Type"): NameObject("/Font"),
+                NameObject("/Subtype"): NameObject("/Type1"), NameObject("/BaseFont"): NameObject("/Helvetica")})
+            page[NameObject("/Resources")] = DictionaryObject({NameObject("/Font"):
+                DictionaryObject({NameObject("/F1"): writer._add_object(font)})})
+            stream = DecodedStreamObject()
+            stream.set_data(b"BT /F1 12 Tf 20 200 Td (Independent\\000 evidence supports the claim.) Tj ET")
+            page[NameObject("/Contents")] = writer._add_object(stream)
+            writer.write(path)
+            evidence = extract([{"paper_id": "paper", "path": str(path), "pages": [1],
+                "sha256": hashlib.sha256(path.read_bytes()).hexdigest()}])
+        self.assertEqual(len(evidence["pages"]), 1)
+        self.assertNotIn("\x00", evidence["pages"][0]["text"])
+        self.assertIn("Independent evidence supports the claim.", evidence["pages"][0]["text"])
+        self.assertIn("original_text_sanitized", evidence["limitations"])
+
     def test_extraction_timeout_discloses_limit_and_does_not_inherit_secrets(self):
         import os
         import subprocess
@@ -220,7 +329,8 @@ class EvaluationEvidenceTests(unittest.TestCase):
         self.assertEqual(evidence["checks"][0]["status"], "unavailable")
         self.assertNotIn("EVALUATION_API_KEY", run.call_args.kwargs["env"])
         self.assertNotIn("SMTP_AUTH_CODE", run.call_args.kwargs["env"])
-        self.assertEqual(run.call_args.kwargs["timeout"], 60)
+        self.assertGreater(run.call_args.kwargs["timeout"], 0)
+        self.assertLessEqual(run.call_args.kwargs["timeout"], 60)
 
     def test_all_distinct_cited_pages_are_extracted_without_a_page_count_cap(self):
         from unittest.mock import patch

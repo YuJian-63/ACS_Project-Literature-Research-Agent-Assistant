@@ -1,11 +1,24 @@
 import json
+import logging
 import time
 from contextlib import nullcontext
 
 import httpx
+from pydantic import ValidationError
 
 from app.evaluations.contracts import EvaluationFailure, JudgeReport, validate_report, weighted_score
 from app.evaluations.service import canonical, digest
+
+logger = logging.getLogger(__name__)
+
+
+def validation_fields(error: ValidationError) -> list[dict]:
+    known = {"assessment", "summary", "dimensions", "grounded_correctness", "citation_support", "task_completion",
+        "analysis_quality", "clarity", "score", "reason", "issues", "severity", "code", "message", "citation_keys",
+        "answer_excerpt", "suggestions"}
+    return [{"field": ".".join(str(part) if type(part) is int or part in known else "unknown_field"
+        for part in item["loc"]), "type": item["type"]}
+        for item in error.errors(include_input=False, include_context=False, include_url=False)[:10]]
 
 
 def system_prompt() -> str:
@@ -22,7 +35,12 @@ def system_prompt() -> str:
         "Judge factual claims against supplied evidence, not eloquence. If evidence is insufficient for a reliable "
         "overall assessment, set assessment=insufficient_evidence and every score=null; still explain the gaps. "
         "Agent excerpts are not independent verification. The evidence scope and checks disclose which original "
-        "pages were available. A failed text match is a warning, not proof of fabrication. Do not claim the full "
+        "pages were available. research.citations[].source_text contains the returned excerpt evidence; "
+        "unavailable checks mean original-page verification was unavailable, not that the excerpts are missing. "
+        "Use sufficient excerpts to assess the answer within evidence_only scope, clearly stating the lack of "
+        "independent verification. Do not refuse solely because original pages are unavailable. If the excerpts "
+        "themselves do not support a reliable assessment, retain insufficient_evidence. "
+        "A failed text match is a warning, not proof of fabrication. Do not claim the full "
         "papers were checked. Unsupported claims and contradictory evidence must be identified. Do not reward "
         "answer length, citation count, tool calls or confident language. Identify missing evidence for important "
         "claims, incorrect attribution, numerical errors and overgeneralization. Use only citation keys supplied "
@@ -65,30 +83,42 @@ def evaluate(settings, payload: dict, evidence: dict, config: dict, *, client=No
         raise EvaluationFailure("EVALUATION_PROVIDER_TIMEOUT", retryable=True) from None
     except httpx.RequestError:
         raise EvaluationFailure("EVALUATION_PROVIDER_UNREACHABLE", retryable=True) from None
+    stage = "response_json"
     try:
         envelope = json.loads(buffer)
+        stage = "response_envelope"
         choice = envelope["choices"][0]
         if choice.get("finish_reason") == "length":
             raise EvaluationFailure("EVALUATION_OUTPUT_TRUNCATED")
         if choice.get("finish_reason") != "stop":
             raise ValueError("Unexpected finish reason")
+        stage = "report_json"
         content = json.loads(choice["message"]["content"])
+        stage = "report_validation"
         report = validate_report(content, {citation["key"] for citation in payload["citations"]})
         combined_answer = payload["answer"] + "\n" + payload["comparison_table"]
+        stage = "answer_excerpt"
         if any(issue.answer_excerpt and issue.answer_excerpt not in combined_answer for issue in report.issues):
             raise ValueError("Judge invented an answer excerpt")
+        stage = "evidence_required"
         if report.assessment == "scored" and not any(citation["source_text"].strip() for citation in payload["citations"]):
             raise ValueError("Cannot assign evidence-based scores without evidence")
+        stage = "provider_usage"
         raw_usage = envelope.get("usage") or {}
         usage = {key: raw_usage.get(key) for key in ("prompt_tokens", "completion_tokens", "total_tokens")}
         if any(value is not None and (type(value) is not int or not 0 <= value <= 9223372036854775807) for value in usage.values()):
             raise ValueError("Invalid usage")
+        stage = "provider_model"
         actual_model = envelope.get("model")
         if actual_model is not None and (not isinstance(actual_model, str) or not 1 <= len(actual_model) <= 256):
             raise ValueError("Invalid provider model")
         usage.update({"model": actual_model, "elapsed_seconds": round(time.monotonic() - started, 3),
             "request_sha256": digest(request)})
-    except (ValueError, TypeError, KeyError, IndexError, AttributeError):
+    except (ValueError, TypeError, KeyError, IndexError, AttributeError) as error:
+        fields = validation_fields(error) if isinstance(error, ValidationError) else []
+        reason = "unknown_citation" if type(error) is ValueError and str(error) == "Judge referenced an unknown citation" else stage
+        logger.warning("Evaluation response rejected: stage=%s error_type=%s fields=%s",
+            reason, type(error).__name__, json.dumps(fields))
         raise EvaluationFailure("EVALUATION_INVALID_RESPONSE", retryable=True) from None
     result = report.model_dump(mode="json")
     result.update({"overall_score": weighted_score(report), "rubric_version": config["rubric_version"],

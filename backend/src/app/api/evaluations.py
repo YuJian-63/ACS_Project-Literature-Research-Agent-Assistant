@@ -3,7 +3,7 @@ from typing import Annotated, Any, Literal
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Request
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import select
 
 from app.auth.dependencies import require_user
@@ -29,6 +29,7 @@ class EvaluationResponse(BaseModel):
     input_sha256: str | None = None
     evidence_sha256: str | None = None
     attempts: int = 0
+    revision: int = 0
     max_attempts: int | None = None
     error_code: str | None = None
     report: dict[str, Any] | None = None
@@ -39,12 +40,17 @@ class EvaluationResponse(BaseModel):
     next_attempt_at: datetime | None = None
 
 
+class EvaluationRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    refresh_evidence: bool = Field(default=False, strict=True)
+
+
 def evaluation_view(task_id, row, settings) -> dict:
     view = {"task_id": task_id, "enabled": settings.evaluation_enabled,
         "configured": settings.evaluation_configured, "status": "not_requested"}
     if row:
         view.update({name: getattr(row, name) for name in ("id", "status", "input_sha256", "evidence_sha256",
-            "attempts", "error_code", "report", "usage", "created_at", "updated_at", "finished_at", "next_attempt_at")})
+            "attempts", "revision", "error_code", "report", "usage", "created_at", "updated_at", "finished_at", "next_attempt_at")})
         view.update({name: row.config[name] for name in ("provider", "model", "rubric_version", "prompt_version", "max_attempts")})
     return view
 
@@ -63,7 +69,7 @@ def get_evaluation(task_id: UUID, request: Request, user: CurrentUser, evaluatio
 
 
 @router.post("", status_code=202, response_model=EvaluationResponse)
-def request_evaluation(task_id: UUID, request: Request, user: CurrentUser):
+def request_evaluation(task_id: UUID, request: Request, user: CurrentUser, body: EvaluationRequest | None = None):
     settings = request.app.state.settings
     with request.app.state.sessions.begin() as session:
         task = session.scalar(select(Task).where(Task.id == task_id, Task.user_id == user.id).with_for_update())
@@ -71,5 +77,5 @@ def request_evaluation(task_id: UUID, request: Request, user: CurrentUser):
             raise APIError(404, "TASK_NOT_FOUND", "Research task not found")
         if not settings.evaluation_configured:
             raise APIError(503, "EVALUATION_NOT_CONFIGURED", "Evaluation is disabled or not configured")
-        row = enqueue_evaluation(session, task, settings)
+        row = enqueue_evaluation(session, task, settings, refresh_evidence=bool(body and body.refresh_evidence))
         return evaluation_view(task_id, row, settings)

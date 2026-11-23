@@ -424,6 +424,7 @@ CREATE TABLE task_evaluations (
     config_sha256 varchar(64) NOT NULL,
     input_payload jsonb NOT NULL,
     config jsonb NOT NULL,
+    revision integer NOT NULL DEFAULT 0,
     evidence jsonb,
     evidence_sha256 varchar(64),
     status text NOT NULL DEFAULT 'pending',
@@ -439,9 +440,10 @@ CREATE TABLE task_evaluations (
     created_at timestamptz NOT NULL DEFAULT now(),
     updated_at timestamptz NOT NULL DEFAULT now(),
     FOREIGN KEY (artifact_id, task_id) REFERENCES artifacts(id, task_id) ON DELETE CASCADE,
-    CONSTRAINT task_evaluations_identity UNIQUE (task_id, input_sha256, config_sha256),
+    CONSTRAINT task_evaluations_identity UNIQUE (task_id, input_sha256, config_sha256, revision),
     CONSTRAINT task_evaluations_status CHECK (status IN ('pending', 'running', 'succeeded', 'failed', 'skipped')),
-    CONSTRAINT task_evaluations_attempts CHECK (attempts >= 0)
+    CONSTRAINT task_evaluations_attempts CHECK (attempts >= 0),
+    CONSTRAINT task_evaluations_revision CHECK (revision >= 0)
 );
 CREATE INDEX task_evaluations_queue_idx ON task_evaluations(status, next_attempt_at);
 CREATE INDEX task_evaluations_task_created_idx ON task_evaluations(task_id, created_at);

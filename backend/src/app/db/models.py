@@ -487,6 +487,7 @@ class TaskEvaluation(UUIDPrimaryKey, CreatedAt, UpdatedAt, Base):
     config_sha256: Mapped[str] = mapped_column(String(64))
     input_payload: Mapped[dict[str, Any]] = mapped_column(JSONB)
     config: Mapped[dict[str, Any]] = mapped_column(JSONB)
+    revision: Mapped[int] = mapped_column(Integer, server_default=text("0"))
     evidence: Mapped[dict[str, Any] | None] = mapped_column(JSONB(none_as_null=True))
     evidence_sha256: Mapped[str | None] = mapped_column(String(64))
     status: Mapped[str] = mapped_column(Text, server_default=text("'pending'"))
@@ -502,9 +503,10 @@ class TaskEvaluation(UUIDPrimaryKey, CreatedAt, UpdatedAt, Base):
 
     __table_args__ = (
         ForeignKeyConstraint(["artifact_id", "task_id"], ["artifacts.id", "artifacts.task_id"], ondelete="CASCADE"),
-        UniqueConstraint("task_id", "input_sha256", "config_sha256", name="task_evaluations_identity"),
+        UniqueConstraint("task_id", "input_sha256", "config_sha256", "revision", name="task_evaluations_identity"),
         CheckConstraint("status IN ('pending', 'running', 'succeeded', 'failed', 'skipped')", name="task_evaluations_status"),
         CheckConstraint("attempts >= 0", name="task_evaluations_attempts"),
+        CheckConstraint("revision >= 0", name="task_evaluations_revision"),
         Index("task_evaluations_queue_idx", "status", "next_attempt_at"),
         Index("task_evaluations_task_created_idx", "task_id", "created_at"),
     )

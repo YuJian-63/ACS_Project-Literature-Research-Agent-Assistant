@@ -19,5 +19,10 @@ try {
   for (const text of ['0 / 100','0 / 5','74%','740 / 1000','2 / 5','GPU-fixture: 0%','NO_SAMPLES','verified-zero']) assert.ok(html.includes(text), text);
   metrics.evaluation.assessment = 'insufficient_evidence';
   assert.ok(!/score\)?: 0 \/ 100|评分: 0 \/ 100/.test(render(metrics)), 'insufficient evidence must never become a zero score');
+  const insufficient = render(metrics);
+  assert.match(insufficient, /重新评分|Re-evaluate/, 'insufficient evidence keeps an explicit reassessment action');
+  assert.match(insufficient, /无法评分|Not scored/, 'missing scores have a readable explanation');
+  const badge = insufficient.match(/class="evaluation-status-badge[^]*?role="status">([^]*?)<\/span><\/div>/)?.[1] ?? '';
+  assert.ok(!/Succeeded|评分完成/.test(badge), 'insufficient evidence is not labelled as a scored success');
   console.log('PASS: real evaluation panel renders missing metrics, genuine zero scores, partial cache coverage and GPU snapshots');
 } finally { await server.close(); }

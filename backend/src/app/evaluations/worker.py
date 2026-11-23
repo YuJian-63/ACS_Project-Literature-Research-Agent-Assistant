@@ -9,6 +9,9 @@ from app.evaluations.contracts import EvaluationFailure
 from app.evaluations.evidence import prepare_evidence
 from app.evaluations.judge import evaluate
 from app.evaluations.service import claim_evaluation, configuration, digest, finish_evaluation, save_evidence
+from app.sources.access import source_permit
+from app.sources.arxiv import ArxivClient
+from app.sources.arxiv_transport import SupervisedArxivTransport
 
 logger = logging.getLogger(__name__)
 
@@ -16,6 +19,8 @@ logger = logging.getLogger(__name__)
 class EvaluationWorker:
     def __init__(self, sessions, settings, *, judge=evaluate):
         self.sessions, self.settings, self.judge = sessions, settings, judge
+        self.arxiv_client = ArxivClient(SupervisedArxivTransport(settings.arxiv_contact_email,
+            lambda: source_permit(sessions))) if settings.arxiv_configured else None
 
     def run_once(self) -> bool:
         if not self.settings.evaluation_configured:
@@ -32,15 +37,15 @@ class EvaluationWorker:
             if evidence is not None and digest(evidence) != claim.evidence_sha256:
                 raise EvaluationFailure("EVALUATION_EVIDENCE_CHANGED")
             if evidence is None:
-                evidence = prepare_evidence(claim.input_payload, self.settings)
+                evidence = prepare_evidence(claim.input_payload, self.settings, arxiv_client=self.arxiv_client)
                 if not save_evidence(self.sessions, claim, evidence):
                     return True
             report, usage = self.judge(self.settings, claim.input_payload, evidence, claim.config)
             finish_evaluation(self.sessions, claim, report=report, usage=usage)
         except EvaluationFailure as error:
             finish_evaluation(self.sessions, claim, error=error)
-        except Exception:
-            logger.warning("Evaluation interrupted; check worker and database health")
+        except Exception as error:
+            logger.warning("Evaluation interrupted: error_type=%s; check worker and database health", type(error).__name__)
             finish_evaluation(self.sessions, claim, error=EvaluationFailure("EVALUATION_INTERNAL_ERROR"))
         return True
 

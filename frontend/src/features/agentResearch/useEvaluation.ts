@@ -26,13 +26,13 @@ export function useEvaluation(taskId: string | undefined, evaluation: Evaluation
     setSubmission({ busy: false });
     return () => { post.current?.abort(); post.current = null; };
   }, [taskId]);
-  async function request() {
+  async function request(refreshEvidence = false) {
     if (!taskId || post.current) return;
     const controller = new AbortController();
     post.current = controller;
     setSubmission({ taskId, busy: true });
     try {
-      await evaluations.request(taskId, controller.signal);
+      await evaluations.request(taskId, controller.signal, refreshEvidence);
       if (!controller.signal.aborted) { setRevision(n => n + 1); onRequested?.(); }
     } catch (error) {
       if (!controller.signal.aborted && !isCanceled(error)) setSubmission({ taskId, busy: false, error: asApiError(error) });
