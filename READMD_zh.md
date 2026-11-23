@@ -183,7 +183,7 @@ uv run --locked python -m app.evaluation_worker
 | --- | --- |
 | [frontend/](frontend/README.md) | React / TypeScript 研究工作台，提供账号、论文库、任务详情及原文证据界面。 |
 | [backend/](backend/README.md) | FastAPI、PostgreSQL、数据库迁移，以及解析、邮件和研究等后台 Worker。 |
-| [agent/](agent/README.md) | Baseline 和 Retrieval Extension，负责阅读、检索、模型调用和带引用的回答。 |
+| [agent/](agent/README.md) | Baseline 和 Retrieval Extension，负责阅读论文、检索原文和生成带引用的回答。目录说明包含 Agent 工作流与消融实验的运行方法。 |
 | [tacc/](tacc/README.md) | 课程 SDK、环境配置与探测脚本；[run_job.py](tacc/research/run_job.py) 读取任务清单并调用 Agent。 |
 | [model-server/](model-server/README.md) | TACC 课程 Qwen 原版服务、[优化版](model-server/server-opt/README.md)、遥测及模型服务实验。 |
 | [scripts/](docs/service_launch.md#按系统使用脚本) | 各系统本地启动器、TACC 联调和 ECS 服务入口。 |
@@ -213,7 +213,7 @@ uv run --locked python -m app.evaluation_worker
 
 | 实验 | 研究问题 | 用例与配置 | 报告或产物 |
 | --- | --- | --- | --- |
-| [1. Agent 消融](#evaluation-agent) | RAG、Planner、Reflection 各自带来什么变化？ | 5 类用例 × 5 种组件配置，共 25 次运行。 | 每次的 `result.json`、内嵌 trace、执行日志；本次提供的消融报告未附冻结结果表。 |
+| [1. Agent 消融](#evaluation-agent) | RAG、Planner、Reflection 各自带来什么变化？ | 5 类用例 × 5 种组件配置，共 25 次运行。 | 每次运行生成 `result.json` 和 `trace.json`。实验结果见[项目报告](Report.pdf) §7.1.1。 |
 | [2. Model Server](#evaluation-model-server) | 并发、调度预算与候选优化如何影响模型推理？ | 串行 / C=1 / C=4；prefill 预算 2048 / 4096 / 8192；GDN 与 N-gram 候选存档。 | [模型服务报告](model-server/server-opt/reports/Server_report.md)及[结果摘要](model-server/server-opt/results/)。 |
 | [3. 全流程研究](#evaluation-end-to-end) | 用户研究任务的质量、开销和等待时间如何变化？ | 四类研究任务、15 对 Baseline / Extension，以及未配对运行存档。 | [全流程报告](docs/report.md)及[冻结清单](docs/evaluation/researcher-20261123.json)。 |
 
@@ -227,7 +227,7 @@ Agent 消融比较组件开关，Model Server 实验比较推理服务，全流�
 
 | 用例 | 数据和任务 | 论文库要求 |
 | --- | --- | --- |
-| `library-qa` | 查找 SkillOpt，解释其优化对象和保留一次更新的判断方法。 | 在自己的账号上传 / 导入 SkillOpt，确认按标题搜索可找到；记录论文版本、PDF SHA-256。 |
+| `library-qa` | [`library-qa.json`](agent/examples/library-qa.json)：查找 SkillOpt，解释其优化对象和保留一次更新的判断方法。 | 在自己的账号上传 / 导入 SkillOpt，确认按标题搜索可找到；记录论文版本、PDF SHA-256。 |
 | `qa` | [`qa.json`](agent/examples/qa.json)：基于 *Attention Is All You Need* 解释 scaled dot-product attention 的 `sqrt(d_k)` 缩放。 | 无；预选 `1706.03762v7`。 |
 | `summary` | [`summary.json`](agent/examples/summary.json)：总结同一篇论文的问题、方法、翻译结果及适用条件。 | 无；预选 `1706.03762v7`。 |
 | `review` | [`review.json`](agent/examples/review.json)：查找 LoRA / QLoRA，比较方法与显存节约机制。 | 无；需要外部搜索。 |
@@ -241,70 +241,23 @@ Agent 消融比较组件开关，Model Server 实验比较推理服务，全流�
 | `rag-reflection` | `extension.py --reflection` | 开启 | 关闭 | 开启 |
 | `full` | `extension.py --planner --reflection` | 开启 | 开启 | 开启 |
 
-这里的 `full` 是全部组件开启，独立于 `--context-policy full` 的完整历史策略。开启 RAG 表示提供 `retrieve` 工具，不保证模型一定调用；Reflection 在上下文压力收尾时可能不执行，需由 trace 核实实际路径。
+这里的 `full` 是全部组件开启，独立于 `--context-policy full` 的完整历史策略。开启 RAG 表示提供 `retrieve` 工具，不保证模型一定调用；启用 Reflection 后，上下文压力收尾产生的有效草稿也会进入复核。各组件的实际调用可在 trace 中核对。
 
 ##### 环境与 25 次运行命令
 
-按 [Agent 文档](agent/README.md)初始化独立 Agent，在私有 `agent/.env` 配置百炼 `BAILIAN_API_KEY`、`MODEL_BASE_URL`、`MODEL_NAME=qwen3.8-27b`、`MODEL_PROVIDER=bailian` 和 `TAVILY_API_KEY`。Embedding 使用 `text-embedding-v4`、1024 维。论文库用例还需运行 Getting Started 中的后端，配置 `AGENT_LIBRARY_BASE_URL`、`AGENT_LIBRARY_ORIGIN`，并使用已验证账号登录。可在私有 `.env` 配置 `AGENT_LIBRARY_USERNAME` / `AGENT_LIBRARY_PASSWORD`，否则带 `--library-login` 的运行会交互询问。以下不使用 `--persist`，无需 Neon 数据库。
+按 [Agent 文档](agent/README.md)配置独立 Agent 的百炼和 Tavily 凭据，启动后端，并使用已验证的账号上传或导入 SkillOpt 论文。确认在该账号的论文库中搜索 `SkillOpt` 能找到原文，然后从仓库根目录运行：
 
-当前仓库有 4 份示例，`agent/run.sh` 只比较 Baseline / Extension。以下命令按报告中的任务描述补充 `library-qa`，显式运行五种配置；不修改 Agent 源码。固定主 Agent 步数 40、任务时限 600 秒、单次输出 4096 Token、上下文 32000、完整历史策略及 0.9 收尾阈值。它们是当前示例默认值的显式设置，与全流程实验的动态预算分开记录。
-
-```bash
-cd agent
-uv sync --frozen
-OUT="$PWD/runs/ablation/$(date -u +%Y%m%dT%H%M%SZ)"
-mkdir -p "$OUT/tasks"
-uv run --frozen python - "$OUT/tasks" <<'PY'
-import json
-import sys
-from pathlib import Path
-
-target = Path(sys.argv[1])
-cases = {path.stem: json.loads(path.read_text(encoding="utf-8"))
-         for path in Path("examples").glob("*.json")}
-cases["library-qa"] = {
-    "question": "Find the SkillOpt paper in my library. Explain what SkillOpt optimizes and how it decides whether to keep an update. Cite the original PDF evidence.",
-    "sources": [], "allow_search": True, "max_papers": 1,
-}
-for name, task in cases.items():
-    task.update(max_steps=40, timeout_seconds=600, max_output_tokens=4096)
-    (target / f"{name}.json").write_text(json.dumps(task, ensure_ascii=False, indent=2), encoding="utf-8")
-PY
-
-status=0
-for task in "$OUT/tasks/"*.json; do
-  name=$(basename "$task" .json)
-  login=()
-  if [[ "$name" == library-qa || "$name" == discovery ]]; then login=(--library-login); fi
-  for variant in baseline rag rag-planner rag-reflection full; do
-    directory="$OUT/$name/$variant"
-    mkdir -p "$directory"
-    entry=extension.py
-    flags=(--index-dir "$directory/index")
-    case "$variant" in
-      baseline) entry=baseline.py; flags=() ;;
-      rag-planner) flags+=(--planner) ;;
-      rag-reflection) flags+=(--reflection) ;;
-      full) flags+=(--planner --reflection) ;;
-    esac
-    printf 'Running %s / %s\n' "$name" "$variant"
-    if ! uv run --frozen python "$entry" --task "$task" \
-        --context-window 32000 --context-policy full --context-finalize-ratio 0.9 \
-        --output "$directory/result.json" "${flags[@]}" "${login[@]}" \
-        > "$directory/run.log" 2>&1; then status=1; fi
-  done
-done
-printf 'Batch: %s\nExit summary: %s (0 means all CLI runs succeeded)\n' "$OUT" "$status"
-cd ..
+```sh
+./agent/run.sh '用户名' '密码'
 ```
 
-每例每配置输出 `agent/runs/ablation/<batch>/<case>/<variant>/result.json` 和 `run.log`，trace 保存在 `result.json` 中，当前 CLI 不另写 `trace.json`。保留失败、`partial` 和缺失输出；CLI 返回成功也可能是 `partial`，需分别检查。RAG 索引按本轮用例 / 配置隔离，PDF 缓存仍由 Agent 共用；记录冷热缓存条件，重复实验使用新的批次目录。
+脚本依次对五份示例运行五种配置。每次运行的结果和事件记录分别写入 `agent/runs/ablation/<batch>/<case>/<configuration>/` 下的 `result.json` 和 `trace.json`。检查结果中的 `stop_reason` 可区分完整交稿、部分交稿和失败。每次启动脚本都会创建新的批次目录。
 
 ##### 指标与复现边界
 
 按相同用例比较 `usage.elapsed_seconds`、步数、模型 / 工具调用、输入 / 输出 / 总 Token、`stop_reason`、引用及 `unresolved`，并从 trace 核对 `retrieve`、Planner、Reflection 和 Embedding 的实际开销。`rag` 对 `baseline`、`rag-planner` / `rag-reflection` 对 `rag`、`full` 对其余配置分别回答不同的增量问题。独立 CLI 不会自动触发后端 DeepSeek 评分；这些产物不能直接当作全流程评分表。
 
-提供的消融报告没有附带 25 次冻结产物，也未固定 SkillOpt 的 arXiv 版本 / PDF 哈希；因此以上是按报告设计补齐的可执行复现流程，不承诺还原未归档的历史数值。动态搜索、论文库内容、缓存与模型服务更新均可能影响结果。建议交替配置顺序、多轮重复，并保存任务 JSON、代码 SHA、模型配置和全部输出。
+动态搜索、论文库内容、缓存与模型服务更新均可能影响结果。建议交替配置顺序、多轮重复，并保存任务 JSON、代码 SHA、模型配置和全部输出。
 
 <a id="evaluation-model-server"></a>
 

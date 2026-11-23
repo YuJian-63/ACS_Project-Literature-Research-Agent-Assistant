@@ -327,6 +327,10 @@ Desktop.ini
 /tacc/qwen27b-private-vllm-student-release/vllm-src/
 /tacc/qwen27b-private-vllm-student-release/qwen-private-build/vllm-source.tar.gz
 
+# Local report sources and archived working files
+/report/
+/archieve/
+
 # Local root agent notes
 /AGENTS.md
 /PROGRESS.md

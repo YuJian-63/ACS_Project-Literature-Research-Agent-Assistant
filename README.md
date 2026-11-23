@@ -185,7 +185,7 @@ The browser manages papers and tasks through the API. The backend passes inputs 
 | --- | --- |
 | [frontend/](frontend/README.md) | React / TypeScript research workspace with accounts, a paper library, task details, and original evidence views. |
 | [backend/](backend/README.md) | FastAPI, PostgreSQL, migrations, and background Workers for parsing, email, research, and related services. |
-| [agent/](agent/README.md) | Baseline and Retrieval Extension workflows for reading, retrieval, model calls, and answers with citations. |
+| [agent/](agent/README.md) | Baseline and Retrieval Extension workflows for reading papers, retrieving passages, and citing evidence. Includes instructions for running the Agent ablation. |
 | [tacc/](tacc/README.md) | Course SDK, environment configuration, and probe scripts. [run_job.py](tacc/research/run_job.py) reads task manifests and invokes the Agent. |
 | [model-server/](model-server/README.md) | Original TACC Qwen service, [optimized service](model-server/server-opt/README.md), telemetry, and model-serving experiments. |
 | [scripts/](docs/service_launch.md#按系统使用脚本) | Platform-specific local launchers, TACC integration, and ECS service entry points. |
@@ -215,7 +215,7 @@ The project evaluation consists of three experiments. This section documents tes
 
 | Experiment | Research question | Cases and configurations | Reports or outputs |
 | --- | --- | --- | --- |
-| [1. Agent ablation](#evaluation-agent) | What changes do RAG, Planner, and Reflection introduce individually? | 5 case types x 5 component configurations, totaling 25 runs. | Per-run `result.json`, embedded traces, and execution logs; the supplied ablation report does not include a frozen results table. |
+| [1. Agent ablation](#evaluation-agent) | What changes do RAG, Planner, and Reflection introduce individually? | 5 case types x 5 component configurations, totaling 25 runs. | Per-run `result.json` and `trace.json`. Results are in §7.1.1 of the [final report](Report.pdf). |
 | [2. Model Server](#evaluation-model-server) | How do concurrency, scheduling budgets, and candidate optimizations affect inference? | Serial / C=1 / C=4; prefill budgets 2048 / 4096 / 8192; archived GDN and N-gram candidates. | [Model-server report](model-server/server-opt/reports/Server_report.md) and [result summaries](model-server/server-opt/results/). |
 | [3. End-to-end research](#evaluation-end-to-end) | How do quality, cost, and waiting time change for user research tasks? | Four research task types, 15 Baseline / Extension pairs, and archived unpaired runs. | [End-to-end report](docs/report.md) and [frozen manifest](docs/evaluation/researcher-20261123.json). |
 
@@ -229,7 +229,7 @@ Agent ablation compares component switches, the Model Server experiment compares
 
 | Case | Data and task | Paper library requirements |
 | --- | --- | --- |
-| `library-qa` | Find SkillOpt and explain what it optimizes and how it decides whether to retain an update. | Upload/import SkillOpt under your account, verify that title search finds it, and record the paper version and PDF SHA-256. |
+| `library-qa` | [`library-qa.json`](agent/examples/library-qa.json): find SkillOpt and explain what it optimizes and how it decides whether to retain an update. | Upload/import SkillOpt under your account, verify that title search finds it, and record the paper version and PDF SHA-256. |
 | `qa` | [`qa.json`](agent/examples/qa.json): explain the `sqrt(d_k)` scaling in scaled dot-product attention using *Attention Is All You Need*. | None; `1706.03762v7` is preselected. |
 | `summary` | [`summary.json`](agent/examples/summary.json): summarize the same paper's problem, method, translation results, and applicability. | None; `1706.03762v7` is preselected. |
 | `review` | [`review.json`](agent/examples/review.json): find LoRA / QLoRA and compare their methods and GPU-memory savings. | None; external search is required. |
