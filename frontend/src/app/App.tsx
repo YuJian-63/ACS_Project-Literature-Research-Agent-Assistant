@@ -14,6 +14,7 @@ const PapersPage = lazy(() => import('../features/papers/pages/PapersPage'));
 const SearchPapersPage = lazy(() => import('../features/search/pages/SearchPapersPage'));
 const NewResearchPage = lazy(() => import('../features/agentResearch/NewResearchPage'));
 const AgentResultPage = lazy(() => import('../features/agentResearch/ResultPage'));
+const ReportComparisonPage = lazy(() => import('../features/agentResearch/ReportComparisonPage'));
 const TasksPage = lazy(() => import('../features/agentResearch/RecordsPage'));
 
 function AppFailure() {
@@ -51,7 +52,7 @@ function Workspace() {
   const searchActive = pathname === '/papers/search';
   const [searchVisited, setSearchVisited] = useState(searchActive);
   useEffect(() => { if (searchActive) setSearchVisited(true); }, [searchActive]);
-  const currentPage = pathname === '/models' ? t('设置') : pathname === '/papers/search' ? t('搜索论文') : pathname === '/tasks/new' ? t('新建研究') : pathname === '/tasks' ? t('研究记录') : pathname.startsWith('/tasks/') ? t('研究结果') : t('论文库');
+  const currentPage = pathname === '/tasks/compare' ? t('报告对比') : pathname === '/models' ? t('设置') : pathname === '/papers/search' ? t('搜索论文') : pathname === '/tasks/new' ? t('新建研究') : pathname === '/tasks' ? t('研究记录') : pathname.startsWith('/tasks/') ? t('研究结果') : t('论文库');
   return <div className={'workspace' + (sidebarCollapsed ? ' is-sidebar-collapsed' : '')}>
     <a href="#main-content" className="skip-link">{t('跳到主要内容')}</a>
     <aside id="workspace-sidebar" className="sidebar">
@@ -72,6 +73,7 @@ function Workspace() {
         <Route path="/tasks" element={null} />
         <Route path="/tasks/new" element={<NewResearchPage />} />
         <Route path="/tasks/preview" element={<Navigate to="/tasks" replace />} />
+        <Route path="/tasks/compare" element={<ReportComparisonPage />} />
         <Route path="/tasks/:taskId" element={<AgentResultPage />} />
         <Route path="/account/password" element={<AuthPage />} />
         <Route path="*" element={<Result status="404" title={t('页面不存在')} subTitle={t('你可以回到论文库，或从任务列表重新打开研究任务。')} extra={<Link to="/papers"><Button type="primary">{t('返回论文库')}</Button></Link>} />} />

@@ -1,4 +1,7 @@
 export const english: Record<string, string> = {
+  "对比所选报告": "Compare selected reports",
+  "报告对比": "Report comparison",
+  "此报告未提供该部分内容": "This report does not include this section",
   "查看研究引用的原文片段与论文来源，核对结论的依据。": "Review cited passages and paper sources to verify the evidence behind the conclusions.",
   "清除": "Clear",
   "服务地址已清除": "Service address cleared",
