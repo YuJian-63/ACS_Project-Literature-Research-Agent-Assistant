@@ -1,0 +1,44 @@
+{
+  "protocol": "concurrent-long-copy-screen-v1",
+  "concurrency": 4,
+  "baseline_result": "/mnt/e/HKUST_class/csit6000V/Project_new/qwen27b-private-vllm-concurrency/results/job-30935",
+  "candidate_result": "/mnt/e/HKUST_class/csit6000V/Project_new/qwen27b-private-vllm-concurrency/results/job-30940",
+  "workload_sha256": "dee4ceacc907584f976b975d76c8750203ab58e0458ac913146b00ce14970dc8",
+  "quality": {
+    "baseline": true,
+    "candidate": true
+  },
+  "metrics_requests": {
+    "baseline": 2,
+    "candidate": 2
+  },
+  "means": {
+    "elapsed_s": {
+      "baseline": 56.07709873118438,
+      "candidate": 57.735348998976406
+    },
+    "ttft_s": {
+      "baseline": 17.99609261850128,
+      "candidate": 18.433743467903696
+    },
+    "tpot_s": {
+      "baseline": 0.023584440625622462,
+      "candidate": 0.024349094659549708
+    },
+    "requests_per_s": {
+      "baseline": 0.06569486215993034,
+      "candidate": 0.06393096642681431
+    },
+    "output_tokens_per_s": {
+      "baseline": 106.55706642340701,
+      "candidate": 103.6960275442928
+    }
+  },
+  "relative_change_candidate_minus_baseline": {
+    "elapsed_s": 0.029570899802451395,
+    "ttft_s": 0.02431921521411153,
+    "tpot_s": 0.0324219703178593,
+    "requests_per_s": -0.02684982775094231,
+    "output_tokens_per_s": -0.026849827750942384
+  }
+}

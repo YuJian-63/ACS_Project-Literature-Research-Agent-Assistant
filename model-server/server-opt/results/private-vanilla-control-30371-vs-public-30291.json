@@ -1,0 +1,87 @@
+{
+  "experiment": "private-vanilla-environment-control",
+  "public_baseline": {
+    "base_url": "http://10.0.3.10:8000/v1",
+    "service_job": "30284",
+    "node": "10-0-3-10",
+    "client_job": "30291"
+  },
+  "private_vanilla": {
+    "base_url": "http://10.0.3.11:8000/v1",
+    "service_job": "30361",
+    "node": "10-0-3-11",
+    "client_job": "30371"
+  },
+  "same_workload": true,
+  "same_input_counts": "False",
+  "same_reference_counts": "False",
+  "same_output_totals": true,
+  "quality": {
+    "public_requests": 24,
+    "private_requests": 24,
+    "private": true,
+    "public": true
+  },
+  "metrics": {
+    "private": {
+      "samples": 2,
+      "errors": [],
+      "peak_observed": null,
+      "counter_deltas": {
+        "prefix_cache_queries_total": 359684.0,
+        "prefix_cache_hits_total": 232064.0,
+        "num_preemptions_total": 0.0,
+        "request_queue_time_seconds_count": 24.0,
+        "request_queue_time_seconds_sum": 0.021464542718604207,
+        "request_prefill_time_seconds_count": 24.0,
+        "request_prefill_time_seconds_sum": 110.18258273787796,
+        "request_prefill_kv_computed_tokens_count": 24.0,
+        "request_prefill_kv_computed_tokens_sum": 127620.0
+      },
+      "prefix_cache_hit_fraction": 0.6451885543977491,
+      "mean_queue_time_s": 0.0008943559466085086,
+      "gauge_scope": "Boundary snapshots only; no time-series or peak measurement"
+    },
+    "public": {
+      "samples": 2,
+      "errors": [],
+      "peak_observed": null,
+      "counter_deltas": {
+        "prefix_cache_queries_total": 359684.0,
+        "prefix_cache_hits_total": 232064.0,
+        "num_preemptions_total": 0.0,
+        "request_queue_time_seconds_count": 24.0,
+        "request_queue_time_seconds_sum": 0.012270151870325208,
+        "request_prefill_time_seconds_count": 24.0,
+        "request_prefill_time_seconds_sum": 91.40051381895319,
+        "request_prefill_kv_computed_tokens_count": 24.0,
+        "request_prefill_kv_computed_tokens_sum": 127620.0
+      },
+      "prefix_cache_hit_fraction": 0.6451885543977491,
+      "mean_queue_time_s": 0.000511256327930217,
+      "gauge_scope": "Boundary snapshots only; no time-series or peak measurement"
+    }
+  },
+  "comparison": {
+    "e2e_public_s": 26.15303083025113,
+    "prefill_public_s": 91.40051381895319,
+    "tpot_increase_pct": 18.294869980179307,
+    "e2e_increase_pct": 19.016372333535593,
+    "e2e_private_s": 31.12638854943604,
+    "prefill_private_s": 110.18258273787796,
+    "queue_private_s": 0.0008943559466085086,
+    "cache_hit_equal": true,
+    "prefill_increase_pct": 20.549194018896255,
+    "ttft_public_s": 3.895756063381365,
+    "tpot_private_ms": 18.76986859695677,
+    "ttft_private_s": 4.680643229949055,
+    "tpot_public_ms": 15.867018240183807,
+    "queue_public_s": 0.000511256327930217,
+    "ttft_increase_pct": 20.147235961340936
+  },
+  "interpretation": "Private vanilla is slower, but public and private runs were on different nodes. This is an environment/node control result, not proof of a private source slowdown or an N-gram gain.",
+  "next_action": "Repeat alternating public/private vanilla or private vanilla/N-gram controls on matched GPU class before profiling or claiming algorithm speedup",
+  "source_public": "public course runtime",
+  "source_private": "private baseline variant; targeted source hashes match course archive",
+  "not_a_candidate_result": true
+}

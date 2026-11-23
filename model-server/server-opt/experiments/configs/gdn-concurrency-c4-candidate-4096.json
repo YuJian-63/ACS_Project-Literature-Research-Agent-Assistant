@@ -1,0 +1,11 @@
+{
+  "async_scheduling": true,
+  "attention_backend": null,
+  "max_num_batched_tokens": 4096,
+  "max_model_len": 36864,
+  "gpu_memory_utilization": 0.9,
+  "speculative_config": null,
+  "profile": "gdn-indexed-state-concurrency-c4-candidate",
+  "max_num_seqs": 4,
+  "enable_prefix_caching": true
+}

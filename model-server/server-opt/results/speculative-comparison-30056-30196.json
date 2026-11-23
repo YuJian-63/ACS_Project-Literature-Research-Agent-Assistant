@@ -1,0 +1,467 @@
+{
+  "experiment": "04-native-ngram-gpu",
+  "varying_parameter": "speculative_config",
+  "kind": "parameter_tuning",
+  "isolated_source_gain_attribution_verified": false,
+  "deployment_argument_differences": {
+    "model": {
+      "baseline": "/mnt/home/public/course-envs/CSIT6000V/project/qwen3.8-27b-v1/models/Qwen3.8-27B-AWQ-INT4",
+      "candidate": "/mnt/home/public/course-envs/CSIT6000V/project-private-vllm/qwen3.8-27b-v1/models/Qwen3.8-27B-AWQ-INT4"
+    }
+  },
+  "quality_gate_passed": true,
+  "scope": "Fixed synthetic sample only; not a source-code speedup or a general quality guarantee",
+  "runs": [
+    {
+      "result_directory": "results/job-30056",
+      "client_job_id": "30056",
+      "client_host": "10-0-1-10",
+      "service_job_id": "30053",
+      "config": {
+        "profile": "public-reference-gdn",
+        "max_model_len": 36864,
+        "max_num_seqs": 4,
+        "max_num_batched_tokens": 4096,
+        "gpu_memory_utilization": 0.9,
+        "enable_prefix_caching": true
+      },
+      "service_evidence": {
+        "source_kind": "public",
+        "arguments": {
+          "enable_auto_tool_choice": true,
+          "tool_call_parser": "qwen3_coder",
+          "host": "0.0.0.0",
+          "disable_access_log_for_endpoints": "/metrics",
+          "model": "/mnt/home/public/course-envs/CSIT6000V/project/qwen3.8-27b-v1/models/Qwen3.8-27B-AWQ-INT4",
+          "dtype": "bfloat16",
+          "max_model_len": 36864,
+          "served_model_name": [
+            "qwen3.8-27b"
+          ],
+          "safetensors_load_strategy": "prefetch",
+          "reasoning_parser": "qwen3",
+          "tensor_parallel_size": 2,
+          "gpu_memory_utilization": 0.9,
+          "enable_prefix_caching": true,
+          "language_model_only": true,
+          "max_num_batched_tokens": 4096,
+          "max_num_seqs": 4
+        },
+        "runtime_versions": {
+          "vllm": "0.26.0",
+          "torch": "2.11.0+cu128",
+          "transformers": "5.10.4",
+          "triton": "3.6.0"
+        },
+        "gpus": [
+          {
+            "name": "NVIDIA GeForce RTX 3090",
+            "uuid": "GPU-a769d98f-3e75-911d-19c6-04e97d1eede1",
+            "free_mib_at_start": 24258,
+            "total_mib": 24576
+          },
+          {
+            "name": "NVIDIA GeForce RTX 3090",
+            "uuid": "GPU-2a1ea953-f6f5-8f57-52ad-a0cbb1bada00",
+            "free_mib_at_start": 24258,
+            "total_mib": 24576
+          }
+        ],
+        "node": "10-0-1-11",
+        "custom_allreduce_disabled": true,
+        "async_scheduling_enabled": true,
+        "startup_memory_profile_by_tp_rank": {},
+        "reported_kv_budget_gib_by_tp_rank": {},
+        "reported_gpu_budget_gib_by_tp_rank": {},
+        "reported_kv_token_capacity": 278528,
+        "source_manifest": {
+          "source_sha256": {
+            "vllm/third_party/flash_linear_attention/ops/chunk.py": "c105ead259e86aedc248c53e7c4cef07034d0ff12da608d80265d1dd0990803f",
+            "vllm/third_party/flash_linear_attention/ops/chunk_delta_h.py": "1b3ad391f939d9443c6b7adb19e57fe381bd5dccea064e8417a4f85b0e713b26",
+            "vllm/model_executor/layers/mamba/gdn/qwen_gdn_linear_attn.py": "1227d6f385a52296e9f08223544b1c5fdc7e8d9aa09a848e7a8e522a8dc51214"
+          },
+          "scheduler_sha256": "2ed2a550b6558b2495eda845a97ae38bcf0225027b9e25fbf00fc3880c1d3941",
+          "matches_course_archive": true
+        },
+        "execution": {
+          "architecture": "Qwen3_5ForConditionalGeneration",
+          "quantization": "compressed-tensors",
+          "attention_backend": "FLASH_ATTN",
+          "gdn_backend": "Triton/FLA",
+          "linear_kernel": "MarlinLinearKernel"
+        },
+        "provenance_limitations": "Targeted source hashes recorded; complete installation and weight equivalence not established"
+      }
+    },
+    {
+      "result_directory": "results/job-30196",
+      "client_job_id": "30196",
+      "client_host": "10-0-4-10",
+      "service_job_id": "30191",
+      "config": {
+        "profile": "public-reference-gdn",
+        "max_model_len": 36864,
+        "max_num_seqs": 4,
+        "max_num_batched_tokens": 4096,
+        "gpu_memory_utilization": 0.9,
+        "enable_prefix_caching": true,
+        "async_scheduling": true,
+        "speculative_config": {
+          "method": "ngram_gpu",
+          "num_speculative_tokens": 3,
+          "prompt_lookup_min": 2,
+          "prompt_lookup_max": 5
+        }
+      },
+      "service_evidence": {
+        "arguments": {
+          "enable_auto_tool_choice": true,
+          "tool_call_parser": "qwen3_coder",
+          "host": "0.0.0.0",
+          "disable_access_log_for_endpoints": "/metrics",
+          "model": "/mnt/home/public/course-envs/CSIT6000V/project-private-vllm/qwen3.8-27b-v1/models/Qwen3.8-27B-AWQ-INT4",
+          "dtype": "bfloat16",
+          "max_model_len": 36864,
+          "served_model_name": [
+            "qwen3.8-27b"
+          ],
+          "safetensors_load_strategy": "prefetch",
+          "reasoning_parser": "qwen3",
+          "tensor_parallel_size": 2,
+          "gpu_memory_utilization": 0.9,
+          "enable_prefix_caching": true,
+          "language_model_only": true,
+          "max_num_batched_tokens": 4096,
+          "max_num_seqs": 4,
+          "async_scheduling": true,
+          "speculative_config": {
+            "method": "ngram_gpu",
+            "num_speculative_tokens": 3,
+            "prompt_lookup_min": 2,
+            "prompt_lookup_max": 5
+          }
+        },
+        "runtime_versions": {
+          "vllm": "0.26.0",
+          "torch": "2.11.0+cu128",
+          "transformers": "5.10.4",
+          "triton": "3.6.0"
+        },
+        "gpus": [
+          {
+            "name": "NVIDIA GeForce RTX 3090",
+            "uuid": "GPU-d6ea9008-5eba-e731-7952-dce40fe9a5be",
+            "total_mib": 24576,
+            "free_mib_at_start": 24124
+          },
+          {
+            "name": "NVIDIA GeForce RTX 3090",
+            "uuid": "GPU-d77daf50-ddaa-3579-ebd6-f502a3a78b6e",
+            "total_mib": 24576,
+            "free_mib_at_start": 24124
+          }
+        ],
+        "node": "10-0-4-11",
+        "custom_allreduce_disabled": true,
+        "async_scheduling_enabled": true,
+        "startup_memory_profile_by_tp_rank": {
+          "0": {
+            "weight_gib": 9.27,
+            "profile_peak_activation_gib": 1.25,
+            "non_torch_gib": 0.12,
+            "cuda_graph_gib": 0.16
+          },
+          "1": {
+            "weight_gib": 9.27,
+            "profile_peak_activation_gib": 1.25,
+            "non_torch_gib": 0.12,
+            "cuda_graph_gib": 0.16
+          }
+        },
+        "reported_kv_budget_gib_by_tp_rank": {
+          "0": 10.32,
+          "1": 10.32
+        },
+        "reported_gpu_budget_gib_by_tp_rank": {
+          "0": 21.2,
+          "1": 21.2
+        },
+        "reported_kv_token_capacity": 250913,
+        "source_manifest": {
+          "experiment": "03-gdn-indexed-state",
+          "variant": "baseline",
+          "scheduler_sha256": "2ed2a550b6558b2495eda845a97ae38bcf0225027b9e25fbf00fc3880c1d3941",
+          "source_sha256": {
+            "vllm/third_party/flash_linear_attention/ops/chunk.py": "c105ead259e86aedc248c53e7c4cef07034d0ff12da608d80265d1dd0990803f",
+            "vllm/third_party/flash_linear_attention/ops/chunk_delta_h.py": "1b3ad391f939d9443c6b7adb19e57fe381bd5dccea064e8417a4f85b0e713b26",
+            "vllm/model_executor/layers/mamba/gdn/qwen_gdn_linear_attn.py": "1227d6f385a52296e9f08223544b1c5fdc7e8d9aa09a848e7a8e522a8dc51214",
+            "benchmarks/kernels/benchmark_gdn_indexed_state.py": "8ebde96c6bf8eeb41e3dfaeefc50f8e781558a767ebd885d0c40a239c53bbe28"
+          },
+          "change": "Original course runtime",
+          "tacc_measured": false
+        },
+        "source_kind": "private",
+        "execution": {
+          "architecture": "Qwen3_5ForConditionalGeneration",
+          "quantization": "compressed-tensors",
+          "attention_backend": "FLASH_ATTN",
+          "gdn_backend": "Triton/FLA",
+          "linear_kernel": "MarlinLinearKernel"
+        }
+      }
+    }
+  ],
+  "quality": {
+    "baseline": "24/24 independently checked",
+    "candidate": "24/24 independently checked"
+  },
+  "latencies": {
+    "all_requests": {
+      "ttft_s": {
+        "mean": {
+          "baseline": 1.1637238153489307,
+          "candidate": 1.1279236434978277,
+          "reduction_fraction": 0.03076346069309288
+        },
+        "median": {
+          "baseline": 0.2655873278854415,
+          "candidate": 0.21420219959691167,
+          "reduction_fraction": 0.19347733454622618
+        },
+        "sample_counts": [
+          24,
+          24
+        ]
+      },
+      "elapsed_s": {
+        "mean": {
+          "baseline": 1.6322819076788921,
+          "candidate": 1.8066932928437989,
+          "reduction_fraction": -0.10685126407663237
+        },
+        "median": {
+          "baseline": 0.7937277083983645,
+          "candidate": 0.9941853489726782,
+          "reduction_fraction": -0.2525521516425453
+        },
+        "sample_counts": [
+          24,
+          24
+        ]
+      },
+      "tpot_s": {
+        "mean": {
+          "baseline": 0.014694609978638895,
+          "candidate": 0.021361663489085764,
+          "reduction_fraction": -0.45370741517730395
+        },
+        "median": {
+          "baseline": 0.014702686175811462,
+          "candidate": 0.021606292680371553,
+          "reduction_fraction": -0.46954729373995296
+        },
+        "sample_counts": [
+          24,
+          24
+        ]
+      }
+    },
+    "first_questions": {
+      "ttft_s": {
+        "mean": {
+          "baseline": 5.654655839025509,
+          "candidate": 5.710247057490051,
+          "reduction_fraction": -0.009831052507365712
+        },
+        "median": {
+          "baseline": 5.6570283606415614,
+          "candidate": 5.714543298468925,
+          "reduction_fraction": -0.010166987711696995
+        },
+        "sample_counts": [
+          4,
+          4
+        ]
+      },
+      "elapsed_s": {
+        "mean": {
+          "baseline": 6.097534815722611,
+          "candidate": 6.3364464057958685,
+          "reduction_fraction": -0.039181668870052144
+        },
+        "median": {
+          "baseline": 6.09910978958942,
+          "candidate": 6.340287229511887,
+          "reduction_fraction": -0.03954305599386543
+        },
+        "sample_counts": [
+          4,
+          4
+        ]
+      },
+      "tpot_s": {
+        "mean": {
+          "baseline": 0.014716783851577805,
+          "candidate": 0.020808994511126316,
+          "reduction_fraction": -0.4139634529520766
+        },
+        "median": {
+          "baseline": 0.014700423673212785,
+          "candidate": 0.020794822605615805,
+          "reduction_fraction": -0.4145730128518865
+        },
+        "sample_counts": [
+          4,
+          4
+        ]
+      }
+    },
+    "following_questions": {
+      "ttft_s": {
+        "mean": {
+          "baseline": 0.2655374106136151,
+          "candidate": 0.21145896069938316,
+          "reduction_fraction": 0.20365661391841228
+        },
+        "median": {
+          "baseline": 0.2641601220238954,
+          "candidate": 0.21348163997754455,
+          "reduction_fraction": 0.19184758720609074
+        },
+        "sample_counts": [
+          20,
+          20
+        ]
+      },
+      "elapsed_s": {
+        "mean": {
+          "baseline": 0.7392313260701485,
+          "candidate": 0.9007426702533848,
+          "reduction_fraction": -0.21848552474345473
+        },
+        "median": {
+          "baseline": 0.659826013026759,
+          "candidate": 0.8131606484530494,
+          "reduction_fraction": -0.23238646612750613
+        },
+        "sample_counts": [
+          20,
+          20
+        ]
+      },
+      "tpot_s": {
+        "mean": {
+          "baseline": 0.014690175204051113,
+          "candidate": 0.02147219728467765,
+          "reduction_fraction": -0.46167060545038696
+        },
+        "median": {
+          "baseline": 0.014702686175811462,
+          "candidate": 0.02165247202501632,
+          "reduction_fraction": -0.4726881718143787
+        },
+        "sample_counts": [
+          20,
+          20
+        ]
+      }
+    }
+  },
+  "mean_six_question_workflow_s": {
+    "baseline": 9.795859191042837,
+    "candidate": 10.84227014624048,
+    "reduction_fraction": -0.10682176364422058
+  },
+  "workflow_trials_s": [
+    [
+      9.75565214199014,
+      9.789483837084845,
+      9.807889353018254,
+      9.830411432078108
+    ],
+    [
+      10.80612559383735,
+      10.840409425087273,
+      10.823087936965749,
+      10.899457629071549
+    ]
+  ],
+  "completion_tokens": {
+    "baseline": 756,
+    "candidate": 756
+  },
+  "observed_engine_counters": {
+    "baseline": {
+      "prefix_cache_queries_total": 193832.0,
+      "prefix_cache_hits_total": 156800.0,
+      "num_preemptions_total": 0.0,
+      "request_queue_time_seconds_count": 24.0,
+      "request_queue_time_seconds_sum": 0.00047013512812554836,
+      "request_prefill_time_seconds_count": 24.0,
+      "request_prefill_time_seconds_sum": 26.409310375805944,
+      "request_prefill_kv_computed_tokens_count": 24.0,
+      "request_prefill_kv_computed_tokens_sum": 37032.0
+    },
+    "candidate": {
+      "prefix_cache_queries_total": 193832.0,
+      "prefix_cache_hits_total": 160000.0,
+      "num_preemptions_total": 0.0,
+      "request_queue_time_seconds_count": 24.0,
+      "request_queue_time_seconds_sum": 0.002401783363893628,
+      "request_prefill_time_seconds_count": 24.0,
+      "request_prefill_time_seconds_sum": 24.51035066996701,
+      "request_prefill_kv_computed_tokens_count": 24.0,
+      "request_prefill_kv_computed_tokens_sum": 33832.0
+    }
+  },
+  "prefill_counter_count_matches_expected_24": [
+    true,
+    true
+  ],
+  "observed_token_cache_hit_fraction": {
+    "baseline": 0.8089479549300425,
+    "candidate": 0.8254570968673903,
+    "change_percentage_points": 1.650914193734787
+  },
+  "notes": [
+    "One deployment per arm is preliminary screening; repeat promising results in alternating order.",
+    "Startup/JIT time is not request TTFT. Initial article-processing cost is included in every measured trial.",
+    "Counter snapshots can lag requests; incomplete counter windows cannot prove compute savings.",
+    "Startup activation profiles are not measured inference GPU-memory peaks; no whole-service CPU/energy claim.",
+    "Only two /metrics reads outside timing; no KV/queue peaks. Counter differences may lag or include other traffic; use the request-count window check before making resource claims.",
+    "Different GPU nodes: node load, CPU and network effects remain possible confounders.",
+    "Different CPU client hosts: client-side latency may include different network/CPU overhead.",
+    "Formal comparison retains the original public baseline 30056 and asynchronous scheduling. Do not replace it with a synchronous control.",
+    "Public baseline versus private original source with native GPU N-gram; known model source hashes and runtime versions are checked, complete installation identity and node equivalence are not established.",
+    "Native feature/configuration experiment; no new decoding algorithm or vLLM source change.",
+    "Short JSON screening does not establish long-output or real Agent performance.",
+    "Inspect output-token differences and physical GPU/node differences before attributing elapsed-time changes."
+  ],
+  "source_code_speedup_claim": false,
+  "speculation": {
+    "num_drafts": 656.0,
+    "proposed_tokens": 240.0,
+    "accepted_tokens": 76.0,
+    "acceptance_rate": 0.31666666666666665,
+    "mean_accepted_draft_tokens_per_draft": 0.11585365853658537,
+    "activity_observed": true,
+    "scope": "Two boundary snapshots only; missing counters are unknown, not zero. Request counts do not independently prove speculative statistics cover exactly the same 24 requests",
+    "spec_counter_window_matches_24_independently_verified": false,
+    "counter_deltas": {
+      "spec_decode_num_drafts_total": 656.0,
+      "spec_decode_num_draft_tokens_total": 240.0,
+      "spec_decode_num_accepted_tokens_total": 76.0,
+      "spec_decode_num_accepted_tokens_per_pos_total": 76.0
+    }
+  },
+  "speculation_implementation_fingerprints": {
+    "config/speculative.py": "b0ccd70e399723d3720ed1178242f5becf0fe1bf6e4756972691114435db5bcf",
+    "config/vllm.py": "d4c31282c664c91bee81267a2134a9609d16c33e88cc40e0f020256346510a87",
+    "v1/sample/rejection_sampler.py": "840ec8995f909eae7525f1bfcda5b6f23dbe77ce3ccb964bec14c97932ba2e76",
+    "v1/spec_decode/metrics.py": "c1c6b20bbf0ae3427dc331bbf8032193cf0b1ab9f3fe552257da6e4d51f2f4f6",
+    "v1/spec_decode/ngram_proposer.py": "5051e1bca645fe4befec0a6340f0dfc169fbcbe070ac1da508b72f8ee9c91736",
+    "v1/spec_decode/ngram_proposer_gpu.py": "6b304fb5a2b7a2e4b6ac05c90c49d228975a7b1f7d566dc1445f048992163b72",
+    "v1/worker/gpu_model_runner.py": "81b7627fbe81f7aaa2f77b4bf085faa353c69d03662ebfe369536a9773bb70d0"
+  },
+  "original_baseline_has_speculation_fingerprints": false
+}

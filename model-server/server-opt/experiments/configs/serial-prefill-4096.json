@@ -1,0 +1,8 @@
+{
+  "enable_prefix_caching": true,
+  "profile": "server-opt-serial-prefill-4096",
+  "max_num_batched_tokens": 4096,
+  "max_num_seqs": 4,
+  "gpu_memory_utilization": 0.9,
+  "max_model_len": 36864
+}

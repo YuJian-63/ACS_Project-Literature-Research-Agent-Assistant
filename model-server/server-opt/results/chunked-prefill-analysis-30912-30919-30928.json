@@ -1,0 +1,78 @@
+{
+  "protocol": "concurrent-long-copy-screen-v1",
+  "workload_sha256": "dee4ceacc907584f976b975d76c8750203ab58e0458ac913146b00ce14970dc8",
+  "runs": [
+    {
+      "job": "30912",
+      "budget": 4096,
+      "concurrency": 4,
+      "quality_passed": true,
+      "e2e_mean_s": 57.1200003420236,
+      "ttft_mean_s": 17.0302065917058,
+      "tpot_mean_ms": 25.0258859476721,
+      "requests_per_s": 0.0644227182973375,
+      "output_tokens_per_s": 104.493649078281,
+      "prefill_seconds": 69.9992993769702,
+      "prefill_computed_tokens": 62032,
+      "queue_mean_s": 6.15884013409959,
+      "cache_hit_fraction": 0.53563509987728,
+      "preemptions": 0,
+      "resource_samples": 0
+    },
+    {
+      "job": "30919",
+      "budget": 2048,
+      "concurrency": 4,
+      "quality_passed": true,
+      "e2e_mean_s": 63.8026375254849,
+      "ttft_mean_s": 16.5123725718586,
+      "tpot_mean_ms": 29.3428442845142,
+      "requests_per_s": 0.0577180541873612,
+      "output_tokens_per_s": 93.6186838918998,
+      "prefill_seconds": 61.8628711584024,
+      "prefill_computed_tokens": 62032,
+      "queue_mean_s": 7.75296414527111,
+      "cache_hit_fraction": 0.506541754159264,
+      "preemptions": 0,
+      "resource_samples": 0
+    },
+    {
+      "job": "30928",
+      "budget": 8192,
+      "concurrency": 4,
+      "quality_passed": true,
+      "e2e_mean_s": 56.6611117658322,
+      "ttft_mean_s": 22.0115686808131,
+      "tpot_mean_ms": 21.432467108628,
+      "requests_per_s": 0.0651032105278336,
+      "output_tokens_per_s": 105.597407476146,
+      "prefill_seconds": 102.248785287607,
+      "prefill_computed_tokens": 62032,
+      "queue_mean_s": 4.99296017311281,
+      "cache_hit_fraction": 0.578125661095832,
+      "preemptions": 0,
+      "resource_samples": 0
+    }
+  ],
+  "relative_to_4096": {
+    "budget2048": {
+      "e2e_percent": 11.6992947189198,
+      "ttft_percent": -3.04067961277354,
+      "tpot_percent": 17.249972072392,
+      "requests_per_s_percent": -10.4072977470952
+    },
+    "budget8192": {
+      "e2e_percent": -0.803376354068011,
+      "ttft_percent": 29.2501565514381,
+      "tpot_percent": -14.3588077027023,
+      "requests_per_s_percent": 1.0562923274293
+    }
+  },
+  "caveats": [
+    "resource-samples.jsonl is empty for jobs 30912, 30919 and 30928; GPU memory/utilization/KV time-series are unavailable",
+    "service/client nodes differ across these jobs, so the small 8192 vs 4096 E2E difference is directional, not a definitive speedup",
+    "prefill computed-token total is identical; budget changes scheduling organization rather than total work"
+  ],
+  "recommendation": "Keep 4096 as the balanced default; 8192 is only a throughput-oriented candidate because TTFT rises about 29% for less than 1% E2E improvement",
+  "next": "Decode/Batch profiling after deciding whether resource-metric reruns are required"
+}

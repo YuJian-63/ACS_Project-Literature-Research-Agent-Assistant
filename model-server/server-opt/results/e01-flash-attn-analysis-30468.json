@@ -1,0 +1,108 @@
+{
+  "experiment": "E01-attention-backend-screen-v1",
+  "protocol": "serial-long-copy-screen-v1",
+  "auto": {
+    "backend": "auto -> FLASH_ATTN",
+    "engine_metrics": {
+      "samples": 2,
+      "errors": [],
+      "peak_observed": null,
+      "counter_deltas": {
+        "prefix_cache_queries_total": 120048.0,
+        "prefix_cache_hits_total": 58016.0,
+        "num_preemptions_total": 0.0,
+        "request_queue_time_seconds_count": 8.0,
+        "request_queue_time_seconds_sum": 0.011066545033827424,
+        "request_prefill_time_seconds_count": 8.0,
+        "request_prefill_time_seconds_sum": 45.245524605037645,
+        "request_prefill_kv_computed_tokens_count": 8.0,
+        "request_prefill_kv_computed_tokens_sum": 62032.0
+      },
+      "prefix_cache_hit_fraction": 0.48327335732373716,
+      "mean_queue_time_s": 0.001383318129228428,
+      "gauge_scope": "Boundary snapshots only; no time-series or peak measurement"
+    },
+    "summary": {
+      "attempted": 8,
+      "successful": 8,
+      "quality_passed": 8,
+      "quality_accuracy": 1.0,
+      "prompt_tokens": 120048,
+      "completion_tokens": 12976,
+      "elapsed_s": {
+        "mean": 32.15764807880623,
+        "median": 30.810586497886106
+      },
+      "ttft_s": {
+        "mean": 5.747682149289176,
+        "median": 3.0343576224986464
+      },
+      "tpot_s": {
+        "mean": 0.01628173118085099,
+        "median": 0.016303586787602374
+      }
+    },
+    "node": "10-0-4-10",
+    "service": "30441",
+    "client": "30451"
+  },
+  "flash_attn": {
+    "backend": "FLASH_ATTN",
+    "engine_metrics": {
+      "samples": 2,
+      "errors": [],
+      "peak_observed": null,
+      "counter_deltas": {
+        "prefix_cache_queries_total": 120048.0,
+        "prefix_cache_hits_total": 58016.0,
+        "num_preemptions_total": 0.0,
+        "request_queue_time_seconds_count": 8.0,
+        "request_queue_time_seconds_sum": 0.007035569287836552,
+        "request_prefill_time_seconds_count": 8.0,
+        "request_prefill_time_seconds_sum": 45.503783653024584,
+        "request_prefill_kv_computed_tokens_count": 8.0,
+        "request_prefill_kv_computed_tokens_sum": 62032.0
+      },
+      "prefix_cache_hit_fraction": 0.48327335732373716,
+      "mean_queue_time_s": 0.000879446160979569,
+      "gauge_scope": "Boundary snapshots only; no time-series or peak measurement"
+    },
+    "summary": {
+      "attempted": 8,
+      "successful": 8,
+      "quality_passed": 8,
+      "quality_accuracy": 1.0,
+      "prompt_tokens": 120048,
+      "completion_tokens": 12976,
+      "elapsed_s": {
+        "mean": 32.33277725748485,
+        "median": 30.955929442076012
+      },
+      "ttft_s": {
+        "mean": 5.777977514779195,
+        "median": 3.081701120827347
+      },
+      "tpot_s": {
+        "mean": 0.016372751983571607,
+        "median": 0.016354458262866856
+      }
+    },
+    "node": "10-0-3-11",
+    "service": "30467",
+    "client": "30468"
+  },
+  "quality": {
+    "auto": true,
+    "flash_attn": true
+  },
+  "actual_backend_confirmed": "FlashAttention version 2",
+  "same_node": false,
+  "flash_vs_auto": {
+    "tpot_pct": 0.5590363930566999,
+    "prefill_pct": 0.5707946813333864,
+    "ttft_pct": 0.5270883932537274,
+    "e2e_pct": 0.544595731159947
+  },
+  "interpretation": "Auto already selected FlashAttention v2. Explicit FLASH_ATTN did not change the kernel; the small difference is not an optimization result and nodes differ.",
+  "next_experiment": "FlashInfer readiness quick screen; stop before CPU if actual FLASHINFER is not confirmed, then profile current FlashAttention path"
+}

@@ -1,0 +1,11 @@
+{
+  "profile": "server-opt-c4-b8192",
+  "max_model_len": 36864,
+  "max_num_seqs": 4,
+  "max_num_batched_tokens": 8192,
+  "gpu_memory_utilization": 0.9,
+  "enable_prefix_caching": true,
+  "attention_backend": null,
+  "async_scheduling": true,
+  "speculative_config": null
+}

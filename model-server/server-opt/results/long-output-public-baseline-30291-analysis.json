@@ -1,0 +1,32 @@
+{
+  "client_job_id": "30291",
+  "service_job_id": "30284",
+  "base_url": "http://10.0.3.10:8000/v1",
+  "status": "complete",
+  "protocol": "serial-long-copy-boundary-v2",
+  "quality_gate": true,
+  "measured_requests": 24,
+  "request_errors": 0,
+  "quality_failed": 0,
+  "warmup_quality": true,
+  "metrics_requests": 2,
+  "counter_window_matches_24": true,
+  "input_tokens_total": 359684,
+  "output_tokens_total": 33652,
+  "mean_e2e_s": 26.15303083025113,
+  "mean_client_ttft_s": 3.895756063381365,
+  "mean_client_tpot_ms": 15.867018240183807,
+  "prefix_cache_hit_fraction": 0.6451885543977491,
+  "prefill_computed_tokens": 127620.0,
+  "prefill_time_s": 91.40051381895319,
+  "gpu_service_source": "public course runtime",
+  "execution_backends": [
+    "(Worker_TP0 pid=32237) INFO 11-21 07:58:09 [compressed_tensors_wNa16.py:137] Using MarlinLinearKernel for CompressedTensorsWNA16",
+    "(Worker_TP0 pid=32237) INFO 11-21 07:58:09 [qwen_gdn_linear_attn.py:150] Using Triton/FLA GDN prefill kernel (requested=auto, head_k_dim=128).",
+    "(Worker_TP1 pid=32238) INFO 11-21 07:58:09 [compressed_tensors_wNa16.py:137] Using MarlinLinearKernel for CompressedTensorsWNA16",
+    "(Worker_TP0 pid=32237) INFO 11-21 07:58:09 [cuda.py:482] Using FLASH_ATTN attention backend out of potential backends: ['FLASH_ATTN', 'FLASHINFER', 'TRITON_ATTN', 'FLEX_ATTENTION']."
+  ],
+  "measured_scope": "serial concurrency 1, 4 trials x 6 cases, synthetic copy/extraction v2",
+  "comparison_ready_for_candidate": true,
+  "agent_round_trip": false
+}

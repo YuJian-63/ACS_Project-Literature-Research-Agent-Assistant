@@ -1,0 +1,323 @@
+{
+  "baseline_client_job": "30056",
+  "baseline_service_job": "30053",
+  "candidate_client_job": "30085",
+  "candidate_service_job": "30077",
+  "quality_gate_passed": true,
+  "independent_answers_checked": {
+    "baseline": 24,
+    "candidate": 24
+  },
+  "semantic_answers_identical": true,
+  "candidate_real_kernel_checks_passed": 20,
+  "candidate_indexed_state_path_observed": true,
+  "comparison": {
+    "mean_six_question_workflow_s": {
+      "baseline": 9.795859191042837,
+      "candidate": 10.303562269778922,
+      "candidate_change_percent": 5.1828335711513684
+    },
+    "first_question_mean_ttft_s": {
+      "baseline": 5.654655839025509,
+      "candidate": 5.959498940734193,
+      "candidate_change_percent": 5.391010706696142
+    },
+    "following_question_mean_ttft_s": {
+      "baseline": 0.2655374106136151,
+      "candidate": 0.26787593056214976,
+      "candidate_change_percent": 0.8806743814857354
+    },
+    "mean_tpot_ms": {
+      "baseline": 14.694609978638894,
+      "candidate": 14.895456339366241,
+      "candidate_change_percent": 1.3668029367183587
+    },
+    "total_completion_tokens": {
+      "baseline": 756,
+      "candidate": 792,
+      "candidate_change_percent": 4.761904761904767
+    },
+    "prefill_seconds_counter_delta": {
+      "baseline": 26.409310375805944,
+      "candidate": 27.644181851297617,
+      "candidate_change_percent": 4.675894439950845
+    }
+  },
+  "raw_output_differences": [
+    {
+      "trial": 1,
+      "case_id": "sample",
+      "baseline_output_tokens": 30,
+      "candidate_output_tokens": 39,
+      "baseline_content": "{\"paper_id\": \"P1\", \"sample_size\": 1200, \"evidence_id\": \"P1:C1\"}",
+      "candidate_content": "{\n  \"paper_id\": \"P1\",\n  \"sample_size\": 1200,\n  \"evidence_id\": \"P1:C1\"\n}",
+      "json_values_equal": true
+    },
+    {
+      "trial": 2,
+      "case_id": "sample",
+      "baseline_output_tokens": 30,
+      "candidate_output_tokens": 39,
+      "baseline_content": "{\"paper_id\": \"P1\", \"sample_size\": 1200, \"evidence_id\": \"P1:C1\"}",
+      "candidate_content": "{\n  \"paper_id\": \"P1\",\n  \"sample_size\": 1200,\n  \"evidence_id\": \"P1:C1\"\n}",
+      "json_values_equal": true
+    },
+    {
+      "trial": 3,
+      "case_id": "sample",
+      "baseline_output_tokens": 30,
+      "candidate_output_tokens": 39,
+      "baseline_content": "{\"paper_id\": \"P1\", \"sample_size\": 1200, \"evidence_id\": \"P1:C1\"}",
+      "candidate_content": "{\n  \"paper_id\": \"P1\",\n  \"sample_size\": 1200,\n  \"evidence_id\": \"P1:C1\"\n}",
+      "json_values_equal": true
+    },
+    {
+      "trial": 4,
+      "case_id": "sample",
+      "baseline_output_tokens": 30,
+      "candidate_output_tokens": 39,
+      "baseline_content": "{\"paper_id\": \"P1\", \"sample_size\": 1200, \"evidence_id\": \"P1:C1\"}",
+      "candidate_content": "{\n  \"paper_id\": \"P1\",\n  \"sample_size\": 1200,\n  \"evidence_id\": \"P1:C1\"\n}",
+      "json_values_equal": true
+    }
+  ],
+  "workload": {
+    "input_token_counts_identical": true,
+    "total_input_tokens_each": 193832,
+    "raw_text_changes": 4,
+    "formatting_difference": "sample case uses compact JSON (30 tokens) in baseline and indented JSON (39 tokens) in candidate; all values/citations match"
+  },
+  "counter_windows": {
+    "baseline": 24,
+    "candidate": 24
+  },
+  "prefix_hit_fraction_each": 0.8089479549300425,
+  "computed_prefill_tokens_each": 37032,
+  "preemptions_each": 0,
+  "weight_identity_at_candidate_startup": {
+    "all_shards_same_file_object": true,
+    "private_directory": "/mnt/home/public/course-envs/CSIT6000V/project-private-vllm/qwen3.8-27b-v1/models/Qwen3.8-27B-AWQ-INT4",
+    "public_directory": "/mnt/home/public/course-envs/CSIT6000V/project/qwen3.8-27b-v1/models/Qwen3.8-27B-AWQ-INT4",
+    "scope": "No weight data is read. A shared file object establishes identity; different file objects or equal sizes alone do not establish byte equality.",
+    "shard_names_match": true,
+    "shards": [
+      {
+        "name": "model-00001-of-00005.safetensors",
+        "present_private": true,
+        "present_public": true,
+        "private_bytes": 2542796928,
+        "private_resolved": "/mnt/home/public/course-envs/CSIT6000V/project/qwen3.8-27b-v1/models/Qwen3.8-27B-AWQ-INT4/model-00001-of-00005.safetensors",
+        "public_bytes": 2542796928,
+        "public_resolved": "/mnt/home/public/course-envs/CSIT6000V/project/qwen3.8-27b-v1/models/Qwen3.8-27B-AWQ-INT4/model-00001-of-00005.safetensors",
+        "same_file_object": true
+      },
+      {
+        "name": "model-00002-of-00005.safetensors",
+        "present_private": true,
+        "present_public": true,
+        "private_bytes": 4967650936,
+        "private_resolved": "/mnt/home/public/course-envs/CSIT6000V/project/qwen3.8-27b-v1/models/Qwen3.8-27B-AWQ-INT4/model-00002-of-00005.safetensors",
+        "public_bytes": 4967650936,
+        "public_resolved": "/mnt/home/public/course-envs/CSIT6000V/project/qwen3.8-27b-v1/models/Qwen3.8-27B-AWQ-INT4/model-00002-of-00005.safetensors",
+        "same_file_object": true
+      },
+      {
+        "name": "model-00003-of-00005.safetensors",
+        "present_private": true,
+        "present_public": true,
+        "private_bytes": 4996718528,
+        "private_resolved": "/mnt/home/public/course-envs/CSIT6000V/project/qwen3.8-27b-v1/models/Qwen3.8-27B-AWQ-INT4/model-00003-of-00005.safetensors",
+        "public_bytes": 4996718528,
+        "public_resolved": "/mnt/home/public/course-envs/CSIT6000V/project/qwen3.8-27b-v1/models/Qwen3.8-27B-AWQ-INT4/model-00003-of-00005.safetensors",
+        "same_file_object": true
+      },
+      {
+        "name": "model-00004-of-00005.safetensors",
+        "present_private": true,
+        "present_public": true,
+        "private_bytes": 4976405864,
+        "private_resolved": "/mnt/home/public/course-envs/CSIT6000V/project/qwen3.8-27b-v1/models/Qwen3.8-27B-AWQ-INT4/model-00004-of-00005.safetensors",
+        "public_bytes": 4976405864,
+        "public_resolved": "/mnt/home/public/course-envs/CSIT6000V/project/qwen3.8-27b-v1/models/Qwen3.8-27B-AWQ-INT4/model-00004-of-00005.safetensors",
+        "same_file_object": true
+      },
+      {
+        "name": "model-00005-of-00005.safetensors",
+        "present_private": true,
+        "present_public": true,
+        "private_bytes": 3534428672,
+        "private_resolved": "/mnt/home/public/course-envs/CSIT6000V/project/qwen3.8-27b-v1/models/Qwen3.8-27B-AWQ-INT4/model-00005-of-00005.safetensors",
+        "public_bytes": 3534428672,
+        "public_resolved": "/mnt/home/public/course-envs/CSIT6000V/project/qwen3.8-27b-v1/models/Qwen3.8-27B-AWQ-INT4/model-00005-of-00005.safetensors",
+        "same_file_object": true
+      }
+    ]
+  },
+  "small_model_configs_identical_sha256": {
+    "config.json": "8a4c7cc94e338329a92ec9a1bb78cbd86f936de1c26aa82af90361ed5d3ef6a7",
+    "generation_config.json": "e70c136c1b78ddc1fb0905bac8e733a4dc448d4f852a5dd75143fffc70be550e",
+    "tokenizer_config.json": "b11349aafa7cdc6a320767cf7ceb29ed82f7eda5d65e8e0819e76f0ce947bf27",
+    "model.safetensors.index.json": "82b1bf79f5b61333e83da17ec3bf89c9f178e29395a14c6b3ce3bbc474e1ead8"
+  },
+  "public_installed_and_private_worker_core_hashes_match": {
+    "vllm/v1/worker/gpu_worker.py": "28ac3f85aca3f68f18ac51cb5915e4d7ebe316c4ff3c021f1c2c5d3b90daca56",
+    "vllm/v1/worker/utils.py": "1728dbbac7b8bf70f82679babeecaaef1901711b7244e9a6f61565e7374e125e",
+    "vllm/utils/mem_utils.py": "937834bb0201970ee9697ba708ff6918494f076206ab4bf49123288e4c927d17",
+    "vllm/v1/executor/multiproc_executor.py": "fb279ff0e0a08681aa0078037d559351006b5453ecd1b1ea12277995925f3312"
+  },
+  "startup_phase_diagnostics": [
+    {
+      "phase": "before-activation",
+      "environment": {
+        "CUDA_DEVICE_ORDER": null,
+        "CUDA_MODULE_LOADING": null,
+        "CUDA_VISIBLE_DEVICES": "2,3",
+        "NVIDIA_VISIBLE_DEVICES": null,
+        "PYTORCH_ALLOC_CONF": null,
+        "PYTORCH_CUDA_ALLOC_CONF": null,
+        "QWEN_PRIVATE_ENV": null,
+        "QWEN_PROJECT_ROOT": null,
+        "QWEN_RUNTIME_MODE": "private",
+        "SLURM_JOB_GPUS": "2,3",
+        "SLURM_JOB_ID": "30077",
+        "SLURM_JOB_NODELIST": "10-0-3-11",
+        "SLURM_STEP_GPUS": "2,3"
+      },
+      "gpu_rows": [
+        {
+          "index": "0",
+          "uuid": "GPU-e8395199-6572-dd32-0f37-1e6ab8b56f5b",
+          "name": "NVIDIA GeForce RTX 3090",
+          "memory.total [MiB]": "24576 MiB",
+          "memory.used [MiB]": "2 MiB",
+          "memory.free [MiB]": "24154 MiB"
+        },
+        {
+          "index": "1",
+          "uuid": "GPU-1acd25b5-3530-2186-dca0-19319b9a71a7",
+          "name": "NVIDIA GeForce RTX 3090",
+          "memory.total [MiB]": "24576 MiB",
+          "memory.used [MiB]": "2 MiB",
+          "memory.free [MiB]": "24154 MiB"
+        }
+      ],
+      "gpu_process_rows": []
+    },
+    {
+      "phase": "after-activation",
+      "environment": {
+        "CUDA_DEVICE_ORDER": null,
+        "CUDA_MODULE_LOADING": null,
+        "CUDA_VISIBLE_DEVICES": "2,3",
+        "NVIDIA_VISIBLE_DEVICES": null,
+        "PYTORCH_ALLOC_CONF": null,
+        "PYTORCH_CUDA_ALLOC_CONF": null,
+        "QWEN_PRIVATE_ENV": "/mnt/home/modapeng/USERDIR/CSIT6000V-private-vllm-latency/.venv",
+        "QWEN_PROJECT_ROOT": "/mnt/home/public/course-envs/CSIT6000V/project-private-vllm/qwen3.8-27b-v1",
+        "QWEN_RUNTIME_MODE": "private",
+        "SLURM_JOB_GPUS": "2,3",
+        "SLURM_JOB_ID": "30077",
+        "SLURM_JOB_NODELIST": "10-0-3-11",
+        "SLURM_STEP_GPUS": "2,3"
+      },
+      "gpu_rows": [
+        {
+          "index": "0",
+          "uuid": "GPU-e8395199-6572-dd32-0f37-1e6ab8b56f5b",
+          "name": "NVIDIA GeForce RTX 3090",
+          "memory.total [MiB]": "24576 MiB",
+          "memory.used [MiB]": "2 MiB",
+          "memory.free [MiB]": "24154 MiB"
+        },
+        {
+          "index": "1",
+          "uuid": "GPU-1acd25b5-3530-2186-dca0-19319b9a71a7",
+          "name": "NVIDIA GeForce RTX 3090",
+          "memory.total [MiB]": "24576 MiB",
+          "memory.used [MiB]": "2 MiB",
+          "memory.free [MiB]": "24154 MiB"
+        }
+      ],
+      "gpu_process_rows": []
+    },
+    {
+      "phase": "after-kernel-check",
+      "environment": {
+        "CUDA_DEVICE_ORDER": null,
+        "CUDA_MODULE_LOADING": null,
+        "CUDA_VISIBLE_DEVICES": "0,1",
+        "NVIDIA_VISIBLE_DEVICES": null,
+        "PYTORCH_ALLOC_CONF": null,
+        "PYTORCH_CUDA_ALLOC_CONF": null,
+        "QWEN_PRIVATE_ENV": "/mnt/home/modapeng/USERDIR/CSIT6000V-private-vllm-latency/.venv",
+        "QWEN_PROJECT_ROOT": "/mnt/home/public/course-envs/CSIT6000V/project-private-vllm/qwen3.8-27b-v1",
+        "QWEN_RUNTIME_MODE": "private",
+        "SLURM_JOB_GPUS": "2,3",
+        "SLURM_JOB_ID": "30077",
+        "SLURM_JOB_NODELIST": "10-0-3-11",
+        "SLURM_STEP_GPUS": "2,3"
+      },
+      "gpu_rows": [
+        {
+          "index": "0",
+          "uuid": "GPU-e8395199-6572-dd32-0f37-1e6ab8b56f5b",
+          "name": "NVIDIA GeForce RTX 3090",
+          "memory.total [MiB]": "24576 MiB",
+          "memory.used [MiB]": "2 MiB",
+          "memory.free [MiB]": "24154 MiB"
+        },
+        {
+          "index": "1",
+          "uuid": "GPU-1acd25b5-3530-2186-dca0-19319b9a71a7",
+          "name": "NVIDIA GeForce RTX 3090",
+          "memory.total [MiB]": "24576 MiB",
+          "memory.used [MiB]": "2 MiB",
+          "memory.free [MiB]": "24154 MiB"
+        }
+      ],
+      "gpu_process_rows": []
+    }
+  ],
+  "nodes": {
+    "baseline_gpu": "10-0-1-11",
+    "candidate_gpu": "10-0-3-11",
+    "baseline_cpu": "10-0-1-10",
+    "candidate_cpu": "10-0-3-10"
+  },
+  "runtime_versions_match": true,
+  "execution_backends_match": true,
+  "candidate_service_cancelled_after_measurement": true,
+  "ta_cleanup_recorded": true,
+  "decision": "No observed speedup in the public-reference serial screening; do not promote the candidate as a performance improvement.",
+  "limitations": [
+    "One deployment per arm on different GPU and CPU nodes.",
+    "Completion lengths differ; elapsed times do not represent identical output work.",
+    "TTFT is also slower here, but isolated patch attribution is not established.",
+    "Weight shards and model config aliases are established at candidate startup; full installation equivalence is not established.",
+    "No inference KV/queue peaks, GPU memory, CPU, energy or concurrency savings are claimed."
+  ],
+  "recommended_next_check": "Same-private-installation original-versus-candidate control with unchanged measurement protocol and matched hardware; keep public30056 as official reference.",
+  "evidence_sha256": {
+    "results/job-30056/answers.jsonl": "82de0a2f4a365ed63e75ed248644a1b3339b39579a49f285af578c318eaeb2f3",
+    "results/job-30056/client.log": "9f5f74bc5be46508a8f4cf05edd088022e5c9d0dc6d82edefd799a7062be0a2d",
+    "results/job-30056/metrics-boundaries.jsonl": "a6e9d42aadb48002a17a1df08c0dd82d8cd05c7b68bf3640f5ca7606a0e175c2",
+    "results/job-30056/server-metrics-after.txt": "e5b8ecad009a7c347cbd1a7d4d8c6667bf2f9051fe0e0a6a214981b242bbcc97",
+    "results/job-30056/server-metrics-before.txt": "3153addc8a0d0848ff4b6e5fb22a239060e5f43729f013e7e3cc43984e255018",
+    "results/job-30056/service.log": "4fc716b1dcb915544341cf850e07e52fa6f498e110d6c0dd7ce67575c96f99a7",
+    "results/job-30056/service_config.json": "e07c9cbb2ea65c9dc82797b16fb0d0d149c9c02ce682468efbe2ce047496900a",
+    "results/job-30056/summary.json": "40be7ff637ece62b090434f258b9f944ef6b0933024f532769633e90de63d74e",
+    "results/job-30056/warmup.json": "0b1261d43f06174fad53ccdfdacd8953055267e4cdad90208395d757059c3ade",
+    "results/job-30056/workload.json": "763ea75c58fbb815d2655e8500f5bc636806faa52976b42f1de4080e548410a8",
+    "results/job-30085/answers.jsonl": "6b9a13be6bc3f193cd4a5409043f526b0311a61104c7bb060d4df5282faa4da1",
+    "results/job-30085/client.log": "899311d025e58d51ea1dc570351691ea9b9620691df7b4c89e9f99007b123816",
+    "results/job-30085/kernel-check.json": "b902bc4f5aed0e44bf8ae64eebb0a768007cc077b20ecf5e379c5d0f6b2593e6",
+    "results/job-30085/metrics-boundaries.jsonl": "868093295f8590ebee151c4dab07ece519dd3ee1adac8799e95dd0c896644ffd",
+    "results/job-30085/server-metrics-after.txt": "d9eee7afe5b2d64c38b40a8e94bf9e4258e048bbee0a17f430503dff1c57872d",
+    "results/job-30085/server-metrics-before.txt": "1ebf1136be0d660fc64a99d1a06c0d30fff10f5794c22a94dac8b6708f0e2a6b",
+    "results/job-30085/service.log": "99c73766d4f3e2a77f3fbe5f5d95d4d0b74c5bb5cb6780d51d31a0a72a47383a",
+    "results/job-30085/service_config.json": "e07c9cbb2ea65c9dc82797b16fb0d0d149c9c02ce682468efbe2ce047496900a",
+    "results/job-30085/summary.json": "f6c4ed5a9a90d7a4da3edefd9cf7199810f58ba69d1e17b6fee108fc1ebfc922",
+    "results/job-30085/warmup.json": "f85deb3bbc600518cdc59a43884bd912e7aebd95e57b1a6bd5ae36c96189ba6b",
+    "results/job-30085/workload.json": "763ea75c58fbb815d2655e8500f5bc636806faa52976b42f1de4080e548410a8"
+  }
+}

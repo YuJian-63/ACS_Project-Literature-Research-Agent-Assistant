@@ -185,7 +185,7 @@ uv run --locked python -m app.evaluation_worker
 | [backend/](backend/README.md) | FastAPI、PostgreSQL、数据库迁移，以及解析、邮件和研究等后台 Worker。 |
 | [agent/](agent/README.md) | Baseline 和 Retrieval Extension，负责阅读、检索、模型调用和带引用的回答。 |
 | [tacc/](tacc/README.md) | 课程 SDK、环境配置与探测脚本；[run_job.py](tacc/research/run_job.py) 读取任务清单并调用 Agent。 |
-| [model-server/](model-server/README.md) | 独立运行在 TACC GPU 节点上的课程 Qwen 模型服务及遥测采集。 |
+| [model-server/](model-server/README.md) | TACC 课程 Qwen 原版服务、[优化版](model-server/server-opt/README.md)、遥测及模型服务实验。 |
 | [scripts/](docs/service_launch.md#按系统使用脚本) | 各系统本地启动器、TACC 联调和 ECS 服务入口。 |
 | [ops/deploy/](ops/deploy/) | ECS 发布脚本与校验；[工作流](.github/workflows/deploy-ecs.yml)由推送 `main` 触发。 |
 | [docs/](docs/) | [API 契约](docs/api-contract.md)、[数据库设计](docs/database-design.md)、[服务启动](docs/service_launch.md)和 [Proposal](docs/Proposal.md)。 |
@@ -195,7 +195,7 @@ uv run --locked python -m app.evaluation_worker
 - **手动启动 / 外部数据库：** 见 [服务启动说明](docs/service_launch.md)。启动器的 `check` 仅检查配置和工具，不验证模型、邮件或集群连通性。
 - **独立本地 Agent：** 按 [Agent 文档](agent/README.md)运行 CLI。网页 `local` 派发要求兼容的 `run_dispatch.py` 入口，当前 `agent/` 未提供该适配器，不能仅切换 `AGENT_TRANSPORT=local` 来替代上述 TCloud 链路。
 - **TACC / TCloud：** 需要课程账号、已登记的 SSH 公钥、初始化后的 SDK、可用执行环境，以及计算节点可访问的论文库 HTTPS 地址。按 [首次配置](tacc/TACC.md#首次配置从新账号注册到网页研究)操作；本机可用 `./scripts/local-research configure` 和 `./scripts/research up`，没有固定公网入口时按 [隧道流程](tacc/TACC.md#本机一键启动)配置。
-- **TACC 模型：** 先按 [模型服务说明](model-server/README.md)启动 GPU 服务，再配置 Agent 接口。Agent 作业必须能访问该地址；集群内网地址不保证能从 ECS 或个人电脑直接访问。模型服务和 Agent CPU 作业分别管理。
+- **TACC 模型：** 按 [模型服务说明](model-server/README.md)启动 GPU 服务。网页模型管理仍提交原版 `server/`；使用 [优化版 `server-opt/`](model-server/server-opt/README.md) 时，手动提交 GPU 作业，并在新建研究中选择「指定服务地址」。Agent 作业必须能访问该地址；集群内网地址不保证能从 ECS 或个人电脑直接访问。模型服务和 Agent CPU 作业分别管理。
 - **已部署 ECS：** 使用已安装的 systemd 服务、Nginx 和 HTTPS；在有权限的账号下执行 `./scripts/research up`。设置计算节点可达的 `AGENT_LIBRARY_PUBLIC_URL`，通过自动部署流程更新代码。本地开发脚本不会安装这些生产设施。
 
 ### 配置、数据与运行边界

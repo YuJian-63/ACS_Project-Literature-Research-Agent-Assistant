@@ -1,0 +1,147 @@
+{
+  "experiment": "prefill-budget-screen-v1",
+  "protocol": "serial-long-copy-screen-v1",
+  "budget_2048": {
+    "client": "30456",
+    "service": "30454",
+    "node": "10-0-1-11",
+    "summary": {
+      "attempted": 8,
+      "successful": 8,
+      "quality_passed": 8,
+      "quality_accuracy": 1.0,
+      "prompt_tokens": 120048,
+      "completion_tokens": 12976,
+      "elapsed_s": {
+        "mean": 32.17491600476205,
+        "median": 30.866886602481827
+      },
+      "ttft_s": {
+        "mean": 5.758280078996904,
+        "median": 3.023349803639576
+      },
+      "tpot_s": {
+        "mean": 0.016283999391981833,
+        "median": 0.016306069767550703
+      }
+    },
+    "engine_metrics": {
+      "samples": 2,
+      "errors": [],
+      "peak_observed": null,
+      "counter_deltas": {
+        "prefix_cache_queries_total": 120048.0,
+        "prefix_cache_hits_total": 58016.0,
+        "num_preemptions_total": 0.0,
+        "request_queue_time_seconds_count": 8.0,
+        "request_queue_time_seconds_sum": 0.010786856291815639,
+        "request_prefill_time_seconds_count": 8.0,
+        "request_prefill_time_seconds_sum": 45.34377758111805,
+        "request_prefill_kv_computed_tokens_count": 8.0,
+        "request_prefill_kv_computed_tokens_sum": 62032.0
+      },
+      "prefix_cache_hit_fraction": 0.48327335732373716,
+      "mean_queue_time_s": 0.0013483570364769548,
+      "gauge_scope": "Boundary snapshots only; no time-series or peak measurement"
+    }
+  },
+  "budget_4096": {
+    "client": "30451",
+    "service": "30441",
+    "node": "10-0-4-10",
+    "summary": {
+      "attempted": 8,
+      "successful": 8,
+      "quality_passed": 8,
+      "quality_accuracy": 1.0,
+      "prompt_tokens": 120048,
+      "completion_tokens": 12976,
+      "elapsed_s": {
+        "mean": 32.15764807880623,
+        "median": 30.810586497886106
+      },
+      "ttft_s": {
+        "mean": 5.747682149289176,
+        "median": 3.0343576224986464
+      },
+      "tpot_s": {
+        "mean": 0.01628173118085099,
+        "median": 0.016303586787602374
+      }
+    },
+    "engine_metrics": {
+      "samples": 2,
+      "errors": [],
+      "peak_observed": null,
+      "counter_deltas": {
+        "prefix_cache_queries_total": 120048.0,
+        "prefix_cache_hits_total": 58016.0,
+        "num_preemptions_total": 0.0,
+        "request_queue_time_seconds_count": 8.0,
+        "request_queue_time_seconds_sum": 0.011066545033827424,
+        "request_prefill_time_seconds_count": 8.0,
+        "request_prefill_time_seconds_sum": 45.245524605037645,
+        "request_prefill_kv_computed_tokens_count": 8.0,
+        "request_prefill_kv_computed_tokens_sum": 62032.0
+      },
+      "prefix_cache_hit_fraction": 0.48327335732373716,
+      "mean_queue_time_s": 0.001383318129228428,
+      "gauge_scope": "Boundary snapshots only; no time-series or peak measurement"
+    }
+  },
+  "budget_8192": {
+    "client": "30463",
+    "service": "30459",
+    "node": "10-0-1-11",
+    "summary": {
+      "attempted": 8,
+      "successful": 8,
+      "quality_passed": 8,
+      "quality_accuracy": 1.0,
+      "prompt_tokens": 120048,
+      "completion_tokens": 12976,
+      "elapsed_s": {
+        "mean": 32.422280909784604,
+        "median": 30.942556091351435
+      },
+      "ttft_s": {
+        "mean": 5.85241049178876,
+        "median": 3.031726344488561
+      },
+      "tpot_s": {
+        "mean": 0.016379572834893125,
+        "median": 0.01634614136835934
+      }
+    },
+    "engine_metrics": {
+      "samples": 2,
+      "errors": [],
+      "peak_observed": null,
+      "counter_deltas": {
+        "prefix_cache_queries_total": 120048.0,
+        "prefix_cache_hits_total": 58016.0,
+        "num_preemptions_total": 0.0,
+        "request_queue_time_seconds_count": 8.0,
+        "request_queue_time_seconds_sum": 0.004548848373815417,
+        "request_prefill_time_seconds_count": 8.0,
+        "request_prefill_time_seconds_sum": 46.085907054832205,
+        "request_prefill_kv_computed_tokens_count": 8.0,
+        "request_prefill_kv_computed_tokens_sum": 62032.0
+      },
+      "prefix_cache_hit_fraction": 0.48327335732373716,
+      "mean_queue_time_s": 0.0005686060467269272,
+      "gauge_scope": "Boundary snapshots only; no time-series or peak measurement"
+    }
+  },
+  "quality": {
+    "budget_2048": true,
+    "budget_4096": true,
+    "budget_8192": true
+  },
+  "same_workload": true,
+  "same_token_totals": true,
+  "same_node_2048_vs_8192": true,
+  "interpretation": "8192 is slower than 2048 on the same node; 2048 and 4096 are close but 4096 ran on a different node. Retain 4096 as baseline default; no budget is promoted as a source optimization.",
+  "next_experiment": "E01 attention backend quick screening with private baseline source and quick protocol; auto already confirmed FLASH_ATTN, test FLASHINFER only after readiness/actual backend confirmation",
+  "full_v2_confirmation": false
+}

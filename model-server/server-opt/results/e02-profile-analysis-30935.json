@@ -1,0 +1,49 @@
+{
+  "experiment": "E02-decode-batch-runtime-profile",
+  "result_job": "30935",
+  "baseline_job": "30912",
+  "config": "C4/context36864/budget4096/APC/attention-auto",
+  "quality": "8/8",
+  "e02": {
+    "e2e_mean_s": 56.07709873118438,
+    "ttft_mean_s": 17.99609261850128,
+    "tpot_ms": 23.58444062562246,
+    "requests_per_s": 0.06569486215993034,
+    "output_tokens_per_s": 106.55706642340701,
+    "prefill_s": 74.29490904416889,
+    "prefill_tokens": 62032,
+    "queue_mean_s": 6.571118248364655,
+    "cache_hit_fraction": 0.5230917825280228,
+    "preemptions": 0
+  },
+  "baseline": {
+    "e2e_mean_s": 57.1200003420236,
+    "ttft_mean_s": 17.0302065917058,
+    "tpot_ms": 25.0258859476721,
+    "requests_per_s": 0.0644227182973375,
+    "output_tokens_per_s": 104.493649078281,
+    "prefill_s": 69.9992993769702,
+    "queue_mean_s": 6.15884013409959,
+    "cache_hit_fraction": 0.53563509987728
+  },
+  "relative_percent": {
+    "e2e": -1.83,
+    "ttft": 5.67,
+    "tpot": -5.76,
+    "requests_per_s": 1.97,
+    "output_tokens_per_s": 1.97,
+    "prefill": 6.14,
+    "queue": 6.69
+  },
+  "native_profile_evidence": [
+    "CUDA graph mixed prefill-decode and decode FULL capture completed before startup",
+    "engine initialization/profile took 66.04s, compilation 48.96s; outside request timing",
+    "inference-time Triton JIT warnings: _compute_slot_mapping_kernel, batch_memcpy_kernel, apply_token_bitmask_inplace_kernel",
+    "native scheduler log showed Running up to 4, Waiting/Deferred during mixed waves, GPU KV cache usage up to about 18.1%, prefix-cache hit rate up to about 47.8%"
+  ],
+  "caveats": [
+    "30935 service endpoint 10.0.1.10 differs from 30912 baseline endpoint 10.0.1.11; do not claim definitive speedup",
+    "resource sidecar was unavailable/empty by prior decision; no GPU memory/utilization conclusion"
+  ],
+  "conclusion": "E02 confirms native continuous batching and exposes inference-time Triton JIT as a warmup/measurement confounder. Latency/throughput is directionally similar to 30912, not a new optimization result."
+}

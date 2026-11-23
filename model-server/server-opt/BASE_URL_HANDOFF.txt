@@ -1,0 +1,17 @@
+# base_url 交接说明
+
+部署者把本服务包放在自己电脑的目录中，并从该目录提交 GPU 作业。服务成功后只交付日志中的：
+
+AGENT_BASE_URL=http://<TACC-node>:8000/v1
+
+固定模型名：qwen3.8-27b
+固定接口：POST ${AGENT_BASE_URL}/chat/completions
+客户端参数：model=qwen3.8-27b、n=1、api_key=EMPTY。研究 Agent 使用 stream=false；独立计时实验使用 stream=true，并设置 stream_options.include_usage=true。
+
+max_model_len=36864 是输入与输出合计上限；max_tokens 须小于等于剩余上下文。服务启动器不额外限制为 4096 Token；实验中的 4096 是客户端请求预算。max_num_batched_tokens=8192 是每轮调度预算，不是输出上限。
+
+非流式响应从 response["metrics"] 读取原生指标，附加遥测在 metrics.telemetry；流式指标放在最后的 usage SSE 事件。缺失指标视为不可用，GPU 为响应完成时的共享设备快照。正常接入不需要读取服务器上的指标文件。
+
+网页模型管理默认仍提交 server/ 原版。手动提交 server-opt/ 后，在新建研究中选择“指定服务地址”；网页不会管理这项手动作业。须等待 Application startup complete. 后再连接，地址随作业变化；使用完毕由提交者执行 tcloud cancel -j <GPU作业号>。
+
+Agent 不需要知道部署者的服务目录，也不需要模型权重、vLLM环境、GPU目录或私有优化目录。工具 schema和工具执行函数由Agent自己提供；服务端返回tool_calls，Agent执行工具后继续请求。

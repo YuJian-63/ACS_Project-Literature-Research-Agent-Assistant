@@ -1,0 +1,56 @@
+{
+  "protocol": "concurrent-long-copy-screen-v1",
+  "workload_sha256": "dee4ceacc907584f976b975d76c8750203ab58e0458ac913146b00ce14970dc8",
+  "service_config": {
+    "profile": "private-concurrency-v1",
+    "max_model_len": 36864,
+    "max_num_seqs": 4,
+    "gpu_memory_utilization": 0.9,
+    "enable_prefix_caching": true,
+    "attention_backend": null,
+    "max_num_batched_tokens": 4096
+  },
+  "runs": [
+    {
+      "concurrency": 1,
+      "client_job_id": "30909",
+      "service_job_id": "30904",
+      "quality_passed": true,
+      "elapsed_mean_s": 32.42898170888657,
+      "ttft_mean_s": 5.969594550435431,
+      "tpot_mean_s": 0.01631236381373396,
+      "requests_per_s": 0.030786398741540575,
+      "output_tokens_per_s": 49.93553875877881,
+      "prefix_cache_hit_fraction": 0.48327335732373716,
+      "mean_queue_time_s": 0.0019215794163756073,
+      "relative_to_c1": {
+        "elapsed_mean_s": 0.0,
+        "ttft_mean_s": 0.0,
+        "tpot_mean_s": 0.0,
+        "requests_per_s": 0.0,
+        "output_tokens_per_s": 0.0
+      }
+    },
+    {
+      "concurrency": 4,
+      "client_job_id": "30912",
+      "service_job_id": "30904",
+      "quality_passed": true,
+      "elapsed_mean_s": 57.12000034202356,
+      "ttft_mean_s": 17.03020659170579,
+      "tpot_mean_s": 0.025025885947672105,
+      "requests_per_s": 0.06442271829733745,
+      "output_tokens_per_s": 104.49364907828134,
+      "prefix_cache_hit_fraction": 0.5356350998772804,
+      "mean_queue_time_s": 6.1588401340995915,
+      "relative_to_c1": {
+        "elapsed_mean_s": 0.7613874174276299,
+        "ttft_mean_s": 1.852824668044429,
+        "tpot_mean_s": 0.5341667359455239,
+        "requests_per_s": 1.0925707757565961,
+        "output_tokens_per_s": 1.092570775756596
+      }
+    }
+  ],
+  "interpretation": "Relative changes are exploratory C=1 comparisons; do not mix with the old serial protocol."
+}
