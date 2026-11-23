@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="1536" height="1056" viewBox="0 0 1536 1056" role="img" aria-labelledby="title description">
   <title id="title">Baseline and Extension</title>
-  <desc id="description">The lower panel follows the Extension sketch: Input, Planner, LLM, Reflection and Output. Folded contours enclose the LLM and two groups of tools. The paper tools are Open Paper, Summarize, Read Paper and Retrieve. A dashed arrow marks optional close reading after summarization. The paper-tool group connects to Chunk and Embedding, which writes a local vector index.</desc>
+  <desc id="description">Baseline and Extension research workflows. The Extension ReAct Agent encloses a language model and its tools, which exchange calls and results. Open, Summarize, Read and Retrieve share PDF parsing and page chunks cached in task memory. Read, successful summaries and retrieval hits register source text as evidence by chunk ID. Cited evidence accompanies the output. Retrieve alone uses embeddings and a local per-paper vector cache.</desc>
   <defs>
     <linearGradient id="frameFill" x2="1" y2="1" gradientUnits="objectBoundingBox">
       <stop stop-color="#f9fafb"/><stop offset=".52" stop-color="#f4f8fa"/><stop offset="1" stop-color="#f7f9fb"/>
@@ -42,6 +42,11 @@
       #extension .ext-heading { font-size: 44px; font-weight: 700 }
       #extension .ext-stage { font-size: 30px; font-weight: 700 }
       #extension .ext-tools-heading { font-size: 29px; font-weight: 700 }
+      #extension .ext-agent-heading { font-size: 25px; font-weight: 700 }
+      #extension .ext-data-label { font-size: 21px; font-weight: 600 }
+      #extension .ext-data-note { font-size: 16px; fill: #45596f }
+      .ext-state-card { fill: #f8fafc; stroke: #8390a3; stroke-width: 1.5 }
+      .ext-llm-frame { fill: #fcfcfe; stroke: #777a9a; stroke-width: 1.7 }
       #extension .ext-block-label { font-size: 24px; font-weight: 600 }
       #extension .ext-tool-label { font-size: 23px; font-weight: 600 }
       #extension .ext-accent { fill: #424d82 }
@@ -145,8 +150,8 @@
       C126 212 136 194 174 196 C212 197 227 181 264 190
       C298 200 315 202 343 193 C384 180 408 202 451 189
       C484 180 503 182 527 167 C570 146 580 123 614 100
-      C638 76 657 56 685 60 C710 67 721 48 750 52
-      C780 55 788 68 812 61 C850 51 883 91 920 132
+      C631 72 650 30 685 34 C709 39 724 19 755 25
+      C785 31 802 40 822 36 C862 27 881 84 920 132
       C941 156 954 169 980 177 C1006 186 1020 178 1047 187
       C1085 202 1100 190 1134 201 C1166 215 1190 197 1223 213
       C1252 225 1278 232 1284 262 C1288 284 1301 296 1293 321
@@ -159,7 +164,8 @@
       C292 546 263 563 221 552 C186 542 165 553 130 543
       C88 531 71 513 67 488 C63 462 45 457 53 425
       C61 397 44 380 52 349 C62 318 48 308 57 282 Z"/>
-    <path class="ext-toolbox" d="
+    <text class="ext-agent-heading" x="749" y="71" text-anchor="middle">ReAct Agent</text>
+    <path id="extension-tools" class="ext-toolbox" d="
       M85 297 C74 275 94 244 118 237 C151 226 171 219 208 223
       C251 228 268 213 307 220 C350 228 363 212 411 219
       C460 229 486 208 530 216 C574 224 596 211 637 214
@@ -181,8 +187,8 @@
     <!-- Main path. Planner and Reflection sit outside the LLM / tools enclosure. -->
     <g id="extension-main-path" class="ext-link">
       <path d="M171 116H255"/>
-      <path d="M448 116H598"/>
-      <path d="M915 116h130"/>
+      <path d="M448 116H644"/>
+      <path d="M848 116h197"/>
       <path d="M1280 116h61"/>
     </g>
     <g id="extension-input">
@@ -193,7 +199,15 @@
       <use xlink:href="#ext-icon-planner" transform="translate(267 92) scale(.86)"/>
       <text class="ext-stage ext-accent" x="321" y="125">Planner</text>
     </g>
+    <path id="llm-tools-exchange" class="ext-link" marker-start="url(#extArrow)" d="M749 162v48">
+      <title>Tool calls and observations</title>
+    </path>
     <g id="extension-llm">
+      <path class="ext-llm-frame" d="M648 112 Q646 94 664 90 C681 86 693 93 707 88
+        C727 82 739 91 757 87 C777 83 786 91 803 88 C824 85 844 91 846 108
+        C849 120 843 127 845 137 Q846 152 829 153 C810 157 795 149 779 154
+        C760 160 747 150 730 155 C707 161 700 151 681 155
+        C658 158 645 150 648 134 Q651 125 648 112 Z"/>
       <use xlink:href="#ext-icon-chip" transform="translate(685 93) scale(.81)"/>
       <text class="ext-stage" x="750" y="126">LLM</text>
     </g>
@@ -208,81 +222,119 @@
 
     <g id="extension-search-tools">
       <path class="ext-toolgroup ext-searchgroup" d="
-        M116 365 C108 334 128 307 156 305 C182 304 187 289 213 295
-        C240 303 253 284 284 290 C314 296 336 284 366 293
-        C389 300 412 295 430 316 C447 335 438 350 443 376
-        C449 403 437 412 440 436 C442 460 425 475 401 478
-        C375 483 362 493 335 487 C301 478 289 496 259 489
-        C227 479 211 494 184 483 C158 473 139 482 124 463
-        C109 445 119 428 113 406 C108 389 120 381 116 365 Z"/>
+        M107.6 365 C101.5 334 116.7 307 138 305 C157.7 304 161.5 289 181.3 295
+        C201.8 303 211.7 284 235.2 290 C258 296 274.8 284 297.6 293
+        C315 300 332.5 295 346.2 316 C359.1 335 352.3 350 356.1 376
+        C360.6 403 351.5 412 353.8 436 C355.3 460 342.4 475 324.2 478
+        C304.4 483 294.5 493 274 487 C248.2 478 239 496 216.2 489
+        C191.9 479 179.8 494 159.2 483 C139.5 473 125 482 113.6 463
+        C102.2 445 109.8 428 105.3 406 C101.5 389 110.6 381 107.6 365 Z"/>
       <g id="extension-search-papers" data-tool="search_papers">
         <title>search_papers</title>
-        <rect class="ext-tool" x="141" y="327" width="275" height="49" rx="5"/>
-        <use xlink:href="#ext-icon-search" transform="translate(161 334) scale(.75)"/>
-        <text class="ext-tool-label" x="222" y="360">Search Papers</text>
+        <rect class="ext-tool" x="118" y="327" width="226" height="49" rx="5"/>
+        <use xlink:href="#ext-icon-search" transform="translate(128 334) scale(.75)"/>
+        <text class="ext-tool-label" x="177" y="360">Search Papers</text>
       </g>
       <g id="extension-search-library" data-tool="search_library">
         <title>search_library</title>
-        <rect class="ext-tool" x="141" y="398" width="275" height="49" rx="5"/>
-        <use xlink:href="#ext-icon-library" transform="translate(168 407) scale(1.14)"/>
-        <text class="ext-tool-label" x="222" y="431">Search Library</text>
+        <rect class="ext-tool" x="118" y="398" width="226" height="49" rx="5"/>
+        <use xlink:href="#ext-icon-library" transform="translate(134 407) scale(1.14)"/>
+        <text class="ext-tool-label" x="177" y="431">Search Library</text>
       </g>
     </g>
 
     <g id="extension-paper-tools">
       <path class="ext-toolgroup ext-readgroup" d="
-        M467 320 C461 291 475 268 500 262 C529 255 548 243 580 251
-        C609 258 630 244 664 249 C699 254 717 243 751 251
-        C788 259 807 246 838 258 C870 270 876 286 876 307
-        C876 328 888 339 882 362 C877 383 889 400 882 420
-        C875 443 889 460 876 482 C863 508 846 513 821 514
-        C786 514 778 525 745 517 C709 508 690 525 655 518
-        C625 511 607 525 574 517 C542 510 525 520 498 511
-        C471 500 465 487 466 460 C466 438 456 429 462 405
-        C469 379 455 363 464 340 C467 334 468 328 467 320 Z"/>
+        M368.9 320 C363.9 291 375.8 268 397 262 C421.6 255 437.8 243 465 251
+        C489.6 258 507.5 244 536.4 249 C566.1 254 581.5 243 610.4 251
+        C641.8 259 658 246 684.3 258 C711.5 270 716.6 286 716.6 307
+        C716.6 328 726.8 339 721.7 362 C717.5 383 727.6 400 721.7 420
+        C715.8 443 727.6 460 716.6 482 C705.5 508 691.1 513 669.8 514
+        C640.1 514 633.3 525 605.2 517 C574.6 508 558.5 525 528.8 518
+        C503.2 511 488 525 459.9 517 C432.7 510 418.2 520 395.3 511
+        C372.4 500 367.2 487 368.1 460 C368.1 438 359.6 429 364.7 405
+        C370.6 379 358.8 363 366.4 340 C368.9 334 369.8 328 368.9 320 Z"/>
       <g id="extension-open-paper" data-tool="open_paper">
         <title>open_paper</title>
-        <rect class="ext-tool" x="491" y="270" width="368" height="46" rx="23"/>
-        <use xlink:href="#ext-icon-input" transform="translate(523 275) scale(.54)"/>
-        <text class="ext-tool-label" x="590" y="302">Open Paper</text>
+        <rect class="ext-tool" x="389.4" y="270" width="312.8" height="46" rx="23"/>
+        <g transform="translate(414 279)" fill="none" stroke="#496987" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round">
+          <title>Section outline</title>
+          <path d="M2 3v22m0-17h8m-8 13h8M14 8h18m-18 6h12m-12 7h16"/>
+        </g>
+        <text class="ext-tool-label" x="473.5" y="302">Open Paper</text>
       </g>
       <g id="extension-summarize" data-tool="summarize_paper">
         <title>summarize_paper</title>
-        <rect class="ext-tool" x="491" y="325" width="368" height="46" rx="5"/>
-        <use xlink:href="#ext-icon-summarize" transform="translate(525 329) scale(.36)"/>
-        <text class="ext-tool-label" x="590" y="357">Summarize</text>
+        <rect class="ext-tool" x="389.4" y="325" width="312.8" height="46" rx="5"/>
+        <use xlink:href="#ext-icon-summarize" transform="translate(418.2 329) scale(.36)"/>
+        <text class="ext-tool-label" x="473.5" y="357">Summarize</text>
       </g>
       <g id="extension-skim-to-close-reading">
-        <path class="ext-optional" d="M543 373v28"/>
-        <text class="ext-note" x="560" y="392">Skim → close read (optional)</text>
+        <path class="ext-optional" d="M433.6 373v28"/>
+        <text class="ext-note" x="448" y="392">Skim → close read (optional)</text>
       </g>
       <g id="extension-read-paper" data-tool="read_paper">
         <title>read_paper</title>
-        <rect class="ext-tool" x="491" y="405" width="368" height="46" rx="5"/>
-        <use xlink:href="#ext-icon-read" transform="translate(523 409) scale(.76)"/>
-        <text class="ext-tool-label" x="590" y="437">Read Paper</text>
+        <rect class="ext-tool" x="389.4" y="405" width="312.8" height="46" rx="5"/>
+        <g transform="translate(414 415)" fill="none" stroke-linecap="round" stroke-width="2.5">
+          <title>Original passage text</title>
+          <rect x="0" y="11" width="37" height="8" rx="2" fill="#d9eceb"/>
+          <path d="M2 4h30m-30 10h32m-32 9h23" stroke="#2f6972"/>
+        </g>
+        <text class="ext-tool-label" x="473.5" y="437">Read Paper</text>
       </g>
       <g id="extension-retrieve" data-tool="retrieve">
         <title>retrieve</title>
-        <rect class="ext-extra" x="491" y="460" width="368" height="42" rx="5"/>
-        <use xlink:href="#ext-icon-retrieve" transform="translate(525 464) scale(.61)"/>
-        <text class="ext-tool-label ext-accent" x="590" y="490">Retrieve</text>
+        <rect class="ext-extra" x="389.4" y="460" width="312.8" height="42" rx="5"/>
+        <use xlink:href="#ext-icon-retrieve" transform="translate(418.2 464) scale(.61)"/>
+        <text class="ext-tool-label ext-accent" x="473.5" y="490">Retrieve</text>
       </g>
     </g>
 
-    <!-- The sketch links the paper-tool group with embedding, then embedding with the external DB. -->
-    <path id="paper-tools-to-embedding" class="ext-data-link" marker-start="url(#extBlueArrow)" d="M889 386h111"/>
-    <g id="extension-embedding">
-      <text class="ext-block-label ext-accent" x="1097" y="352" text-anchor="middle">Chunk &amp; Embedding</text>
-      <use xlink:href="#ext-icon-chunks" transform="translate(1015 364) scale(.79)"/>
-      <path class="ext-data-link" d="M1086 398h29"/>
-      <use xlink:href="#ext-icon-matrix" transform="translate(1121 375) scale(.88)"/>
+    <!-- Parsed papers and selected evidence are separate per-run maps in PaperContext. -->
+    <path id="paper-tools-to-parser" class="ext-data-link" d="M719 282h73"/>
+    <g id="extension-pdf-parser">
+      <title>Shared PyMuPDF parser for arXiv and library PDFs</title>
+      <use xlink:href="#ext-icon-read" transform="translate(805 257) scale(.84)"/>
+      <text class="ext-data-label" x="833" y="324" text-anchor="middle">Shared PDF parser</text>
     </g>
-    <path id="embedding-to-db" class="ext-data-link" d="M1187 386h196"/>
-    <g id="extension-db">
-      <title>DB — local per-paper vector index</title>
-      <use xlink:href="#ext-icon-vectors" transform="translate(1401 352) scale(1.08)"/>
-      <text class="ext-block-label" x="1432" y="453" text-anchor="middle">DB</text>
+    <path id="parser-to-page-chunks" class="ext-data-link" d="M855 282h93"/>
+    <g id="extension-page-chunks">
+      <title>PaperContext.papers caches each parsed paper, its outline, pages and original text chunks for this run.</title>
+      <rect class="ext-state-card" x="954" y="248" width="279" height="73" rx="9"/>
+      <use xlink:href="#ext-icon-chunks" transform="translate(968 261) scale(.52)"/>
+      <text class="ext-data-label" x="1025" y="279">Page chunks</text>
+      <text class="ext-data-note" x="1025" y="304">In memory · text, page, ID</text>
+    </g>
+    <path id="used-chunks-to-evidence" class="ext-data-link" d="M1135 322v35"/>
+    <text class="ext-note" x="1150" y="346">used chunks</text>
+    <g id="extension-evidence">
+      <title>Read, successfully summarized and retrieved passages are registered in PaperContext.evidence by chunk_id.</title>
+      <rect class="ext-state-card" x="1048" y="362" width="185" height="62" rx="9"/>
+      <g transform="translate(1061 377)" fill="none" stroke="#567087" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M8 2H3v26h5m19-26h5v26h-5M11 11h13m-13 7h9"/>
+      </g>
+      <text class="ext-data-label" x="1103" y="387">Evidence</text>
+      <text class="ext-data-note" x="1103" y="411">by chunk ID</text>
+    </g>
+    <path id="evidence-to-output" class="ext-data-link" d="M1234 391h213V149"/>
+    <text class="ext-note" x="1330" y="381">Citations</text>
+
+    <!-- Only Retrieve needs embeddings. Document vectors can be reused across runs. -->
+    <path id="chunks-to-embedding" class="ext-data-link" d="M981 322v124"/>
+    <text class="ext-note" x="970" y="404" text-anchor="end">on retrieval</text>
+    <path id="query-to-embedding" class="ext-data-link" d="M705 481h247"/>
+    <text class="ext-note" x="820" y="470" text-anchor="middle">query</text>
+    <g id="extension-embedding">
+      <title>Build or reuse vectors for the selected papers; embed each retrieval query.</title>
+      <use xlink:href="#ext-icon-matrix" transform="translate(959 452) scale(.82)"/>
+      <text class="ext-data-label ext-accent" x="1021" y="488">Embedding</text>
+    </g>
+    <path id="embedding-vector-cache" class="ext-data-link" marker-start="url(#extBlueArrow)" d="M1143 480h235"/>
+    <g id="extension-vector-cache">
+      <title>Local per-paper cache of normalized document vectors</title>
+      <use xlink:href="#ext-icon-vectors" transform="translate(1391 449) scale(.9)"/>
+      <text class="ext-data-label" x="1417" y="534" text-anchor="middle">Vector cache</text>
     </g>
   </g>
 </svg>
