@@ -1,6 +1,6 @@
 import { agentResearch, type AgentResearchSummary, type AgentSource } from '../../api/agentResearch';
 import { t, useLocale } from '../../i18n';
-import { useCallback, useEffect, useRef, useState, type Key } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type Key } from 'react';
 import { notification as notificationApi, App, Button, Empty, Select, Table } from 'antd';
 import type { TableColumnsType } from 'antd';
 import { DownloadOutlined, PlusOutlined, ReloadOutlined } from '@ant-design/icons';
@@ -10,7 +10,9 @@ import type { TaskStatus } from '../../api/types';
 import { ErrorNotice } from '../../shared/components/ErrorNotice';
 import { PageHeader } from '../../shared/components/PageHeader';
 import { PaginationBar } from '../../shared/components/PaginationBar';
-import { StatusBadge } from '../../shared/components/StatusBadge';
+import { PageSizeSelect } from '../../shared/components/PageSizeSelect';
+import RecordStatus from './RecordStatus';
+import RecordQuestion from './RecordQuestion';
 import { useResource } from '../../shared/hooks/useResource';
 import { errorText } from '../../i18n/diagnostics';
 import { dateTime, taskStatusLabels } from '../../shared/lib/format';
@@ -19,7 +21,7 @@ import SourceImportDialog from './SourceImportDialog';
 import MathText from '../../shared/components/MathText';
 
 const columns = (onDelete: (task: AgentResearchSummary) => void, deleting: boolean, onImport: (source: AgentSource) => void): TableColumnsType<AgentResearchSummary> => [
-  { title: t("研究任务"), key: 'task', render: (_value, task) => <div className="task-name"><Link to={`/tasks/${task.id}`}><MathText inline>{task.question || t("研究任务")}</MathText></Link><span className="task-identifier">{task.id.slice(0, 8)}</span></div> },
+  { title: t("研究任务"), key: 'task', render: (_value, task) => <RecordQuestion key={task.id} taskId={task.id} question={task.question} /> },
   { title: t('研究论文'), key: 'papers', width: 280, render: (_value, task) => <div className="task-paper-links">
     {task.papers.length ? task.papers.map(paper => paper.id !== null
       ? <Link key={paper.id} to={paperReaderUrl(paper.id)}><MathText inline>{paper.title}</MathText></Link>
@@ -29,28 +31,46 @@ const columns = (onDelete: (task: AgentResearchSummary) => void, deleting: boole
             aria-label={t('导入并阅读《{0}》', [paper.title])} title={t('导入并阅读')} />
         </div>) : '—'}
   </div> },
-  { title: t("状态"), dataIndex: 'status', width: 124, render: (status: TaskStatus) => <StatusBadge status={status} /> },
+  { title: t("状态"), dataIndex: 'status', width: 220, render: (_status: TaskStatus, task) => <RecordStatus task={task} /> },
   { title: t("资料"), key: 'paperCount', width: 84, render: (_value, task) => t("{0} 篇", [task.papers.length]) },
   { title: t("创建时间"), dataIndex: 'created_at', width: 144, render: dateTime },
   { title: '', key: 'action', width: 160, render: (_value, task) => <div className="selection-actions"><Link aria-label={t("查看任务 {0}", [task.id.slice(0, 8)])} to={`/tasks/${task.id}`}>{t("查看")}</Link><Button danger type="text" disabled={deleting || task.status === 'running'} onClick={() => onDelete(task)} aria-label={t("删除研究记录 {0}", [task.id.slice(0, 8)])}>{t("删除")}</Button></div> },
 ];
 
 const deletionNotifications = { placement: 'top', duration: 3, maxCount: 3, stack: false, classNames: { list: 'search-notification-list' } } as const;
-export default function TasksPage() {
+export default function TasksPage({ active = true }: { active?: boolean }) {
   useLocale();
   const navigate = useNavigate();
+  const savedScroll = useRef({ x: 0, y: 0 });
+  useLayoutEffect(() => {
+    if (!active) {
+      window.scrollTo({ left: 0, top: 0, behavior: 'instant' });
+      return;
+    }
+    const position = savedScroll.current;
+    const rememberScroll = () => { savedScroll.current = { x: window.scrollX, y: window.scrollY }; };
+    const frame = requestAnimationFrame(() => {
+      window.scrollTo({ left: position.x, top: position.y, behavior: 'instant' });
+      window.addEventListener('scroll', rememberScroll, { passive: true });
+    });
+    return () => {
+      cancelAnimationFrame(frame);
+      window.removeEventListener('scroll', rememberScroll);
+    };
+  }, [active]);
   const [importSource, setImportSource] = useState<AgentSource>();
   const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(10);
   const [status, setStatus] = useState<TaskStatus>();
-  const load = useCallback((signal: AbortSignal) => agentResearch.list({ limit: 20, offset: (page - 1) * 20, status }, signal), [page, status]);
+  const load = useCallback((signal: AbortSignal) => agentResearch.list({ limit: pageSize, offset: (page - 1) * pageSize, status }, signal), [page, pageSize, status]);
   const resource = useResource(load);
   const { modal, message } = App.useApp();
   const [notification, holder] = notificationApi.useNotification(deletionNotifications);
   const [selected, setSelected] = useState<Key[]>([]);
   const [deleting, setDeleting] = useState(false);
   const request = useRef<AbortController | null>(null);
-  const filters = useRef({ status });
-  filters.current = { status };
+  const filters = useRef({ status, pageSize });
+  filters.current = { status, pageSize };
   useEffect(() => () => { request.current?.abort(); notification.destroy(); }, [notification]);
 
   async function removeTasks(ids: string[]) {
@@ -77,7 +97,7 @@ export default function TasksPage() {
         const current = filters.current;
         const pageInfo = await agentResearch.list({ status: current.status, limit: 1, offset: 0 }, pending.signal);
         if (pending.signal.aborted) return;
-        if (filters.current.status === current.status) setPage((value) => Math.min(value, Math.max(1, Math.ceil(pageInfo.total / 20))));
+        if (filters.current.status === current.status) setPage((value) => Math.min(value, Math.max(1, Math.ceil(pageInfo.total / filters.current.pageSize))));
       }
       resource.reload();
     } catch (error) {
@@ -96,13 +116,14 @@ export default function TasksPage() {
     <PageHeader title={t("研究记录")} description={t("查看和管理已经保存的研究结果。")} action={<Link to="/tasks/new"><Button type="primary" icon={<PlusOutlined />}>{t("新建任务")}</Button></Link>} />
     <section className="content-panel">
       <div className="filter-toolbar">
+        <PageSizeSelect value={pageSize} onChange={size => { setPageSize(size); setPage(1); }} />
         <Select<TaskStatus> value={status} allowClear placeholder={t("全部状态")} aria-label={t("筛选任务状态")} onChange={(value) => { setStatus(value); setPage(1); }} options={Object.entries(taskStatusLabels()).map(([value, label]) => ({ value: value as TaskStatus, label }))} />
         <Button icon={<ReloadOutlined />} loading={resource.loading} onClick={resource.reload}>{t("刷新")}</Button>
       </div>
       {selected.length > 0 && <div className="selection-notice"><span>{t('已选择 {0} 条研究记录', [selected.length])}</span><div className="selection-actions"><Button danger disabled={deleting} loading={deleting} onClick={() => confirmDelete(selected.map(String))}>{t('删除已选研究')}</Button><Button type="link" disabled={deleting} onClick={() => setSelected([])}>{t('清空选择')}</Button></div></div>}
       {resource.error && <ErrorNotice error={resource.error} retry={resource.reload} />}
       <Table<AgentResearchSummary> className="research-records-table" rowKey="id" columns={columns((task) => confirmDelete([task.id]), deleting, setImportSource).map((column) => ({ ...column, align: 'left' as const }))} rowSelection={{ align: 'left', selectedRowKeys: selected, preserveSelectedRowKeys: true, onChange: setSelected, getCheckboxProps: (task) => ({ disabled: deleting || task.status === 'running', 'aria-label': t('选择研究记录 {0}', [task.id.slice(0, 8)]) }) }} dataSource={resource.data?.items || []} loading={resource.loading} pagination={false} scroll={{ x: 980 }} locale={{ emptyText: <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={status ? t("没有匹配的任务") : t("还没有研究任务")}>{!status && <Link to="/tasks/new"><Button>{t("创建第一个任务")}</Button></Link>}</Empty> }} />
-      {resource.data && <PaginationBar total={resource.data.total} page={page} onChange={setPage} />}
+      {resource.data && <PaginationBar total={resource.data.total} page={page} pageSize={pageSize} onChange={setPage} />}
     </section>
   </>;
 }

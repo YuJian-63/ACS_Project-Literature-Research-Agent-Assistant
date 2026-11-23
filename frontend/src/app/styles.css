@@ -2308,3 +2308,55 @@ main {
 .research-records-table .ant-table-thead > tr > th { text-align: center; }
 .research-records-table .task-name, .research-records-table .task-paper-links { text-align: left; }
 .research-records-table .selection-actions { justify-content: flex-start; }
+
+.record-status { display: flex; flex-direction: column; align-items: flex-start; gap: 8px; }
+.record-evaluation { display: flex; align-items: center; gap: 6px; font-size: 12px; line-height: 1.5; color: var(--text-secondary, #68717d); }
+.record-evaluation[data-status="succeeded"] { color: #397457; }
+.record-evaluation[data-status="failed"], .record-evaluation[data-status="unavailable"] { color: #a44343; }
+.record-evaluation[data-status="insufficient"] { color: #96651e; }
+.record-evaluation-score { font-weight: 600; font-variant-numeric: tabular-nums; }
+
+.record-evaluation .status-badge { align-self: flex-start; }
+.record-evaluation a.status-badge:hover { text-decoration: underline; text-underline-offset: 3px; }
+.record-evaluation a.status-badge:focus-visible { outline: 2px solid currentColor; outline-offset: 3px; }
+
+.record-evaluation-score.record-score-high { background: #eaf4ed; color: #246647; }
+.record-evaluation-score.record-score-medium { background: #fff4ce; color: #795c00; }
+.record-evaluation-score.record-score-low { background: #fbeeea; color: #a33b36; }
+
+.record-question { width: 100%; max-width: 480px; min-width: 0; }
+.task-name > .record-question-text {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+  line-clamp: 3;
+  max-height: 4.8em;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+  white-space: normal;
+  line-height: 1.6;
+}
+.task-name > .record-question-text.is-expanded {
+  display: block;
+  -webkit-line-clamp: unset;
+  line-clamp: unset;
+  max-height: none;
+}
+.record-question-text .katex-display { max-width: 100%; overflow-x: auto; }
+.record-question-toggle {
+  display: block;
+  padding: 0;
+  margin-top: 6px;
+  border: 0;
+  background: none;
+  color: var(--accent, #246647);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+.record-question-toggle:hover { text-decoration: underline; }
+.record-question-toggle:focus-visible { outline: 2px solid currentColor; outline-offset: 3px; }
+
+.table-page-size { display: flex; align-items: center; gap: 10px; color: var(--muted); font-size: 12px; white-space: nowrap; }
+.table-page-size select { max-width: 100%; min-height: 40px; padding: 7px 30px 7px 12px; border: 1px solid var(--line); border-radius: 5px; background: #f7faf8; color: var(--ink); font: inherit; cursor: pointer; }
+.table-page-size select:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }

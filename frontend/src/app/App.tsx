@@ -45,6 +45,9 @@ function Workspace() {
   useEffect(() => {
     try { localStorage.setItem('literature-v3-sidebar-collapsed', sidebarCollapsed ? '1' : '0'); } catch { /* Preference storage is optional. */ }
   }, [sidebarCollapsed]);
+  const recordsActive = pathname === '/tasks';
+  const [recordsVisited, setRecordsVisited] = useState(recordsActive);
+  useEffect(() => { if (recordsActive) setRecordsVisited(true); }, [recordsActive]);
   const searchActive = pathname === '/papers/search';
   const [searchVisited, setSearchVisited] = useState(searchActive);
   useEffect(() => { if (searchActive) setSearchVisited(true); }, [searchActive]);
@@ -61,12 +64,12 @@ function Workspace() {
     <div className="workspace-body">
       <header className="topbar"><div className="breadcrumb"><Button type="text" className="sidebar-toggle" icon={sidebarCollapsed ? <MenuUnfoldOutlined /> : <MenuFoldOutlined />} aria-label={t(sidebarCollapsed ? '展开侧栏' : '收起侧栏')} title={t(sidebarCollapsed ? '展开侧栏' : '收起侧栏')} aria-expanded={!sidebarCollapsed} aria-controls="workspace-sidebar" onClick={() => setSidebarCollapsed((value) => !value)} /><Link to="/papers" className="mobile-brand"><BookOutlined /></Link><Link to={pathname.startsWith('/tasks') ? '/tasks' : '/papers'}>{pathname.startsWith('/tasks') ? t('研究记录') : t('研究空间')}</Link><RightOutlined /><span>{pathname === '/account/password' ? t('修改密码') : currentPage}</span></div><div className="topbar-actions"><LanguageSwitch /><AccountMenu /></div></header>
       <nav className="mobile-nav" aria-label={t('移动导航')}><NavLink to="/papers" end>{t('论文库')}</NavLink><NavLink to="/papers/search">{t('搜索论文')}</NavLink><NavLink to="/tasks" end>{t('研究记录')}</NavLink><NavLink to="/tasks/new">{t('新建研究')}</NavLink><NavLink to="/models">{t('设置')}</NavLink></nav>
-      <main id="main-content" tabIndex={-1}>{searchVisited && <div hidden={!searchActive}><Suspense fallback={<div className="page-loading"><Spin /></div>}><SearchPapersPage active={searchActive} /></Suspense></div>}<Suspense fallback={<div className="page-loading"><Spin description={t('正在加载页面')} size="large"><div className="loading-placeholder" /></Spin></div>}><Routes>
+      <main id="main-content" tabIndex={-1}>{recordsVisited && <div hidden={!recordsActive}><Suspense fallback={<div className="page-loading"><Spin /></div>}><TasksPage active={recordsActive} /></Suspense></div>}{searchVisited && <div hidden={!searchActive}><Suspense fallback={<div className="page-loading"><Spin /></div>}><SearchPapersPage active={searchActive} /></Suspense></div>}<Suspense fallback={<div className="page-loading"><Spin description={t('正在加载页面')} size="large"><div className="loading-placeholder" /></Spin></div>}><Routes>
         <Route path="/" element={<Navigate to="/papers" replace />} />
         <Route path="/models" element={<ModelsPage />} />
         <Route path="/papers" element={<PapersPage />} />
         <Route path="/papers/search" element={null} />
-        <Route path="/tasks" element={<TasksPage />} />
+        <Route path="/tasks" element={null} />
         <Route path="/tasks/new" element={<NewResearchPage />} />
         <Route path="/tasks/preview" element={<Navigate to="/tasks" replace />} />
         <Route path="/tasks/:taskId" element={<AgentResultPage />} />
