@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="1536" height="1176" viewBox="0 0 1536 1176" role="img" aria-labelledby="title description">
   <title id="title">Baseline and Extension research workflows</title>
-  <desc id="description">Both workflows share a ReAct model and tools, a PDF parser and a per-run evidence map. The paper tools connect to their common parser through a single bus. Parsed papers and complete run results are artifacts that can be saved to PostgreSQL. Under pressure compact mode can compress the context before generation. Extension adds planning, reflection and retrieval with a separate local vector cache.</desc>
+  <desc id="description">Both workflows share a ReAct model and tools, a PDF parser and a per-run evidence map. The parser reads the source PDF from a file. Parsed papers and run results can be saved to PostgreSQL. Extension adds planning, reflection and retrieval. Its third artifact, Vector, holds document chunk embeddings in a per-paper file cache. Compact mode can compress the context before generation.</desc>
   <defs>
     <marker id="extArrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6.6" markerHeight="6.6" orient="auto-start-reverse">
       <path d="M0 0 10 5 0 10Z" fill="#203548"/>
@@ -193,20 +193,19 @@
         <use xlink:href="#ext-icon-retrieve" transform="translate(418.2 464) scale(.61)"/>
         <text class="ext-tool-label ext-accent" x="473.5" y="490">Retrieve</text>
       </g>
-    <g id="shared-data">
+    <g id="paper-parsing">
       <!-- The common parser is invoked from the middle of the paper-tool bus. -->
       <path class="ext-data-link" d="M699 384h98"/>
       <circle cx="699" cy="384" r="4" fill="#377d83"/>
       <g id="shared-parser">
-        <title>All paper tools acquire or reuse the same parsed PDF.</title>
+        <title>The paper tools share the same parsed document. The parser reads the original PDF from a file.</title>
         <use xlink:href="#ext-icon-read" transform="translate(805 360) scale(.82)"/>
-        <text class="ext-data-label" x="830" y="430" text-anchor="middle">Shared PDF parser</text>
+        <text class="ext-data-label" x="823" y="430" text-anchor="middle">Shared PDF parser</text>
       </g>
 
-      <!-- The two card-shaped records are the parsed paper and TaskResult JSON. -->
-      <g id="artifacts">
-        <title>Persisted artifacts: parsed paper records and the full run result, including its cited evidence, usage and trace.</title>
-        <path class="artifact-boundary" d="M934 286
+      <path id="parser-to-paper" class="ext-data-link" d="M829 354v-53q0-9 9-9h119"/>
+    </g>
+    <path id="artifact-contour" class="artifact-boundary" d="M934 286
           C930 259 949 241 972 239 C995 237 1005 231 1030 234
           C1055 238 1065 228 1091 233 C1119 239 1132 231 1156 237
           C1182 244 1194 236 1212 247 C1235 257 1239 269 1236 287
@@ -215,6 +214,7 @@
           C1094 431 1078 445 1051 439 C1028 435 1010 445 985 437
           C960 430 944 436 935 416 C925 394 935 382 930 358
           C927 335 939 326 935 309 C933 301 932 294 934 286Z"/>
+    <g id="paper-and-run-artifacts">
         <text class="artifact-heading" x="1084" y="257" text-anchor="middle">Artifacts</text>
         <g id="parsed-papers">
           <title>Parsed pages and original chunks are cached per run with source, page and chunk ID.</title>
@@ -235,34 +235,37 @@
           <text class="ext-data-label" x="1016" y="394">Run result</text>
           <text class="ext-data-note" x="1016" y="416">Answer · citations · trace</text>
         </g>
-      </g>
-      <path id="parser-to-paper" class="ext-data-link" d="M829 354v-53q0-9 9-9h119"/>
-      <path id="artifacts-to-database" class="ext-data-link" d="M1242 334h137"/>
-      <text class="ext-note" x="1333" y="324" text-anchor="middle">persist</text>
-      <g id="database">
-        <title>PostgreSQL stores paper documents and run results when persistence is enabled.</title>
-        <use xlink:href="#ext-icon-vectors" transform="translate(1391 299) scale(.92)"/>
-        <text class="ext-data-label" x="1418" y="383" text-anchor="middle">Database</text>
-      </g>
-      <path id="result-to-output" class="ext-data-link" d="M1215 398h276V167"/>
     </g>
-    <g id="retrieval-vectors">
-      <title>Retrieve embeds the query and builds or reuses each paper's document vectors in a local JSON file.</title>
-      <path id="chunks-to-embedding" class="ext-data-link" d="M963 318h-12q-9 0-9 9v112q0 8 8 8h32v7"/>
-      <text class="ext-note" x="933" y="457" text-anchor="end">on retrieval</text>
-      <path id="retrieve-query" class="ext-data-link" d="M587 502v10h326q10 0 10-10v-12q0-10 10-10h18"/>
-      <text class="ext-note" x="820" y="503" text-anchor="middle">query</text>
-      <use xlink:href="#ext-icon-matrix" transform="translate(959 455) scale(.78)"/>
-      <text class="ext-data-label ext-accent" x="1021" y="488">Embedding</text>
-      <path class="ext-data-link" marker-start="url(#extBlueArrow)" d="M1143 480h235"/>
-      <g id="local-vector-cache">
-        <title>Local file cache of per-paper document vectors</title>
-        <g transform="translate(1395 461)" fill="#eff6fa" stroke="#526a7f" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+    <g id="persist-and-output">
+      <path class="parser-bus" d="M1214 290h36 M1214 385h28q8 0 8-8v-87"/>
+      <circle cx="1250" cy="290" r="3.5" fill="#377d83"/>
+      <path id="records-to-database" class="ext-data-link" d="M1250 290h133"/>
+      <text class="ext-note" x="1340" y="280" text-anchor="middle">--persist</text>
+      <g id="database">
+        <title>PostgreSQL stores the parsed paper and the run result as JSONB when persistence is enabled.</title>
+        <use xlink:href="#ext-icon-vectors" transform="translate(1391 257) scale(.92)"/>
+        <text class="ext-data-label" x="1418" y="340" text-anchor="middle">Database</text>
+      </g>
+      <path id="result-to-output" class="ext-data-link" d="M1214 411h269q8 0 8-8V167"/>
+    </g>
+    <g id="vector-artifact">
+        <title>One JSON file per paper caches its document chunk vectors across retrievals.</title>
+        <rect class="ext-state-card" x="961" y="444" width="252" height="49" rx="9"/>
+        <g transform="translate(970 451) scale(.83)" fill="#eff6fa" stroke="#526a7f" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
           <path d="M1 7V2h27l10 10v25h-5"/><path d="M6 11V7h17l10 10v25H6z"/>
           <path d="M23 7v10h10M12 23h15m-15 6h15m-15 6h10" fill="none"/>
         </g>
-        <text class="ext-data-label" x="1418" y="534" text-anchor="middle">Local vector cache</text>
-      </g>
+        <text class="ext-data-label" x="1016" y="465">Vector</text>
+        <text class="ext-data-note" x="1016" y="485">Per-paper file cache</text>
+    </g>
+    <g id="retrieval-embedding">
+      <title>Retrieve embeds the query for this ranking. Document vectors are computed from paper chunks or reused from the file cache.</title>
+      <path id="chunks-to-embedding" class="ext-data-link" d="M960 315h-27q-8 0-8 8v112q0 8-8 8h-80q-8 0-8 8v3"/>
+      <path id="retrieve-query" class="ext-data-link" d="M669 493h77q8 0 8-8q0-7 8-7h36"/>
+      <text class="ext-note" x="746" y="509" text-anchor="middle">query</text>
+      <use xlink:href="#ext-icon-matrix" transform="translate(807 458) scale(.70)"/>
+      <text class="ext-data-label ext-accent" x="830" y="523" text-anchor="middle">Embedding</text>
+      <path class="ext-data-link" marker-start="url(#extBlueArrow)" d="M859 478h98"/>
     </g>
   </defs>
   <rect width="1536" height="1176" fill="#fefefe"/>
@@ -285,7 +288,12 @@
         <title>Shared parser for all 3 paper tools</title>
       </path>
     </g>
-    <use xlink:href="#shared-data"/>
+    <g id="baseline-artifacts">
+      <use xlink:href="#artifact-contour"/>
+      <use xlink:href="#paper-and-run-artifacts"/>
+    </g>
+    <use xlink:href="#paper-parsing"/>
+    <use xlink:href="#persist-and-output"/>
   </g>
   <path d="M32.5 579H1506" stroke="#96a9c5" stroke-width="1.35"/>
   <g id="extension" class="workflow" transform="translate(0 590)">
@@ -310,7 +318,13 @@
         <title>Shared parser for all 4 paper tools</title>
       </path>
     </g>
-    <use xlink:href="#shared-data"/>
-    <use xlink:href="#retrieval-vectors"/>
+    <g id="extension-artifacts">
+      <use xlink:href="#artifact-contour" transform="translate(0 -74.5) scale(1 1.32)"/>
+      <use xlink:href="#paper-and-run-artifacts"/>
+      <use xlink:href="#vector-artifact"/>
+    </g>
+    <use xlink:href="#paper-parsing"/>
+    <use xlink:href="#persist-and-output"/>
+    <use xlink:href="#retrieval-embedding"/>
   </g>
 </svg>
