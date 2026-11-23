@@ -6,9 +6,7 @@ Agent 根据研究问题选择论文、读取 PDF，并把答案中的论断关�
 
 ## Agent workflow
 
-![项目提案中的 Baseline 和 Proposed Extensions 工作流](workflow.png)
-
-上图复现项目提案中的工作流，当前实现见下文。[可编辑的 SVG](workflow.svg) · [提案原图](../docs/workflow.png)
+[![Baseline and Extension workflows](workflow.png)](workflow.svg)
 
 ### Baseline 如何从问题走到引用
 
