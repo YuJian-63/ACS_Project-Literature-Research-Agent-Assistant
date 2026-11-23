@@ -2360,3 +2360,10 @@ main {
 .table-page-size { display: flex; align-items: center; gap: 10px; color: var(--muted); font-size: 12px; white-space: nowrap; }
 .table-page-size select { max-width: 100%; min-height: 40px; padding: 7px 30px 7px 12px; border: 1px solid var(--line); border-radius: 5px; background: #f7faf8; color: var(--ink); font: inherit; cursor: pointer; }
 .table-page-size select:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+.record-question-meta { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
+.record-question-meta .task-identifier { margin: 0; }
+.record-workflow { display: inline-flex; padding: 2px 7px; border: 1px solid var(--line); border-radius: 4px; color: var(--muted); background: #f7faf8; font-size: 11px; line-height: 1.6; white-space: nowrap; }
+.record-workflow-baseline { background: #edf2f7; border-color: #dbe3ec; color: #405b78; }
+.record-workflow-extended { background: #f0edf8; border-color: #e1daf0; color: #67508b; }
+.record-workflow-retry { border: 0; background: none; color: var(--accent); padding: 0; font: inherit; font-size: 11px; cursor: pointer; }

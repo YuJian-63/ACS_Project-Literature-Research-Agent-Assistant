@@ -32,7 +32,11 @@ export interface AgentResearchSummary {
   status: TaskStatus;
   created_at: string;
 }
+export type ResearchWorkflowType = 'baseline' | 'extended';
 export const agentResearch = {
+  workflow(taskId: string, signal: AbortSignal) {
+    return request<{ workflow_type: ResearchWorkflowType }>({ url: '/api/v1/tasks/' + encodeURIComponent(taskId), signal });
+  },
   getConcurrency(signal: AbortSignal) {
     return request<{ concurrency: number }>({ url: '/api/v1/agent-research/queue/concurrency', signal });
   },

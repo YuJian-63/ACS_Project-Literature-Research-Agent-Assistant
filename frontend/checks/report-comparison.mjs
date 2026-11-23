@@ -1,0 +1,33 @@
+import assert from 'node:assert/strict';
+import { createElement } from 'react';
+import { renderToStaticMarkup } from 'react-dom/server';
+import { createServer } from 'vite';
+import { fileURLToPath } from 'node:url';
+const server = await createServer({ root: fileURLToPath(new URL('../', import.meta.url)), server: { middlewareMode: true, ws: false, watch: null }, appType: 'custom' });
+try {
+ const { comparisonIds, scoreDifference, matchingInputs, reportedConfig } = await server.ssrLoadModule('/src/features/agentResearch/lib/reportComparison.ts');
+ const a = '11111111-1111-4111-8111-111111111111', b = '22222222-2222-4222-8222-222222222222';
+ assert.deepEqual(comparisonIds(new URLSearchParams({ a, b })), [a,b]);
+ for (const query of [{a,b:a},{a:'bad',b},{a},{a,b:'https://example.com'}]) assert.equal(comparisonIds(new URLSearchParams(query)), null);
+ const evaluation = {status:'succeeded',assessment:'scored',overall_score:0,overall_score_max:100,score_max:5,provider:'deepseek',model:'judge',rubric_version:'v1',prompt_version:'p1',weights:{clarity:20}};
+ assert.equal(scoreDifference(evaluation, {...evaluation,overall_score:80}), 80);
+ assert.equal(scoreDifference(evaluation, {...evaluation,assessment:'insufficient_evidence'}), null);
+ assert.equal(scoreDifference(evaluation, {...evaluation,status:'pending'}), null);
+ assert.equal(scoreDifference(evaluation, {...evaluation,overall_score_max:80}), null);
+ assert.equal(scoreDifference(evaluation, {...evaluation,rubric_version:'v2'}), null);
+ assert.equal(scoreDifference(evaluation, {...evaluation,provider:null}), null);
+ const record={question:'Question',paper_ids:[a,b]};
+ assert.deepEqual(matchingInputs(record,{...record,paper_ids:[b,a]}),{question:true,papers:true});
+ assert.deepEqual(matchingInputs(record,{question:'Another question',paper_ids:[b]}),{question:false,papers:false});
+ assert.equal(matchingInputs({...record,paper_ids:[]},{...record,paper_ids:[]}).papers,null);
+ assert.equal(reportedConfig({result:{configuration:{task:{allow_search:false}}}}).allow_search,false);
+ assert.equal(reportedConfig({result:{configuration:{}}}).allow_search,undefined);
+ const { ComparisonMetrics } = await server.ssrLoadModule('/src/features/agentResearch/ComparisonMetrics.tsx');
+ const dimensions=Object.fromEntries(['grounded_correctness','citation_support','task_completion','analysis_quality','clarity'].map(k=>[k,{score:4,reason:''}]));
+ const row=(id,score,time,tokens)=>({task_id:id,status:'succeeded',result:{usage:{elapsed_seconds:time,total_tokens:tokens,token_usage_complete:true}},metrics:{evaluation:{...evaluation,overall_score:score,dimensions}}});
+ const rendered=renderToStaticMarkup(createElement(ComparisonMetrics,{records:[row(a,85,104.44,48984),row(b,67,108.68,81646)],comparableInputs:false}));
+ assert.match(rendered, />-18</, 'different or unknown inputs still allow a numerical score delta');
+ assert.match(rendered, />\+4.24</, 'elapsed time delta is independent of matching inputs');
+ assert.match(rendered, />\+32662</, 'complete token counts allow a raw delta');
+ console.log('PASS: pair validation, unrelated reports, genuine zero scores and incompatible evaluation handling');
+} finally {await server.close();}

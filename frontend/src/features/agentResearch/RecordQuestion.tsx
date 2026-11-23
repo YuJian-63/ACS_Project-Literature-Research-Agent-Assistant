@@ -2,6 +2,7 @@ import { useEffect, useId, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { t, useLocale } from '../../i18n';
 import MathText from '../../shared/components/MathText';
+import RecordWorkflow from './RecordWorkflow';
 
 export default function RecordQuestion({ taskId, question }: { taskId: string; question: string }) {
   const locale = useLocale();
@@ -29,6 +30,6 @@ export default function RecordQuestion({ taskId, question }: { taskId: string; q
     {overflowing && <button className="record-question-toggle" type="button" aria-expanded={expanded} aria-controls={textId} onClick={() => setExpanded(value => !value)}>
       {locale === 'en-US' ? expanded ? 'Collapse' : 'Show full text' : expanded ? '收起' : '显示完整文本'}
     </button>}
-    <span className="task-identifier">{taskId.slice(0, 8)}</span>
+    <div className="record-question-meta"><RecordWorkflow taskId={taskId} /><span className="task-identifier">{taskId.slice(0, 8)}</span></div>
   </div>;
 }
