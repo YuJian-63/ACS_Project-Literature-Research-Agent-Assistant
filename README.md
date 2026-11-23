@@ -1,10 +1,10 @@
 # Literature Research Agent Assistant
 
-HKUST CSIT6000V Advanced AI Computing and Systems 课程项目。用户上传 PDF、提交研究问题，再从回答中的引用打开原 PDF 对应页。Baseline 和 Retrieval Extension 可在本地或 TACC 执行，模型使用百炼 API 或独立部署的 Qwen 服务。
+HKUST CSIT6000V Advanced AI Computing and Systems 课程项目。用户上传 PDF、arXiv搜索、导入论文，提交研究问题，接收问题回答。Baseline 和 Retrieval Extension 可在本地或 TACC 执行，模型使用百炼 API 或独立部署的 Qwen 服务。
 
 ## Getting Started Instructions
 
-**公网入口：** [https://8.218.149.237/](https://8.218.149.237/)。使用已部署服务时，可直接打开该地址注册、验证邮箱并登录；以下步骤用于本地运行或自行部署。
+**公网入口：** [https://8.218.149.237/](https://8.218.149.237/)。已实现将系统部署到云服务器，访问公网网址即可访问服务，使用已部署服务时，可直接打开该地址注册、验证邮箱并登录。以下步骤用于本地运行或自行部署。
 
 ### 1. 前置条件
 
@@ -16,6 +16,7 @@ HKUST CSIT6000V Advanced AI Computing and Systems 课程项目。用户上传 PD
 | 数据库 | 已启动的 Docker 和 Compose 插件，脚本使用 PostgreSQL 17；也可连接已有 PostgreSQL。 |
 | 邮件 | 支持 SSL/TLS 465 端口的 SMTP 邮箱和授权码，用于注册验证；下面以 QQ 邮箱为例。 |
 | 研究模型 | 百炼 API Key、对应工作空间的兼容接口地址和可用模型 ID。下面的网页研究示例在 TACC CPU 作业中调用百炼，无需申请 GPU。 |
+| 评分模型 | 使用 Deepseek-Flash 用于任务评分，需要配置相关数据。 |
 | TACC / TCloud | 有效课程账号、已登记公钥对应的私钥、已初始化的 `tcloud` SDK，以及 SDK 可使用的 Python 3.12 执行环境。仅启动网页、注册和上传 PDF 时无需集群。 |
 | 网络与端口 | 能下载依赖和镜像、连接 SMTP 及 TACC；Worker 和计算节点均能访问百炼，计算节点能通过 HTTPS 访问论文库。本地端口 `5173`、`8000` 和默认数据库端口 `55432` 未被占用；临时论文库入口另用 `8001`。 |
 
