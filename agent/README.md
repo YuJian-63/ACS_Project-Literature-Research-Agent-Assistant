@@ -69,13 +69,15 @@ Extension 的 `retrieve(source, query, top_k=3)` 接受单个论文标识或非�
 
 结果写入 `runs/extension/`。启用 `--persist` 时，Neon 存储键为 `extension/<task_id>`，结果 JSON 保留原任务 ID。Trace 中 `retrieval_index` 记录建索引或复用，`embedding` 按 `document` 和 `query` 分别记录调用耗时与实际输入 token；`usage` 延续 Baseline 的聊天模型统计。
 
-从仓库根目录运行以下命令，可串行对比 `agent/examples/*.json` 下的全部示例。脚本接收一次网页账号和密码，运行 discovery 和 library-qa 时自动登录论文库。运行 library-qa 前，先将 SkillOpt 原文上传至该账号的论文库。
+从仓库根目录运行以下命令，即可开始 25 组消融实验。先启动论文库 API，并确认该账号已上传 SkillOpt 原文。
 
 ```bash
 ./agent/run.sh '你的用户名' '你的密码'
 ```
 
-也可通过环境变量 `AGENT_LIBRARY_USERNAME` 和 `AGENT_LIBRARY_PASSWORD` 提供凭据。省略凭据时仍运行全部示例，使用 CLI 默认的搜索配置。每个示例先跑 Baseline，再跑 Extension，分别写入 `runs/baseline/<task_id>.json` 和 `runs/extension/<task_id>.json`。示例每次生成新的任务 ID。单项失败后继续运行其余项，脚本最后以非零状态退出。
+脚本先验证账号能找到 SkillOpt，再依次运行 `library-qa`、`qa`、`summary`、`review` 和 `discovery`。每题都跑 Baseline、RAG、RAG + Planner、RAG + Reflection 和全开五种配置。库内问答和 discovery 使用论文库授权。也可通过 `AGENT_LIBRARY_USERNAME` 与 `AGENT_LIBRARY_PASSWORD` 或已有的 `AGENT_LIBRARY_TOKEN` 提供凭据。
+
+终端显示批次目录和当前组号。每组结束后，答案、引用、用量和停止原因写入 `agent/runs/ablation/<批次>/<案例>/<配置>/result.json`，按时间排序的事件写入同目录的 `trace.json`。单组失败后继续执行，全部结束后有失败则返回非零状态。再次执行会新建批次。
 
 重复写入同一路径会覆盖已有结果。对照实验可用 `--output` 为每次运行指定不同的文件名。
 
