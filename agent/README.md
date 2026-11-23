@@ -6,9 +6,9 @@ Agent 根据研究问题选择论文、读取 PDF，并把答案中的论断关�
 
 ## Agent workflow
 
-![Baseline 研究循环与 Extension 的规划、段落检索和草稿核对路径](workflow.png)
+![项目提案中的 Baseline 和 Proposed Extensions 工作流](workflow.png)
 
-上栏是 Baseline，下栏用蓝色标出 Extension 增加的部分。ReAct 循环由 `agent` 和 `tools` 两个节点组成。可选的 `planner` 在循环前运行，`reflection` 在循环外接收有效草稿（含上下文压力收尾的草稿），需要时可调用一次 `read_paper` 或 `retrieve` 补证。虚线表示跳过对应节点的路径。[报告用 SVG 矢量图](workflow.svg)
+上图复现项目提案中的工作流，当前实现见下文。[可编辑的 SVG](workflow.svg) · [提案原图](../docs/workflow.png)
 
 ### Baseline 如何从问题走到引用
 
