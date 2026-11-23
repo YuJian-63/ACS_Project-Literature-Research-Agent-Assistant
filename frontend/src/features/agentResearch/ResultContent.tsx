@@ -18,9 +18,12 @@ import './research.css';
 
 export default function ResultContent({ result, metrics, onEvaluationRequested, onReadEvidence, onReadSource }: { result: AgentResult; metrics?: TaskMetrics; onEvaluationRequested?: () => void; onReadEvidence?: (evidence: AgentEvidence) => void; onReadSource?: (source: AgentSource) => void }) {
   useLocale();
-  const [parameters] = useSearchParams();
+  const [parameters, setParameters] = useSearchParams();
   const [selectedKey, setSelectedKey] = useState<string | undefined>(() => parameters.get('citation') || undefined);
-  const [activeTab, setActiveTab] = useState('');
+  const activeTab = parameters.get('tab') || '';
+  function setActiveTab(tab: string) {
+    setParameters(previous => { const next = new URLSearchParams(previous); next.set('tab', tab); return next; }, { replace: true });
+  }
   const selected = result.citations.find(citation => citation.chunk_id === selectedKey);
   const byId = new Map(result.citations.map((citation, index) => [citation.chunk_id, { citation, number: index + 1 }]));
   function markdown(value: string, className = '') {

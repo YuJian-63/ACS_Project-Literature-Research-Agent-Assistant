@@ -9,6 +9,7 @@ import type { Paper, PaperStatus } from '../../../api/types';
 import { ErrorNotice } from '../../../shared/components/ErrorNotice';
 import { PageHeader } from '../../../shared/components/PageHeader';
 import { PaginationBar } from '../../../shared/components/PaginationBar';
+import { PageSizeSelect } from '../../../shared/components/PageSizeSelect';
 import { PaperTable } from '../components/PaperTable';
 import { canSelectPaper, hasPendingPaper, hasPendingPapers } from '../lib/selection';
 import { PaperUpload } from '../components/PaperUpload';
@@ -34,6 +35,7 @@ export default function PapersPage() {
   const [draft, setDraft] = useState('');
   const [status, setStatus] = useState<PaperStatus>();
   const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(10);
   const [expanded, setExpanded] = useState(false);
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const deleteRequest = useRef<AbortController | null>(null);
@@ -41,7 +43,7 @@ export default function PapersPage() {
   const libraryPanel = useRef<HTMLElement>(null);
   const libraryHeading = useRef<HTMLHeadingElement>(null);
   const closedPaperId = useRef<string | null>(null);
-  const load = useCallback((signal: AbortSignal) => api.papers({ q: query || undefined, status, limit: 20, offset: (page - 1) * 20 }, signal), [page, query, status]);
+  const load = useCallback((signal: AbortSignal) => api.papers({ q: query || undefined, status, limit: pageSize, offset: (page - 1) * pageSize }, signal), [page, pageSize, query, status]);
   const resource = useResource(load, 2000, hasPendingPapers);
   const loadReadingPaper = useCallback((signal: AbortSignal) => readingPaperId ? api.paper(readingPaperId, signal) : Promise.resolve(null), [readingPaperId]);
   const readerResource = useResource(loadReadingPaper, 2000, hasPendingPaper);
@@ -54,8 +56,8 @@ export default function PapersPage() {
   const newResearchUrl = `/tasks/new${selected.length ? `?${parameters}` : ''}`;
   const newResearchAction = <Link to={newResearchUrl}><Button type="primary" icon={readingPaperId ? <PlusOutlined aria-hidden="true" /> : <ArrowRightOutlined aria-hidden="true" />} iconPlacement={readingPaperId ? 'start' : 'end'}>{t('新建研究')}</Button></Link>;
   const papers = resource.data?.items || [];
-  const latestLibrary = useRef({ parameters: readerParameters, page, papers, query, status });
-  latestLibrary.current = { parameters: readerParameters, page, papers, query, status };
+  const latestLibrary = useRef({ parameters: readerParameters, page, pageSize, papers, query, status });
+  latestLibrary.current = { parameters: readerParameters, page, pageSize, papers, query, status };
   const emptyMessage = query || status ? t('没有匹配的论文，请调整筛选条件') : t('还没有论文，上传第一篇 PDF 开始研究');
   useEffect(() => {
     if (readingPaperId || closedPaperId.current === null) return;
@@ -135,7 +137,7 @@ export default function PapersPage() {
         // Requery the current filter to find a valid page after cross-page deletion.
         const fresh = await api.papers({ q: current.query || undefined, status: current.status, limit: 1, offset: 0 }, controller.signal);
         if (controller.signal.aborted) return;
-        setPage((value) => Math.min(value, Math.max(1, Math.ceil(fresh.total / 20))));
+        setPage((value) => Math.min(value, Math.max(1, Math.ceil(fresh.total / latestLibrary.current.pageSize))));
         resource.reload();
 
       }
@@ -203,6 +205,7 @@ export default function PapersPage() {
     <section ref={libraryPanel} className="content-panel library-panel">
       <div className="panel-heading"><div><h2 ref={libraryHeading} tabIndex={-1}>{t("我的论文")}</h2><p>{readingPaper ? t('点击标题切换原文，勾选论文可继续创建研究。') : t("选择论文后可创建摘要、问答或跨论文综述任务。")}</p></div><div className="library-panel-actions">{readingPaper && newResearchAction}<Button icon={<ReloadOutlined />} aria-label={t('刷新')} title={t('刷新')} onClick={resource.reload} loading={resource.loading}>{readingPaper ? null : t("刷新")}</Button></div></div>
       <div className="filter-toolbar">
+        <PageSizeSelect value={pageSize} onChange={size => { setPageSize(size); setPage(1); }} />
         <Input.Search value={draft} placeholder={t("搜索标题或文件名")} aria-label={t("搜索论文")} maxLength={200} allowClear onChange={(event) => { setDraft(event.target.value); if (!event.target.value) { setQuery(''); setPage(1); } }} onSearch={(value) => { setQuery(value); setPage(1); }} />
         <Select<PaperStatus> value={status} onChange={(value) => { setStatus(value); setPage(1); }} allowClear placeholder={t("全部状态")} aria-label={t("筛选论文状态")} options={Object.entries(paperStatusLabels()).map(([value, label]) => ({ value: value as PaperStatus, label }))} />
       </div>
@@ -215,7 +218,7 @@ export default function PapersPage() {
         onChange: changeSelection,
         getCheckboxProps: (paper) => ({ disabled: !canSelectPaper(paper) || (selected.length >= 20 && !selected.includes(paper.id)), 'aria-label': t("选择论文 {0}", [paper.title]) }),
       }} />}
-      {resource.data && <PaginationBar total={resource.data.total} page={page} onChange={setPage} />}
+      {resource.data && <PaginationBar total={resource.data.total} page={page} pageSize={pageSize} onChange={setPage} />}
     </section>
     {readingPaper && <PaperReader onDelete={deletePaper} deletingId={deletingId} key={readingPaper.id} page={readingPage} returnToResearch={returnToResearch} newResearchUrl={newResearchUrl} paper={papers.find((paper) => paper.id === readingPaper.id) || readingPaper} papers={papers} expanded={expanded} onRead={openReader} onExpand={() => setExpanded((value) => !value)} onClose={closeReader} />}
     </div>
