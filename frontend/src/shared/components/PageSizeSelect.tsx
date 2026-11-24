@@ -7,7 +7,7 @@ export function PageSizeSelect({ value, onChange }: { value: number; onChange: (
   return <div className="table-page-size">
     <label htmlFor={id}>{t('每页显示')}</label>
     <select id={id} value={value} onChange={event => onChange(Number(event.target.value))}>
-      {[10, 25, 50].map(size => <option key={size} value={size}>{t('{0} 篇', [size])}</option>)}
+      {[10, 20, 50].map(size => <option key={size} value={size}>{t('{0} 篇', [size])}</option>)}
     </select>
   </div>;
 }

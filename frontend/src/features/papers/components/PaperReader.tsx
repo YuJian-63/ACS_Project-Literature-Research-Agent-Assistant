@@ -12,11 +12,12 @@ import MathText from '../../../shared/components/MathText';
 
 type DocumentState = { kind: 'loading' } | { kind: 'ready'; url: string } | { kind: 'error'; error: ApiError };
 
-export default function PaperReader({ paper, papers, page = 1, returnToResearch, newResearchUrl, expanded, onRead, onExpand, onClose, onDelete, deletingId }: {
+export default function PaperReader({ paper, papers, page = 1, returnToResearch, returnToComparison = false, newResearchUrl, expanded, onRead, onExpand, onClose, onDelete, deletingId }: {
   paper: Paper;
   papers: Paper[];
   page?: number;
   returnToResearch?: string;
+  returnToComparison?: boolean;
   newResearchUrl: string;
   expanded: boolean;
   onRead: (paper: Paper) => void;
@@ -73,7 +74,7 @@ export default function PaperReader({ paper, papers, page = 1, returnToResearch,
       <div className="paper-reader-actions">
         <Link className="reader-new-research" to={newResearchUrl}><Button type="primary" icon={<PlusOutlined aria-hidden="true" />}>{t('新建研究')}</Button></Link>
         {onDelete && <PaperDeleteButton paper={paper} onDelete={onDelete} deletingId={deletingId} />}
-        {returnToResearch && <Button type="primary" className="reader-task-return" icon={<ArrowLeftOutlined aria-hidden="true" />} onClick={() => navigate(returnToResearch)}>{t('返回研究')}</Button>}
+        {returnToResearch && <Button type="primary" className="reader-task-return" icon={<ArrowLeftOutlined aria-hidden="true" />} onClick={() => navigate(returnToResearch)}>{t(returnToComparison ? '返回报告对比' : '返回研究')}</Button>}
         <Button className="reader-expand" icon={expanded ? <FullscreenExitOutlined aria-hidden="true" /> : <FullscreenOutlined aria-hidden="true" />} onClick={onExpand}>{expanded ? t('显示论文列表') : t('专注阅读')}</Button>
         <Button href={paperFileUrl(paper.id, page)} target="_blank" rel="noopener noreferrer" icon={<SelectOutlined aria-hidden="true" />}>{t('在新标签页打开')}</Button>
         <Button icon={<CloseOutlined aria-hidden="true" />} aria-label={t('关闭阅读')} title={t('返回论文库')} onClick={onClose} />

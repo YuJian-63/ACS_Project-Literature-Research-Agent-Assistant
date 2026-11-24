@@ -21,7 +21,7 @@ try {
   assert.match(markup, /class="status-badge status-failed"/, 'evaluation uses the shared badge appearance');
   assert.match(markup, /href="\/tasks\/task-one\?tab=evaluation"[^>]*>[^]*评分失败/, 'evaluation links to its report tab');
   assert.doesNotMatch(markup, /<a[^>]*>[^]*已完成[^]*<\/a>/, 'research completion is not linked');
-  for (const [score, tone] of [[100, 'high'], [80, 'high'], [79.99, 'medium'], [60, 'medium'], [59.99, 'low'], [0, 'low']]) {
+  for (const [score, tone] of [[100, 'high'], [85, 'high'], [84.99, 'medium'], [70, 'medium'], [69.99, 'warning'], [60, 'warning'], [59.99, 'low'], [0, 'low']]) {
     const html = renderToStaticMarkup(createElement(MemoryRouter, {}, createElement(RecordStatusView, { status: 'succeeded', taskId: 'task-one', evaluation: { status: 'succeeded', assessment: 'scored', overall_score: score, overall_score_max: 100 } })));
     const scoreLink = html.match(/<a class="status-badge record-evaluation-score record-score-([^"]+)"[^>]*href="([^"]+)"[^>]*>([^]*?)<\/a>/);
     assert.ok(scoreLink, 'score has its own linked badge');

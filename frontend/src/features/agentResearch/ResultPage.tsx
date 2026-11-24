@@ -1,13 +1,16 @@
+import { createUuid } from '../../shared/lib/uuid';
 import { shouldPollResearch } from '../../shared/lib/taskMetrics';
 import { t, useLocale } from '../../i18n';
 import { useEffect, useState } from 'react';
 import { Alert, Button, Empty, Skeleton } from 'antd';
-import { Link, useParams, useNavigate } from 'react-router-dom';
+import { Link, useParams, useNavigate, useSearchParams } from 'react-router-dom';
 import { agentResearch, type AgentResearchRecord, type AgentSource } from '../../api/agentResearch';
 import { asApiError, isCanceled, type ApiError } from '../../api/client';
 import { ErrorNotice } from '../../shared/components/ErrorNotice';
 import { PageHeader } from '../../shared/components/PageHeader';
+import ReportPdfExport from './ReportPdfExport';
 import ResearchProgress from './ResearchProgress';
+import { comparisonReturnUrl, withComparisonReturn } from '../../shared/lib/comparisonReturn';
 import { paperReaderUrl } from '../../shared/lib/paperReader';
 import ResultContent from './ResultContent';
 import MathText from '../../shared/components/MathText';
@@ -18,6 +21,8 @@ type ReadingTarget = { source: AgentSource; page?: number; citationKey?: string 
 export default function ResultPage() {
   useLocale();
   const navigate = useNavigate();
+  const [parameters] = useSearchParams();
+  const returnComparison = comparisonReturnUrl(parameters.get('return_compare'));
   const { taskId = '' } = useParams();
   const [record, setRecord] = useState<AgentResearchRecord>();
   const [error, setError] = useState<ApiError>();
@@ -27,8 +32,8 @@ export default function ResultPage() {
   const [readingTarget, setReadingTarget] = useState<ReadingTarget>();
   function openPaper(paperId: string, target: ReadingTarget) {
     setReadingTarget(undefined);
-    navigate(paperReaderUrl(paperId, { page: target.page,
-      researchReturn: { researchId: taskId, citationKey: target.citationKey } }));
+    navigate(withComparisonReturn(paperReaderUrl(paperId, { page: target.page,
+      researchReturn: { researchId: taskId, citationKey: target.citationKey } }), returnComparison));
   }
   function readSource(target: ReadingTarget) {
     const resolved = resolveResearchSource(target.source);
@@ -53,8 +58,8 @@ export default function ResultPage() {
     }
     void load(); return () => { pending.abort(); clearTimeout(timer); };
   }, [taskId, revision]);
-  return <><Link className="back-link" to="/tasks">{t('返回任务列表')}</Link>
-    <PageHeader title={t('研究结果')} description={t('围绕你的问题，阅读研究内容并核对原文依据。')} action={<Button onClick={() => setRevision(value => value + 1)} loading={loading}>{t('刷新')}</Button>} />
+  return <><Link className="comparison-return-entry" aria-label={t('返回任务列表')} to="/tasks">← {t('返回任务列表')}</Link>
+    <PageHeader title={t('研究结果')} description={t('围绕你的问题，阅读研究内容并核对原文依据。')} action={<div className="comparison-actions"><ReportPdfExport records={record ? [record] : []} disabled={loading} /><Button aria-label={t('重试')} disabled={loading || !record || record.task_id !== taskId} onClick={() => navigate(`/tasks/new?${new URLSearchParams({ retry_task: taskId, retry_key: createUuid() })}`)}>{t('重试')}</Button><Button onClick={() => setRevision(value => value + 1)} loading={loading}>{t('刷新')}</Button></div>} />
     {error && <ErrorNotice error={error} retry={() => setRevision(value => value + 1)} />}
     {loading && <Skeleton active />}
     {record?.question && <div className="result-question"><span>{t('研究问题')}</span><MathText>{record.question}</MathText></div>}

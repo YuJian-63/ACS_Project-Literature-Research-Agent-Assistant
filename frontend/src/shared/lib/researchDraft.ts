@@ -2,7 +2,7 @@ import { defaultResearch, type ResearchOptions, type AgentResearchRequest } from
 import { createUuid } from './uuid';
 
 export interface ResearchSubmission { fingerprint: string; key: string }
-export interface ResearchDraft { question: string; paperIds: string[]; research?: ResearchOptions; allowSearch?: boolean; sourceKey?: string; submission?: ResearchSubmission }
+export interface ResearchDraft { question: string; paperIds: string[]; research?: ResearchOptions; allowSearch?: boolean; sourceKey?: string; submission?: ResearchSubmission; retryMissing?: string[] }
 const prefix = 'literature-v3-research-draft:';
 const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -32,6 +32,7 @@ export function readResearchDraft(userId: string): ResearchDraft | undefined {
       && typeof options.planner === 'boolean' && typeof options.reflection === 'boolean';
     return { ...(options ? { research: valid ? options : defaultResearch } : {}),
       ...(typeof draft.allowSearch === 'boolean' ? { allowSearch: draft.allowSearch } : {}), question: draft.question, paperIds: draft.paperIds, submission,
+      ...(Array.isArray(draft.retryMissing) && draft.retryMissing.length <= 10 && draft.retryMissing.every((value: unknown) => typeof value === 'string' && value.length <= 50) ? { retryMissing: draft.retryMissing } : {}),
       ...(typeof draft.sourceKey === 'string' && draft.sourceKey.length <= 2000 ? { sourceKey: draft.sourceKey } : {}) };
   } catch { return undefined; }
 }
