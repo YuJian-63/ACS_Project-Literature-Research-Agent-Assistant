@@ -1,6 +1,7 @@
 import { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useLocation, useNavigate } from 'react-router-dom';
 import type { AgentEvidence, AgentResearchRecord, AgentSource } from '../../api/agentResearch';
+import { withComparisonReturn } from '../../shared/lib/comparisonReturn';
 import { paperReaderUrl } from '../../shared/lib/paperReader';
 import { resolveResearchSource } from './lib/researchSource';
 import ResultContent from './ResultContent';
@@ -9,10 +10,11 @@ import SourceImportDialog from './SourceImportDialog';
 type Target = { source: AgentSource; page?: number; citationKey?: string };
 export default function ComparedReport({ record, section, onRequested }: { record: AgentResearchRecord; section: string; onRequested: () => void }) {
   const navigate = useNavigate();
+  const location = useLocation();
   const [target, setTarget] = useState<Target>();
   function open(paperId: string, value: Target) {
     setTarget(undefined);
-    navigate(paperReaderUrl(paperId, { page: value.page, researchReturn: { researchId: record.task_id, citationKey: value.citationKey } }));
+    navigate(withComparisonReturn(paperReaderUrl(paperId, { page: value.page }), location.pathname + location.search));
   }
   function read(value: Target) {
     const resolved = resolveResearchSource(value.source);

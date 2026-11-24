@@ -29,5 +29,21 @@ try {
  assert.match(rendered, />-18</, 'different or unknown inputs still allow a numerical score delta');
  assert.match(rendered, />\+4.24</, 'elapsed time delta is independent of matching inputs');
  assert.match(rendered, />\+32662</, 'complete token counts allow a raw delta');
+ const {comparisonReturnUrl, withComparisonReturn}=await server.ssrLoadModule('/src/shared/lib/comparisonReturn.ts');
+ const comparison='/tasks/compare?'+new URLSearchParams({a,b,section:'sources'});
+ assert.equal(comparisonReturnUrl(comparison),comparison);
+ for(const value of ['https://evil.test/tasks/compare?a='+a+'&b='+b,'//evil.test','/tasks/compare?a='+a+'&b='+a]) assert.equal(comparisonReturnUrl(value),undefined);
+ const linked=withComparisonReturn('/tasks/'+a,comparison);
+ assert.equal(new URLSearchParams(linked.split('?')[1]).get('return_compare'),comparison);
+ const {researchReaderReturnUrl}=await server.ssrLoadModule('/src/shared/lib/paperReader.ts');
+ const returned=researchReaderReturnUrl(new URLSearchParams({return_research:a,return_compare:comparison}));
+ assert.equal(new URLSearchParams(returned.split('?')[1]).get('return_compare'),comparison);
+ const {retryResearchDraft}=await server.ssrLoadModule('/src/features/agentResearch/lib/retryResearch.ts');
+ const retry=retryResearchDraft({question:'Original question',paper_ids:[a],result:{configuration:{workflow:'extension',model_provider:'bailian',context_policy:'CompactHistory',planner:true,reflection:false,task:{allow_search:false}}}},'extended');
+ assert.equal(retry.draft.question,'Original question');assert.deepEqual(retry.draft.paperIds,[a]);
+ assert.equal(retry.draft.research.workflow,'extension');assert.equal(retry.draft.research.planner,true);assert.equal(retry.draft.research.reflection,false);assert.equal(retry.draft.allowSearch,false);assert.equal(retry.draft.submission,undefined);assert.deepEqual(retry.missing,[]);
+ const failedRetry=retryResearchDraft({question:'Failed question',paper_ids:[a],result:null},'extended');
+ assert.equal(failedRetry.draft.research.workflow,'extension');assert.ok(failedRetry.missing.includes('context_policy'));
+ assert.equal(retryResearchDraft({question:'q',paper_ids:[],result:{configuration:{workflow:'extension'}}},'baseline').draft.research.workflow,'baseline');
  console.log('PASS: pair validation, unrelated reports, genuine zero scores and incompatible evaluation handling');
 } finally {await server.close();}

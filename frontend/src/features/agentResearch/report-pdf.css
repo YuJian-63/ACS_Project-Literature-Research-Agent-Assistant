@@ -1,0 +1,47 @@
+.comparison-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.research-pdf-export { display: none; }
+@page research-report { size: A4 portrait; margin: 14mm; }
+@page research-comparison { size: A4 landscape; margin: 12mm; }
+@media print {
+  body:has(> .research-pdf-export) > :not(.research-pdf-export) { display: none !important; }
+  body:has(> .research-pdf-export) { margin: 0; min-width: 0; background: white; }
+  .research-pdf-export { display: block !important; page: research-report; color: #213a38; font: 10pt/1.6 Arial,"Microsoft YaHei",sans-serif; width: auto; print-color-adjust: exact; -webkit-print-color-adjust: exact; }
+  .research-pdf-export[data-comparison="true"] { page: research-comparison; }
+  .research-pdf-export h1 { font-size: 22pt; margin: 0 0 6mm; }
+  .research-pdf-export h2 { font-size: 15pt; break-after: avoid; }
+  .research-pdf-export h3 { font-size: 11pt; break-after: avoid; }
+  .pdf-generated { font-size: 9pt; color: #536e69; }
+  .pdf-report-pair { display: grid; grid-template-columns: minmax(0,1fr); gap: 8mm; }
+  [data-comparison="true"] .pdf-report-pair { grid-template-columns: minmax(0,1fr) minmax(0,1fr); }
+  .pdf-report-header, .pdf-report-content { min-width: 0; overflow-wrap: anywhere; }
+  .pdf-section { margin-top: 9mm; }
+  .pdf-section-title { border-bottom: 1px solid #dbe5e1; padding-bottom: 2mm; }
+  .research-pdf-export .ant-btn, .research-pdf-export .ant-tabs-nav, .research-pdf-export .ant-drawer { display: none !important; }
+  .research-pdf-export details { display: block; }
+  .research-pdf-export details > summary { display: none; }
+  .research-pdf-export .comparison-overview { padding: 0; border: 0; }
+  .research-pdf-export .comparison-metrics-table { font-size: 10pt; }
+  .research-pdf-export .comparison-visually-hidden { display: none; }
+  .research-pdf-export .evaluation-report-header { flex-wrap: wrap; gap: 3mm; }
+  .research-pdf-export .evaluation-report-header h2 { font-size: 15pt; }
+  .research-pdf-export .evaluation-report-overview { display: block; padding: 4mm 0; }
+  .research-pdf-export .evaluation-total { border: 0; }
+  .research-pdf-export .evaluation-total-number { font-size: 24pt; }
+  .research-pdf-export .research-unresolved-heading h2 { font-size: 15pt; }
+  .research-pdf-export .research-citation-card { gap: 3mm; padding: 3mm; break-inside: avoid-page; }
+  .research-pdf-export .research-citation-card > div { min-width: 0; }
+  .research-pdf-export .citation-chip { white-space: nowrap; flex-shrink: 0; }
+  .research-pdf-export .research-markdown, .research-pdf-export .research-comparison, .research-pdf-export .katex-display { overflow: visible !important; max-height: none !important; }
+  .research-pdf-export .research-markdown table { width: 100%; min-width: 0; table-layout: fixed; font-size: 9pt; }
+  .research-pdf-export .research-markdown th, .research-pdf-export .research-markdown td { white-space: normal; overflow-wrap: anywhere; padding: 2mm; }
+  .research-pdf-export pre { white-space: pre-wrap; overflow-wrap: anywhere; }
+  .research-pdf-export tr, .research-pdf-export .evaluation-dimension { break-inside: avoid-page; }
+  .research-pdf-export a { color: inherit; text-decoration: none; }
+  .research-pdf-export .research-run-metrics { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); }
+  .research-pdf-export .research-run-heading { flex-wrap: wrap; }
+}
+@media print {
+  .research-pdf-export .evaluation-table-wrap { overflow: visible !important; min-width: 0; }
+  .research-pdf-export .evaluation-report table { min-width: 0 !important; width: 100%; table-layout: fixed; font-size: 9pt; }
+  .research-pdf-export .evaluation-report th, .research-pdf-export .evaluation-report td { white-space: normal; overflow-wrap: anywhere; padding: 2mm 1mm; }
+}

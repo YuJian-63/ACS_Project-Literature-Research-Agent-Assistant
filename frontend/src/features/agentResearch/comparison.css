@@ -9,8 +9,6 @@
 .comparison-paper-list { color: var(--muted); font-size: 12px; line-height: 1.8; overflow-wrap: anywhere; }
 .comparison-config { padding-top: 10px; border-top: 1px solid var(--line); font-size: 12px; color: var(--muted); overflow-wrap: anywhere; }
 .comparison-config p { margin: 3px 0; }
-.comparison-conditions { margin: 18px 0; }
-.comparison-conditions p { margin: 0 0 4px; }
 .comparison-overview { margin-top: 18px; }
 .comparison-overview h2 { font-size: 18px; margin: 0 0 12px; }
 .comparison-metrics-table { width: 100%; table-layout: fixed; border-collapse: collapse; font-size: 13px; }
@@ -40,3 +38,26 @@
 .comparison-reading-pane .research-citation-card > div { min-width: 0; flex: 1; }
 .comparison-reading-pane .research-citation-card strong { display: block; font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .comparison-visually-hidden { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; border: 0; }
+
+.comparison-report-card { padding: 24px; }
+.comparison-report-card > header { margin-bottom: 4px; }
+.comparison-id { display: block; font-size: 13px; margin-bottom: 22px; }
+.comparison-field-label { display: block; color: var(--muted); font-size: 13px; letter-spacing: .04em; margin-bottom: 8px; }
+.comparison-question-block { margin-bottom: 20px; }
+.comparison-question { margin: 0; font-size: 18px; line-height: 1.8; }
+.comparison-papers-block { margin-bottom: 22px; }
+.comparison-paper-items { margin: 0; padding-left: 18px; font-size: 15px; line-height: 1.8; overflow-wrap: anywhere; }
+.comparison-paper-items li + li { margin-top: 5px; }
+.comparison-unavailable { color: var(--muted); font-size: 14px; }
+.comparison-settings { display: grid; grid-template-columns: minmax(0,1fr) minmax(0,1fr); gap: 16px 22px; padding: 18px 0; margin: 0; border-top: 1px solid var(--line); }
+.comparison-settings > div { min-width: 0; }
+.comparison-settings dt { font-size: 13px; color: var(--muted); margin-bottom: 5px; }
+.comparison-settings dd { margin: 0; font-size: 15px; color: var(--ink); overflow-wrap: anywhere; }
+.comparison-settings dd small { display: inline-block; margin-left: 8px; font-size: 13px; color: var(--muted); }
+.comparison-setting-model { grid-column: 1 / -1; }
+.comparison-setting-value { display: inline-block; padding: 1px 8px; border-radius: 4px; background: #f0f3f2; color: var(--muted); font-size: 14px; }
+.comparison-setting-value[data-enabled="true"] { color: var(--accent); background: #eaf4ed; }
+
+.comparison-report-card > header strong { font-size: 16px; }
+.comparison-report-card > header a { font-size: 14px; }
+.comparison-report-card .record-workflow { font-size: 12px; }

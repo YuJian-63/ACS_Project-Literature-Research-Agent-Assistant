@@ -12,5 +12,5 @@ import './app/styles.css';
 captureEmailLink();
 
 createRoot(document.getElementById('root')!).render(
-  <StrictMode><LocaleProvider><AntApp message={{ duration: 3 }} notification={{ duration: 3 }}><BrowserRouter><AuthProvider><AppErrorBoundary><App /></AppErrorBoundary></AuthProvider></BrowserRouter></AntApp></LocaleProvider></StrictMode>,
+  <StrictMode><LocaleProvider><AntApp message={{ duration: 3, maxCount: 3 }} notification={{ duration: 3 }}><BrowserRouter><AuthProvider><AppErrorBoundary><App /></AppErrorBoundary></AuthProvider></BrowserRouter></AntApp></LocaleProvider></StrictMode>,
 );

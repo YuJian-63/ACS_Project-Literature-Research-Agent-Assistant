@@ -1,3 +1,4 @@
+import { comparisonReturnUrl, withComparisonReturn } from './comparisonReturn';
 export interface ResearchReaderReturn { researchId: string; citationKey?: string }
 export function paperReaderUrl(paperId: string, { page, selectedIds = [], researchReturn }: { page?: number; selectedIds?: string[]; researchReturn?: ResearchReaderReturn } = {}): string {
   const parameters = new URLSearchParams({ paper_id: paperId });
@@ -15,5 +16,5 @@ export function researchReaderReturnUrl(parameters: URLSearchParams): string | u
   const result = new URLSearchParams();
   const citation = parameters.get('return_citation');
   if (citation && citation.length <= 200) result.set('citation', citation);
-  return '/tasks/' + id + (result.size ? '?' + result : '');
+  return withComparisonReturn('/tasks/' + id + (result.size ? '?' + result : ''), comparisonReturnUrl(parameters.get('return_compare')));
 }

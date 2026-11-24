@@ -26,7 +26,7 @@ export function RecordStatusView({ status, evaluation, error = false, taskId }: 
     : evaluation?.status || 'neutral';
   const label = error ? c('评分状态读取失败', 'Could not load evaluation') : !evaluation ? c('正在读取评分…', 'Loading evaluation…') : insufficient ? c('证据不足，无法评分', 'Insufficient evidence to score') : labels[evaluation.status];
   const score = evaluation?.overall_score;
-  const scoreTone = score == null ? 'unknown' : score >= 80 ? 'high' : score >= 60 ? 'medium' : 'low';
+  const scoreTone = score == null ? 'unknown' : score >= 85 ? 'high' : score >= 70 ? 'medium' : score >= 60 ? 'warning' : 'low';
   const scoreClass = `status-badge record-evaluation-score record-score-${scoreTone}`;
   const scoreText = <>{formatMetric(score)} / {formatMetric(evaluation?.overall_score_max)}</>;
   const evaluationUrl = taskId ? `/tasks/${encodeURIComponent(taskId)}?tab=evaluation` : undefined;

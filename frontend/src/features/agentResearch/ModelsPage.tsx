@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useCallback, useState } from 'react';
 import { App, Button, Descriptions, Input, Popconfirm, Radio, Space, Tag } from 'antd';
 import { changeService, loadModels, pollModels, setModelUrl, type ModelState } from '../../api/models';
 import { agentResearch } from '../../api/agentResearch';
@@ -16,7 +16,12 @@ const pollQueue = () => true;
 
 export default function ModelsPage() {
   const locale = useLocale();
-  const { data, error, reload } = useResource(loadModels, 10000, pollModels);
+  const [checkingConfig, setCheckingConfig] = useState(false);
+  const load = useCallback(async (signal: AbortSignal) => {
+    try { return { ...await loadModels(signal), configReadAt: new Date().toISOString() }; }
+    finally { if (!signal.aborted) setCheckingConfig(false); }
+  }, []);
+  const { data, error, reload, refresh } = useResource(load, 10000, pollModels);
   const queue = useResource(agentResearch.getConcurrency, 5000, pollQueue);
   const [draft, setDraft] = useState<string>();
   const [busy, setBusy] = useState(false);
@@ -26,7 +31,7 @@ export default function ModelsPage() {
     setSavingLimit(true);
     try {
       await agentResearch.setConcurrency(limit);
-      void message.success(t('全站并发已设为 {0}', [limit]));
+      void message.success(t('研究并发数已设置为 {0}', [limit]));
     } catch (err) {
       void message.error(errorText(asApiError(err)));
     } finally {
@@ -78,7 +83,11 @@ export default function ModelsPage() {
         <div className="models-connections">
           <section className="content-panel models-bailian">
             <div className="models-panel-heading"><div><h2>{t('百炼 API')}</h2><p>{t('标准研究模型与嵌入服务')}</p></div></div>
-            <div className="models-bailian-model"><strong>{data.bailian_name || '—'}</strong><Tag color={data.bailian_config === 'missing' ? undefined : 'green'}>{t({local: '已配置', remote: '使用远端配置', missing: '缺少配置文件'}[data.bailian_config])}</Tag></div>
+            <div className="models-bailian-model"><strong>{data.bailian_name || '—'}</strong><Tag color={data.bailian_config === 'missing' ? 'red' : 'gold'}>{t({local: '配置已读取', remote: '远端配置未验证', missing: '配置缺失或不完整'}[data.bailian_config])}</Tag></div>
+            <div className="models-bailian-check"><span>{t('连通性')}：<Tag>{t('未验证')}</Tag></span><Button aria-label={t('重新读取配置')} size="small" loading={checkingConfig} onClick={() => { setCheckingConfig(true); refresh(); }}>{t('重新读取配置')}</Button></div>
+            <p className="models-bailian-explanation">{t(data.bailian_config === 'local' ? '后端已读取到 API 密钥和服务地址，仅确认字段存在，不代表密钥有效或模型可用。' : data.bailian_config === 'remote' ? '当前使用远端配置，现有接口无法确认远端配置是否正确。' : '后端未读取到完整的 API 密钥和服务地址，请检查服务端配置。')}</p>
+            <p className="models-bailian-explanation">{t('当前接口未提供百炼连通性检测；聊天模型和嵌入服务的实际可用性均未验证。')}</p>
+            <p className="models-bailian-read-time">{t('配置读取时间')}：{new Date(data.configReadAt).toLocaleTimeString(locale)}</p>
           </section>
           <section className="content-panel models-endpoint">
             <div><h2>{t('指定服务地址')}</h2><p>{t('连接已在 TACC 上运行的模型服务')}</p></div>

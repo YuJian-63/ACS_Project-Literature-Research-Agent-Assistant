@@ -742,7 +742,7 @@ main {
   color: #a33b36
 }
 
-.status-queued,.status-uploaded,.status-partial {
+.status-queued,.status-uploaded,.status-partial,.record-evaluation-score.record-score-warning {
   background: #f5f1e7;
   color: #795c25
 }
@@ -2367,3 +2367,17 @@ main {
 .record-workflow-baseline { background: #edf2f7; border-color: #dbe3ec; color: #405b78; }
 .record-workflow-extended { background: #f0edf8; border-color: #e1daf0; color: #67508b; }
 .record-workflow-retry { border: 0; background: none; color: var(--accent); padding: 0; font: inherit; font-size: 11px; cursor: pointer; }
+
+.pagination-actions { display: flex; align-items: center; justify-content: flex-end; flex-wrap: wrap; gap: 12px; }
+.pagination-actions > .ant-btn { flex-shrink: 0; }
+
+.comparison-return-entry { display: inline-flex; align-items: center; gap: 8px; padding: 9px 14px; margin-bottom: 20px; margin-right: 8px; border: 1px solid var(--line); background: #eaf4ed; border-radius: 5px; font-size: 13px; }
+
+.ant-notification:has(.research-retry-notification) { width: min(640px, calc(100vw - 32px)); }
+@media (min-width: 640px) {
+  .research-retry-notification .ant-notification-notice-title { white-space: nowrap; }
+}
+
+.models-bailian-check { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px; margin: 16px 0 12px; font-size: 13px; }
+.models-bailian-explanation { margin: 8px 0; color: var(--muted); font-size: 13px; line-height: 1.8; }
+.models-bailian-read-time { margin: 14px 0 0; color: var(--muted); font-size: 12px; }
