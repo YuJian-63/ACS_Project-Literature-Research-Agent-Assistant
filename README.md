@@ -217,7 +217,7 @@ The project evaluation consists of three experiments. This section documents tes
 | --- | --- | --- | --- |
 | [1. Agent ablation](#evaluation-agent) | What changes do RAG, Planner, and Reflection introduce individually? | 5 case types x 5 component configurations, totaling 25 runs. | Per-run `result.json` and `trace.json`. Results are in §7.1.1 of the [final report](Report.pdf). |
 | [2. Model Server](#evaluation-model-server) | How do concurrency, scheduling budgets, and candidate optimizations affect inference? | Serial / C=1 / C=4; prefill budgets 2048 / 4096 / 8192; archived GDN and N-gram candidates. | [Model-server report](model-server/server-opt/reports/Server_report.md) and [result summaries](model-server/server-opt/results/). |
-| [3. End-to-end research](#evaluation-end-to-end) | How do quality, cost, and waiting time change for user research tasks? | Four research task types, 15 Baseline / Extension pairs, and archived unpaired runs. | [End-to-end report](docs/report.md) and [frozen manifest](docs/evaluation/researcher-20261123.json). |
+| [3. End-to-end research](#evaluation-end-to-end) | How do quality, cost, and waiting time change for user research tasks? | Four research task types, 15 Baseline / Extension pairs, and archived unpaired runs. | [End-to-end report](Report.pdf) and [frozen manifest](docs/evaluation/researcher-20261123.json). |
 
 Agent ablation compares component switches, the Model Server experiment compares inference services, and the end-to-end experiment compares the full user-visible research workflow. Their model providers, workloads, and timing boundaries differ; do not pool their data into a single comparison.
 
@@ -361,7 +361,7 @@ The model benchmark client times streaming requests and collects `/metrics` at e
 
 #### 3. End-to-End Research Experiment
 
-This experiment compares **Agent Baseline and Extension** across the paper library, TCloud dispatch, model service, citations, and independent evaluation. See the [end-to-end report](docs/report.md) for measurements and analysis. It is distinct from the five-configuration ablation above and does not assume model-server optimizations.
+This experiment compares **Agent Baseline and Extension** across the paper library, TCloud dispatch, model service, citations, and independent evaluation. See the [end-to-end report](Report.pdf) for measurements and analysis. It is distinct from the five-configuration ablation above and does not assume model-server optimizations.
 
 **View existing results online:** Open [https://8.218.149.237/](https://8.218.149.237/) and sign in with username `Researcher` (case-sensitive) and password `123456`. Open the research records and select a task to view its answer, citations, evaluation scores, and performance metrics.
 
@@ -521,4 +521,4 @@ You may also create tasks individually in the web interface: copy the original `
 
 Within each task type, pair runs by the same question and PDF hash set, aggregate Baseline / Extension separately, and report sample sizes and the sign of `Extension - Baseline`. Record paper order separately; the historical manifest preserves actual order without sorting. Check task `status` and Agent `stop_reason` independently: `succeeded` does not establish that the research is complete. Do not replace evaluation failures, `insufficient_evidence`, or missing metrics with zero.
 
-Model-service load, caches, TACC queueing, dynamic search, PDF retrieval, and model/evaluation-service updates affect reruns. Even temperature 0 does not guarantee identical wording or numerical results. Add multiple paired repetitions, alternate execution order, and report distributions; a single round does not establish a causal improvement. See the [experiment report](docs/report.md) for numerical results and their scope, and the [Server report](model-server/server-opt/reports/Server_report.md) for the independent model-server experiment.
+Model-service load, caches, TACC queueing, dynamic search, PDF retrieval, and model/evaluation-service updates affect reruns. Even temperature 0 does not guarantee identical wording or numerical results. Add multiple paired repetitions, alternate execution order, and report distributions; a single round does not establish a causal improvement. See the [experiment report](Report.pdf) for numerical results and their scope, and the [Server report](model-server/server-opt/reports/Server_report.md) for the independent model-server experiment.

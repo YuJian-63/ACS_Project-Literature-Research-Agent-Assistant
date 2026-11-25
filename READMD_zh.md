@@ -215,7 +215,7 @@ uv run --locked python -m app.evaluation_worker
 | --- | --- | --- | --- |
 | [1. Agent 消融](#evaluation-agent) | RAG、Planner、Reflection 各自带来什么变化？ | 5 类用例 × 5 种组件配置，共 25 次运行。 | 每次运行生成 `result.json` 和 `trace.json`。实验结果见[项目报告](Report.pdf) §7.1.1。 |
 | [2. Model Server](#evaluation-model-server) | 并发、调度预算与候选优化如何影响模型推理？ | 串行 / C=1 / C=4；prefill 预算 2048 / 4096 / 8192；GDN 与 N-gram 候选存档。 | [模型服务报告](model-server/server-opt/reports/Server_report.md)及[结果摘要](model-server/server-opt/results/)。 |
-| [3. 全流程研究](#evaluation-end-to-end) | 用户研究任务的质量、开销和等待时间如何变化？ | 四类研究任务、15 对 Baseline / Extension，以及未配对运行存档。 | [全流程报告](docs/report.md)及[冻结清单](docs/evaluation/researcher-20261123.json)。 |
+| [3. 全流程研究](#evaluation-end-to-end) | 用户研究任务的质量、开销和等待时间如何变化？ | 四类研究任务、15 对 Baseline / Extension，以及未配对运行存档。 | [全流程报告](Report.pdf)及[冻结清单](docs/evaluation/researcher-20261123.json)。 |
 
 Agent 消融比较组件开关，Model Server 实验比较推理服务，全流程实验比较用户可见的完整研究链路；三者的模型来源、工作负载及计时边界不同，不能将其数据混为同一组对照。
 
@@ -353,7 +353,7 @@ tcloud download "slurm_log/qwen-public-serve-agent-${GPU_ID}.log" "$RESULT/servi
 
 #### 3. 全流程研究实验
 
-本实验比较 **Agent Baseline 与 Extension** 在论文库、TCloud 派发、模型服务、引用和独立评分组成的链路中的表现；实测结果与对比分析见 [全流程报告](docs/report.md)。它不等同于上述五配置消融，也不默认包含模型服务优化。
+本实验比较 **Agent Baseline 与 Extension** 在论文库、TCloud 派发、模型服务、引用和独立评分组成的链路中的表现；实测结果与对比分析见 [全流程报告](Report.pdf)。它不等同于上述五配置消融，也不默认包含模型服务优化。
 
 **在线查看已有实验结果：** 打开 [https://8.218.149.237/](https://8.218.149.237/)，使用用户名 `Researcher`（区分大小写）、密码 `123456` 登录。进入研究记录，打开对应任务详情，即可查看研究答案、引用、评分和性能指标。
 
@@ -513,4 +513,4 @@ EVALUATION_DAILY_LIMIT=50
 
 各类型内按同一问题与 PDF 哈希集合配对，分别汇总 Baseline / Extension，并注明样本数和 `Extension − Baseline` 的方向。论文顺序另行记录；历史清单保留了实际顺序，不自动排序。任务 `status` 与 Agent `stop_reason` 分别检查，`succeeded` 不代表研究内容完整；评分失败、`insufficient_evidence` 或指标缺失均不得补零。
 
-模型服务负载、缓存、TACC 排队、动态搜索、PDF 获取及模型/评分服务更新都会影响重跑结果，即使温度为 0 也不保证逐字或数值一致。建议新增多轮配对重复，交替运行顺序并报告分布；不要将单轮结果解释为确定的因果提升。报告中的具体数值及适用范围见 [实验报告](docs/report.md)；独立模型服务实验另见 [Server report](model-server/server-opt/reports/Server_report.md)。
+模型服务负载、缓存、TACC 排队、动态搜索、PDF 获取及模型/评分服务更新都会影响重跑结果，即使温度为 0 也不保证逐字或数值一致。建议新增多轮配对重复，交替运行顺序并报告分布；不要将单轮结果解释为确定的因果提升。报告中的具体数值及适用范围见 [实验报告](Report.pdf)；独立模型服务实验另见 [Server report](model-server/server-opt/reports/Server_report.md)。
