@@ -113,26 +113,3 @@ tcloud cat slurm_log/acs-DISPATCH_ID-JOBID.log
 tcloud download acs-research/jobs/DISPATCH_ID/status.json ./status.json
 tcloud download acs-research/jobs/DISPATCH_ID/result.json ./result.json
 ```
-
-### 2026-11-22 手动网页提交
-
-预选一篇《SkillOpt》并提交“总结这篇论文”。网页任务 `f55876b8-3a36-4dd4-ae26-cd20786943fe`，派发 UUID `6bfaf09e-fdad-40cb-b2d7-404c12dd959d`，TACC CPU 作业 `30628`。从提交到结果入库共 217 秒，其中 Baseline 执行约 129 秒。百炼模型调用 20 次，工具调用 9 次，覆盖打开原文、分块摘要和分页阅读。
-
-后端状态为 `succeeded`，Agent 返回 `partial` 并列出附录和超参数的证据缺口。抽查正文中的两处结果与上传原件第 9、10 页一致。单篇总结额外生成了比较表，表中各项缺少引用，留待后续核对。此次轨迹没有调用外部搜索。Orchid 空预选和预选的自动化验收见下节，同题手动对照仍待复验。
-
-### 2026-11-21 百炼验收结果
-
-两次真实网页提交均由 Worker 自动派发到 TACC 并取回结果。两条任务都回答 `LUMEN-472`，点击引用打开了上传原件的第 2 页，下载文件的 SHA-256 与上传时一致。
-
-| 网页提交 | TACC 作业 | Agent 实际调用的工具 | 百炼调用 |
-| --- | --- | --- | --- |
-| [预选一篇](http://127.0.0.1:19483/tasks/f2674517-7767-4fb8-a349-4ea86995bbdc) | `30387` | `open_paper` → `read_paper` | 3 次 |
-| [空预选](http://127.0.0.1:19483/tasks/45333d05-2178-4241-86f6-e00936cdfa10) | `30395` | `search_library` → `open_paper` → `read_paper` | 4 次 |
-
-SDK 提交需要同步源码和准备环境。首次尝试曾在 30 秒时超时；将提交等待单独设为 180 秒后，空预选作业成功完成。可用下列命令复核该作业的最终状态：
-
-```sh
-tcloud cat acs-research/jobs/1c323c36-1ff7-4ddd-8f96-d2a11d7e3fb7/status.json
-```
-
-更早的 CPU 作业 `30379` 已单独验证自动授权、按用户搜索、下载原文和跨账户隔离。[只读探测脚本](library-probe/submit.sh) · [课程 GPU 模型服务单独运行说明](qwen27b-student-release/README.md)
